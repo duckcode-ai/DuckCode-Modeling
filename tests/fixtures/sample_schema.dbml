@@ -1,0 +1,13 @@
+Table customer {
+  customer_id integer [pk, not null]
+  email varchar [not null, unique]
+  status varchar
+}
+
+Table sales_order {
+  order_id integer [pk, not null]
+  customer_id integer [not null]
+  total_amount decimal(12,2) [not null]
+}
+
+Ref: sales_order.customer_id > customer.customer_id

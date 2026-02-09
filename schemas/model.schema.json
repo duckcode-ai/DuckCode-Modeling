@@ -1,0 +1,254 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.com/schemas/model.schema.json",
+  "title": "DataLex YAML v1",
+  "type": "object",
+  "required": [
+    "model",
+    "entities"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "model": {
+      "type": "object",
+      "required": [
+        "name",
+        "version",
+        "domain",
+        "owners",
+        "state"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_]*$"
+        },
+        "version": {
+          "type": "string",
+          "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$"
+        },
+        "domain": {
+          "type": "string",
+          "minLength": 1
+        },
+        "owners": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "string",
+            "pattern": "^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$"
+          }
+        },
+        "state": {
+          "type": "string",
+          "enum": [
+            "draft",
+            "approved",
+            "deprecated"
+          ]
+        }
+      }
+    },
+    "entities": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "$ref": "#/$defs/entity"
+      }
+    },
+    "relationships": {
+      "type": "array",
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/relationship"
+      }
+    },
+    "governance": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "classification": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string",
+            "enum": [
+              "PUBLIC",
+              "INTERNAL",
+              "CONFIDENTIAL",
+              "PII",
+              "PCI"
+            ]
+          }
+        },
+        "stewards": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string",
+            "pattern": "^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$"
+          }
+        }
+      }
+    },
+    "rules": {
+      "type": "array",
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/rule"
+      }
+    },
+    "display": {
+      "type": "object"
+    }
+  },
+  "$defs": {
+    "entity": {
+      "type": "object",
+      "required": [
+        "name",
+        "type",
+        "fields"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string",
+          "pattern": "^[A-Z][A-Za-z0-9]*$"
+        },
+        "type": {
+          "type": "string",
+          "enum": [
+            "table",
+            "view"
+          ]
+        },
+        "description": {
+          "type": "string"
+        },
+        "tags": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "fields": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/field"
+          }
+        }
+      }
+    },
+    "field": {
+      "type": "object",
+      "required": [
+        "name",
+        "type"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_]*$"
+        },
+        "type": {
+          "type": "string",
+          "minLength": 1
+        },
+        "nullable": {
+          "type": "boolean"
+        },
+        "primary_key": {
+          "type": "boolean"
+        },
+        "unique": {
+          "type": "boolean"
+        },
+        "description": {
+          "type": "string"
+        },
+        "tags": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "relationship": {
+      "type": "object",
+      "required": [
+        "name",
+        "from",
+        "to",
+        "cardinality"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "from": {
+          "type": "string",
+          "pattern": "^[A-Z][A-Za-z0-9]*\\.[a-z][a-z0-9_]*$"
+        },
+        "to": {
+          "type": "string",
+          "pattern": "^[A-Z][A-Za-z0-9]*\\.[a-z][a-z0-9_]*$"
+        },
+        "cardinality": {
+          "type": "string",
+          "enum": [
+            "one_to_one",
+            "one_to_many",
+            "many_to_one",
+            "many_to_many"
+          ]
+        },
+        "on_delete": {
+          "type": "string",
+          "enum": [
+            "restrict",
+            "cascade",
+            "set_null",
+            "no_action"
+          ]
+        }
+      }
+    },
+    "rule": {
+      "type": "object",
+      "required": [
+        "name",
+        "target",
+        "expression",
+        "severity"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "target": {
+          "type": "string",
+          "pattern": "^[A-Z][A-Za-z0-9]*\\.[a-z][a-z0-9_]*$"
+        },
+        "expression": {
+          "type": "string",
+          "minLength": 1
+        },
+        "severity": {
+          "type": "string",
+          "enum": [
+            "info",
+            "warn",
+            "error"
+          ]
+        }
+      }
+    }
+  }
+}

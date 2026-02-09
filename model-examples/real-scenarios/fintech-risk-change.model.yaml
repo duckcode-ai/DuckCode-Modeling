@@ -1,0 +1,558 @@
+model:
+  name: fintech_risk
+  version: 2.0.0
+  domain: financial_services
+  owners:
+    - risk-data@company.com
+    - compliance-platform@company.com
+  state: draft
+
+entities:
+  - name: AccountHolder
+    type: table
+    tags: [PII, GOLD]
+    fields:
+      - name: holder_id
+        type: integer
+        primary_key: true
+        nullable: false
+      - name: external_holder_code
+        type: string
+        nullable: false
+        unique: true
+      - name: first_name
+        type: string
+        nullable: false
+      - name: last_name
+        type: string
+        nullable: false
+      - name: date_of_birth
+        type: date
+        nullable: false
+      - name: tax_identifier
+        type: string
+        nullable: false
+      - name: phone_number
+        type: string
+        nullable: true
+      - name: email
+        type: string
+        nullable: true
+      - name: residency_country_code
+        type: string
+        nullable: false
+      - name: customer_segment
+        type: string
+        nullable: false
+      - name: risk_rating
+        type: string
+        nullable: false
+      - name: onboarding_date
+        type: date
+        nullable: false
+      - name: primary_address_id
+        type: integer
+        nullable: true
+      - name: created_at
+        type: timestamp
+        nullable: false
+      - name: updated_at
+        type: timestamp
+        nullable: false
+
+  - name: Address
+    type: table
+    fields:
+      - name: address_id
+        type: integer
+        primary_key: true
+        nullable: false
+      - name: line_1
+        type: string
+        nullable: false
+      - name: line_2
+        type: string
+        nullable: true
+      - name: city_name
+        type: string
+        nullable: false
+      - name: state_code
+        type: string
+        nullable: false
+      - name: postal_code
+        type: string
+        nullable: false
+      - name: country_code
+        type: string
+        nullable: false
+      - name: created_at
+        type: timestamp
+        nullable: false
+      - name: updated_at
+        type: timestamp
+        nullable: false
+
+  - name: Account
+    type: table
+    fields:
+      - name: account_id
+        type: integer
+        primary_key: true
+        nullable: false
+      - name: holder_id
+        type: integer
+        nullable: false
+      - name: account_number_masked
+        type: string
+        nullable: false
+        unique: true
+      - name: account_type
+        type: string
+        nullable: false
+      - name: product_code
+        type: string
+        nullable: false
+      - name: account_status
+        type: string
+        nullable: false
+      - name: currency_code
+        type: string
+        nullable: false
+      - name: opened_at
+        type: timestamp
+        nullable: false
+      - name: closed_at
+        type: timestamp
+        nullable: true
+      - name: available_balance
+        type: decimal(18,2)
+        nullable: false
+      - name: current_balance
+        type: decimal(18,2)
+        nullable: false
+      - name: credit_limit_amount
+        type: decimal(18,2)
+        nullable: true
+      - name: overdraft_limit_amount
+        type: decimal(18,2)
+        nullable: true
+      - name: created_at
+        type: timestamp
+        nullable: false
+      - name: updated_at
+        type: timestamp
+        nullable: false
+
+  - name: Counterparty
+    type: table
+    fields:
+      - name: counterparty_id
+        type: integer
+        primary_key: true
+        nullable: false
+      - name: counterparty_code
+        type: string
+        nullable: false
+        unique: true
+      - name: counterparty_name
+        type: string
+        nullable: false
+      - name: counterparty_type
+        type: string
+        nullable: false
+      - name: country_code
+        type: string
+        nullable: false
+      - name: bank_identifier_code
+        type: string
+        nullable: true
+      - name: risk_level
+        type: string
+        nullable: false
+      - name: sanctions_list_hit
+        type: boolean
+        nullable: false
+      - name: created_at
+        type: timestamp
+        nullable: false
+      - name: updated_at
+        type: timestamp
+        nullable: false
+
+  - name: MoneyTransfer
+    type: table
+    fields:
+      - name: transfer_id
+        type: integer
+        primary_key: true
+        nullable: false
+      - name: debit_account_id
+        type: integer
+        nullable: false
+      - name: credit_account_id
+        type: integer
+        nullable: false
+      - name: counterparty_id
+        type: integer
+        nullable: false
+      - name: transfer_reference
+        type: string
+        nullable: false
+        unique: true
+      - name: transfer_channel
+        type: string
+        nullable: false
+      - name: transfer_status
+        type: string
+        nullable: false
+      - name: transfer_amount
+        type: decimal(20,6)
+        nullable: false
+      - name: transfer_currency
+        type: string
+        nullable: false
+      - name: fx_rate_applied
+        type: decimal(18,8)
+        nullable: true
+      - name: initiated_at
+        type: timestamp
+        nullable: false
+      - name: settled_at
+        type: timestamp
+        nullable: true
+      - name: reversed_at
+        type: timestamp
+        nullable: true
+      - name: aml_screening_result
+        type: string
+        nullable: true
+      - name: sanctions_screening_result
+        type: string
+        nullable: true
+
+  - name: LedgerEntry
+    type: table
+    fields:
+      - name: ledger_entry_id
+        type: integer
+        primary_key: true
+        nullable: false
+      - name: transfer_id
+        type: integer
+        nullable: false
+      - name: account_id
+        type: integer
+        nullable: false
+      - name: entry_type
+        type: string
+        nullable: false
+      - name: amount
+        type: decimal(18,2)
+        nullable: false
+      - name: currency_code
+        type: string
+        nullable: false
+      - name: posting_date
+        type: date
+        nullable: false
+      - name: posting_timestamp
+        type: timestamp
+        nullable: false
+      - name: reconciliation_status
+        type: string
+        nullable: false
+
+  - name: Card
+    type: table
+    fields:
+      - name: card_id
+        type: integer
+        primary_key: true
+        nullable: false
+      - name: account_id
+        type: integer
+        nullable: false
+      - name: card_token
+        type: string
+        nullable: false
+        unique: true
+      - name: card_network
+        type: string
+        nullable: false
+      - name: card_type
+        type: string
+        nullable: false
+      - name: issued_at
+        type: date
+        nullable: false
+      - name: expires_at
+        type: date
+        nullable: false
+      - name: card_status
+        type: string
+        nullable: false
+      - name: daily_limit_amount
+        type: decimal(18,2)
+        nullable: true
+
+  - name: CardTransaction
+    type: table
+    fields:
+      - name: card_transaction_id
+        type: integer
+        primary_key: true
+        nullable: false
+      - name: card_id
+        type: integer
+        nullable: false
+      - name: merchant_counterparty_id
+        type: integer
+        nullable: false
+      - name: authorization_code
+        type: string
+        nullable: false
+      - name: transaction_amount
+        type: decimal(18,2)
+        nullable: false
+      - name: settlement_amount
+        type: decimal(18,2)
+        nullable: true
+      - name: settlement_currency
+        type: string
+        nullable: false
+      - name: transaction_status
+        type: string
+        nullable: false
+      - name: merchant_category_code
+        type: string
+        nullable: true
+      - name: authorized_at
+        type: timestamp
+        nullable: false
+      - name: settled_at
+        type: timestamp
+        nullable: true
+
+  - name: RiskAssessment
+    type: table
+    fields:
+      - name: risk_assessment_id
+        type: integer
+        primary_key: true
+        nullable: false
+      - name: holder_id
+        type: integer
+        nullable: false
+      - name: score_version
+        type: string
+        nullable: false
+      - name: risk_score
+        type: decimal(10,4)
+        nullable: false
+      - name: model_confidence
+        type: decimal(10,4)
+        nullable: true
+      - name: risk_outcome
+        type: string
+        nullable: false
+      - name: assessed_at
+        type: timestamp
+        nullable: false
+      - name: explanation_code
+        type: string
+        nullable: true
+
+  - name: ComplianceCase
+    type: table
+    fields:
+      - name: compliance_case_id
+        type: integer
+        primary_key: true
+        nullable: false
+      - name: holder_id
+        type: integer
+        nullable: false
+      - name: case_type
+        type: string
+        nullable: false
+      - name: case_status
+        type: string
+        nullable: false
+      - name: opened_at
+        type: timestamp
+        nullable: false
+      - name: closed_at
+        type: timestamp
+        nullable: true
+      - name: disposition_code
+        type: string
+        nullable: true
+      - name: disposition_notes
+        type: string
+        nullable: true
+
+  - name: KycDocument
+    type: table
+    fields:
+      - name: kyc_document_id
+        type: integer
+        primary_key: true
+        nullable: false
+      - name: holder_id
+        type: integer
+        nullable: false
+      - name: document_type
+        type: string
+        nullable: false
+      - name: document_number_hash
+        type: string
+        nullable: false
+      - name: issuing_country_code
+        type: string
+        nullable: false
+      - name: issued_date
+        type: date
+        nullable: true
+      - name: expiry_date
+        type: date
+        nullable: true
+      - name: verification_status
+        type: string
+        nullable: false
+      - name: verified_at
+        type: timestamp
+        nullable: true
+
+  - name: FreezeEvent
+    type: table
+    fields:
+      - name: freeze_event_id
+        type: integer
+        primary_key: true
+        nullable: false
+      - name: account_id
+        type: integer
+        nullable: false
+      - name: freeze_reason_code
+        type: string
+        nullable: false
+      - name: freeze_status
+        type: string
+        nullable: false
+      - name: frozen_at
+        type: timestamp
+        nullable: false
+      - name: released_at
+        type: timestamp
+        nullable: true
+      - name: initiated_by
+        type: string
+        nullable: false
+
+relationships:
+  - name: holder_primary_address
+    from: AccountHolder.primary_address_id
+    to: Address.address_id
+    cardinality: many_to_one
+
+  - name: account_holder
+    from: Account.holder_id
+    to: AccountHolder.holder_id
+    cardinality: many_to_one
+
+  - name: transfer_debit_account
+    from: MoneyTransfer.debit_account_id
+    to: Account.account_id
+    cardinality: many_to_one
+
+  - name: transfer_credit_account
+    from: MoneyTransfer.credit_account_id
+    to: Account.account_id
+    cardinality: many_to_one
+
+  - name: transfer_counterparty
+    from: MoneyTransfer.counterparty_id
+    to: Counterparty.counterparty_id
+    cardinality: many_to_one
+
+  - name: ledger_transfer
+    from: LedgerEntry.transfer_id
+    to: MoneyTransfer.transfer_id
+    cardinality: many_to_one
+
+  - name: ledger_account
+    from: LedgerEntry.account_id
+    to: Account.account_id
+    cardinality: many_to_one
+
+  - name: card_account
+    from: Card.account_id
+    to: Account.account_id
+    cardinality: many_to_one
+
+  - name: card_transaction_card
+    from: CardTransaction.card_id
+    to: Card.card_id
+    cardinality: many_to_one
+
+  - name: card_transaction_merchant
+    from: CardTransaction.merchant_counterparty_id
+    to: Counterparty.counterparty_id
+    cardinality: many_to_one
+
+  - name: risk_holder
+    from: RiskAssessment.holder_id
+    to: AccountHolder.holder_id
+    cardinality: many_to_one
+
+  - name: compliance_holder
+    from: ComplianceCase.holder_id
+    to: AccountHolder.holder_id
+    cardinality: many_to_one
+
+  - name: kyc_holder
+    from: KycDocument.holder_id
+    to: AccountHolder.holder_id
+    cardinality: many_to_one
+
+  - name: account_freeze_events
+    from: Account.account_id
+    to: FreezeEvent.account_id
+    cardinality: one_to_many
+
+governance:
+  classification:
+    AccountHolder.first_name: PII
+    AccountHolder.last_name: PII
+    AccountHolder.date_of_birth: PII
+    AccountHolder.tax_identifier: PCI
+    AccountHolder.phone_number: PII
+    AccountHolder.email: PII
+    Address.line_1: PII
+    Address.line_2: PII
+    KycDocument.document_number_hash: CONFIDENTIAL
+    MoneyTransfer.transfer_reference: CONFIDENTIAL
+  stewards:
+    risk: risk-governance@company.com
+    compliance: compliance-governance@company.com
+
+rules:
+  - name: transfer_amount_positive
+    target: MoneyTransfer.transfer_amount
+    expression: "value > 0"
+    severity: error
+
+  - name: ledger_amount_not_zero
+    target: LedgerEntry.amount
+    expression: "value != 0"
+    severity: error
+
+  - name: risk_score_range
+    target: RiskAssessment.risk_score
+    expression: "value >= 0 and value <= 1"
+    severity: warn
+
+  - name: card_transaction_amount_positive
+    target: CardTransaction.transaction_amount
+    expression: "value > 0"
+    severity: error

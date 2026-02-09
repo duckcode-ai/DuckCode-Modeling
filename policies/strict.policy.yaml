@@ -1,0 +1,32 @@
+pack:
+  name: strict_governance
+  version: 1.0.0
+  description: Strict policy profile for production-oriented model repositories.
+
+policies:
+  - id: ENTITY_TAG_REQUIRED
+    type: require_entity_tags
+    severity: error
+    params:
+      tags: [GOLD, SILVER, BRONZE]
+      mode: any
+
+  - id: ALL_FIELD_DESCRIPTIONS
+    type: require_field_descriptions
+    severity: error
+    params:
+      exempt_primary_key: false
+
+  - id: SENSITIVE_CLASSIFICATION_REQUIRED
+    type: classification_required_for_tags
+    severity: error
+    params:
+      field_tags: [PII, PCI]
+      field_name_regex: "(^email$|^phone$|^ssn$|_token$|^ip_address$)"
+      allowed_classifications: [PII, PCI]
+
+  - id: DECIMAL_RULE_REQUIRED
+    type: rule_target_required
+    severity: warn
+    params:
+      field_types: ["decimal(12,2)", "decimal(14,2)", "decimal(18,2)"]

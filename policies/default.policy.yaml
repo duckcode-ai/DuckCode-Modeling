@@ -1,0 +1,26 @@
+pack:
+  name: default_governance
+  version: 1.0.0
+  description: Baseline policy checks for MVP repositories.
+
+policies:
+  - id: ENTITY_TAG_BASELINE
+    type: require_entity_tags
+    severity: warn
+    params:
+      tags: [GOLD, SILVER, BRONZE]
+      mode: any
+
+  - id: FIELD_DESCRIPTION_REQUIRED
+    type: require_field_descriptions
+    severity: warn
+    params:
+      exempt_primary_key: true
+
+  - id: SENSITIVE_CLASSIFICATION_REQUIRED
+    type: classification_required_for_tags
+    severity: error
+    params:
+      field_tags: [PII, PCI]
+      field_name_regex: "(^email$|^phone$|^ssn$|_token$)"
+      allowed_classifications: [PII, PCI, CONFIDENTIAL]

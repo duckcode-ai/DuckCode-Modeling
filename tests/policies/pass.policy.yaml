@@ -1,0 +1,10 @@
+pack:
+  name: pass_policy
+  version: 1.0.0
+
+policies:
+  - id: WARN_ONLY_DESCRIPTION
+    type: require_field_descriptions
+    severity: warn
+    params:
+      exempt_primary_key: true

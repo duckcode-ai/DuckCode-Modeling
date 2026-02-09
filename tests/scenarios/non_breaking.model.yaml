@@ -1,0 +1,42 @@
+model:
+  name: commerce
+  version: 1.1.0
+  domain: sales
+  owners:
+    - data-platform@company.com
+  state: draft
+
+entities:
+  - name: Customer
+    type: table
+    fields:
+      - name: customer_id
+        type: integer
+        primary_key: true
+        nullable: false
+      - name: email
+        type: string
+        nullable: false
+      - name: lifecycle_stage
+        type: string
+        nullable: true
+
+  - name: Order
+    type: table
+    fields:
+      - name: order_id
+        type: integer
+        primary_key: true
+        nullable: false
+      - name: customer_id
+        type: integer
+        nullable: false
+      - name: total_amount
+        type: decimal(12,2)
+        nullable: false
+
+relationships:
+  - name: customer_orders
+    from: Customer.customer_id
+    to: Order.customer_id
+    cardinality: one_to_many

@@ -1,0 +1,616 @@
+model:
+  name: retail_analytics
+  version: 2.0.0
+  domain: commerce
+  owners:
+    - retail-data@company.com
+    - analytics-platform@company.com
+  state: draft
+
+entities:
+  - name: LoyaltyTier
+    type: table
+    fields:
+      - name: loyalty_tier_id
+        type: integer
+        primary_key: true
+        nullable: false
+      - name: tier_code
+        type: string
+        nullable: false
+        unique: true
+      - name: tier_name
+        type: string
+        nullable: false
+      - name: minimum_points
+        type: integer
+        nullable: false
+      - name: benefits_description
+        type: string
+        nullable: true
+      - name: is_active
+        type: boolean
+        nullable: false
+      - name: created_at
+        type: timestamp
+        nullable: false
+      - name: updated_at
+        type: timestamp
+        nullable: false
+
+  - name: Customer
+    type: table
+    description: Unified customer profile for commerce analytics
+    tags: [PII, GOLD]
+    fields:
+      - name: customer_id
+        type: integer
+        primary_key: true
+        nullable: false
+      - name: external_customer_code
+        type: string
+        nullable: false
+        unique: true
+      - name: first_name
+        type: string
+        nullable: false
+      - name: last_name
+        type: string
+        nullable: false
+      - name: email
+        type: string
+        nullable: false
+        unique: true
+      - name: phone_number
+        type: string
+        nullable: true
+      - name: date_of_birth
+        type: date
+        nullable: true
+      - name: gender_code
+        type: string
+        nullable: true
+      - name: created_at
+        type: timestamp
+        nullable: false
+      - name: updated_at
+        type: timestamp
+        nullable: false
+      - name: marketing_opt_in
+        type: boolean
+        nullable: false
+      - name: default_address_id
+        type: integer
+        nullable: true
+      - name: loyalty_tier_id
+        type: integer
+        nullable: true
+      - name: loyalty_points
+        type: integer
+        nullable: false
+      - name: customer_status
+        type: string
+        nullable: false
+      - name: risk_segment
+        type: string
+        nullable: true
+
+  - name: Address
+    type: table
+    fields:
+      - name: address_id
+        type: integer
+        primary_key: true
+        nullable: false
+      - name: line_1
+        type: string
+        nullable: false
+      - name: line_2
+        type: string
+        nullable: true
+      - name: city_name
+        type: string
+        nullable: false
+      - name: state_code
+        type: string
+        nullable: false
+      - name: postal_code
+        type: string
+        nullable: false
+      - name: country_code
+        type: string
+        nullable: false
+      - name: latitude
+        type: decimal(9,6)
+        nullable: true
+      - name: longitude
+        type: decimal(9,6)
+        nullable: true
+      - name: created_at
+        type: timestamp
+        nullable: false
+      - name: updated_at
+        type: timestamp
+        nullable: false
+
+  - name: ProductCategory
+    type: table
+    fields:
+      - name: category_id
+        type: integer
+        primary_key: true
+        nullable: false
+      - name: parent_category_id
+        type: integer
+        nullable: true
+      - name: category_name
+        type: string
+        nullable: false
+      - name: category_code
+        type: string
+        nullable: false
+        unique: true
+      - name: category_description
+        type: string
+        nullable: true
+      - name: is_active
+        type: boolean
+        nullable: false
+      - name: created_at
+        type: timestamp
+        nullable: false
+      - name: updated_at
+        type: timestamp
+        nullable: false
+
+  - name: Supplier
+    type: table
+    fields:
+      - name: supplier_id
+        type: integer
+        primary_key: true
+        nullable: false
+      - name: supplier_code
+        type: string
+        nullable: false
+        unique: true
+      - name: supplier_name
+        type: string
+        nullable: false
+      - name: supplier_tier
+        type: string
+        nullable: false
+      - name: supplier_email
+        type: string
+        nullable: true
+      - name: supplier_phone
+        type: string
+        nullable: true
+      - name: country_code
+        type: string
+        nullable: false
+      - name: tax_registration_number
+        type: string
+        nullable: true
+      - name: created_at
+        type: timestamp
+        nullable: false
+      - name: updated_at
+        type: timestamp
+        nullable: false
+
+  - name: Product
+    type: table
+    fields:
+      - name: product_id
+        type: integer
+        primary_key: true
+        nullable: false
+      - name: category_id
+        type: integer
+        nullable: false
+      - name: supplier_id
+        type: integer
+        nullable: false
+      - name: sku_code
+        type: string
+        nullable: false
+        unique: true
+      - name: product_name
+        type: string
+        nullable: false
+      - name: brand_name
+        type: string
+        nullable: true
+      - name: launch_date
+        type: date
+        nullable: true
+      - name: unit_price
+        type: decimal(14,2)
+        nullable: false
+      - name: standard_cost
+        type: decimal(14,2)
+        nullable: false
+      - name: tax_code
+        type: string
+        nullable: true
+      - name: weight_kg
+        type: decimal(10,3)
+        nullable: true
+      - name: is_discontinued
+        type: boolean
+        nullable: false
+      - name: created_at
+        type: timestamp
+        nullable: false
+      - name: updated_at
+        type: timestamp
+        nullable: false
+
+  - name: InventorySnapshot
+    type: table
+    fields:
+      - name: inventory_snapshot_id
+        type: integer
+        primary_key: true
+        nullable: false
+      - name: product_id
+        type: integer
+        nullable: false
+      - name: warehouse_id
+        type: integer
+        nullable: false
+      - name: snapshot_date
+        type: date
+        nullable: false
+      - name: on_hand_quantity
+        type: integer
+        nullable: false
+      - name: reserved_quantity
+        type: integer
+        nullable: false
+      - name: available_quantity
+        type: integer
+        nullable: false
+      - name: reorder_point
+        type: integer
+        nullable: true
+      - name: safety_stock_quantity
+        type: integer
+        nullable: true
+      - name: unit_cost
+        type: decimal(14,2)
+        nullable: false
+      - name: inventory_value
+        type: decimal(18,2)
+        nullable: false
+
+  - name: SalesOrder
+    type: table
+    fields:
+      - name: order_id
+        type: integer
+        primary_key: true
+        nullable: false
+      - name: customer_id
+        type: integer
+        nullable: false
+      - name: billing_address_id
+        type: integer
+        nullable: false
+      - name: shipping_address_id
+        type: integer
+        nullable: false
+      - name: order_number
+        type: string
+        nullable: false
+        unique: true
+      - name: order_status
+        type: string
+        nullable: false
+      - name: order_date
+        type: timestamp
+        nullable: false
+      - name: channel_code
+        type: string
+        nullable: true
+      - name: currency_code
+        type: string
+        nullable: false
+      - name: gross_amount
+        type: decimal(14,2)
+        nullable: false
+      - name: discount_amount
+        type: decimal(14,2)
+        nullable: false
+      - name: tax_amount
+        type: decimal(14,2)
+        nullable: false
+      - name: shipping_amount
+        type: decimal(14,2)
+        nullable: false
+      - name: total_amount
+        type: decimal(18,4)
+        nullable: false
+      - name: payment_status
+        type: string
+        nullable: false
+      - name: fulfilled_at
+        type: timestamp
+        nullable: true
+      - name: cancelled_at
+        type: timestamp
+        nullable: true
+      - name: created_at
+        type: timestamp
+        nullable: false
+      - name: updated_at
+        type: timestamp
+        nullable: false
+
+  - name: SalesOrderItem
+    type: table
+    fields:
+      - name: order_item_id
+        type: integer
+        primary_key: true
+        nullable: false
+      - name: order_id
+        type: integer
+        nullable: false
+      - name: product_id
+        type: integer
+        nullable: false
+      - name: line_number
+        type: integer
+        nullable: false
+      - name: quantity_ordered
+        type: integer
+        nullable: false
+      - name: unit_price
+        type: decimal(14,2)
+        nullable: false
+      - name: line_discount_amount
+        type: decimal(14,2)
+        nullable: false
+      - name: line_tax_amount
+        type: decimal(14,2)
+        nullable: false
+      - name: line_total_amount
+        type: decimal(14,2)
+        nullable: false
+      - name: is_gift_item
+        type: boolean
+        nullable: false
+      - name: promised_ship_date
+        type: date
+        nullable: true
+      - name: fulfilled_quantity
+        type: integer
+        nullable: false
+
+  - name: PaymentTransaction
+    type: table
+    fields:
+      - name: payment_transaction_id
+        type: integer
+        primary_key: true
+        nullable: false
+      - name: order_id
+        type: integer
+        nullable: false
+      - name: payment_reference
+        type: string
+        nullable: false
+        unique: true
+      - name: payment_method
+        type: string
+        nullable: false
+      - name: payment_provider
+        type: string
+        nullable: false
+      - name: transaction_status
+        type: string
+        nullable: false
+      - name: authorized_amount
+        type: decimal(14,2)
+        nullable: false
+      - name: captured_amount
+        type: decimal(14,2)
+        nullable: false
+      - name: refunded_amount
+        type: decimal(14,2)
+        nullable: false
+      - name: transaction_currency
+        type: string
+        nullable: false
+      - name: authorized_at
+        type: timestamp
+        nullable: true
+      - name: captured_at
+        type: timestamp
+        nullable: true
+      - name: failed_at
+        type: timestamp
+        nullable: true
+
+  - name: Shipment
+    type: table
+    fields:
+      - name: shipment_id
+        type: integer
+        primary_key: true
+        nullable: false
+      - name: order_id
+        type: integer
+        nullable: false
+      - name: shipment_number
+        type: string
+        nullable: false
+        unique: true
+      - name: carrier_code
+        type: string
+        nullable: false
+      - name: service_level
+        type: string
+        nullable: true
+      - name: tracking_number
+        type: string
+        nullable: true
+      - name: shipped_at
+        type: timestamp
+        nullable: true
+      - name: delivered_at
+        type: timestamp
+        nullable: false
+      - name: shipping_status
+        type: string
+        nullable: false
+      - name: estimated_delivery_date
+        type: date
+        nullable: true
+      - name: shipping_cost
+        type: decimal(14,2)
+        nullable: false
+
+  - name: ReturnRequest
+    type: table
+    fields:
+      - name: return_request_id
+        type: integer
+        primary_key: true
+        nullable: false
+      - name: order_id
+        type: integer
+        nullable: false
+      - name: order_item_id
+        type: integer
+        nullable: false
+      - name: customer_id
+        type: integer
+        nullable: false
+      - name: return_reason_code
+        type: string
+        nullable: false
+      - name: return_status
+        type: string
+        nullable: false
+      - name: requested_at
+        type: timestamp
+        nullable: false
+      - name: approved_at
+        type: timestamp
+        nullable: true
+      - name: refunded_at
+        type: timestamp
+        nullable: true
+      - name: refund_amount
+        type: decimal(14,2)
+        nullable: true
+
+relationships:
+  - name: customer_default_address
+    from: Customer.default_address_id
+    to: Address.address_id
+    cardinality: many_to_one
+
+  - name: customer_loyalty_tier
+    from: Customer.loyalty_tier_id
+    to: LoyaltyTier.loyalty_tier_id
+    cardinality: many_to_one
+
+  - name: product_category
+    from: Product.category_id
+    to: ProductCategory.category_id
+    cardinality: many_to_one
+
+  - name: product_supplier
+    from: Product.supplier_id
+    to: Supplier.supplier_id
+    cardinality: many_to_one
+
+  - name: inventory_product
+    from: InventorySnapshot.product_id
+    to: Product.product_id
+    cardinality: many_to_one
+
+  - name: order_customer
+    from: SalesOrder.customer_id
+    to: Customer.customer_id
+    cardinality: many_to_one
+
+  - name: order_billing_address
+    from: SalesOrder.billing_address_id
+    to: Address.address_id
+    cardinality: many_to_one
+
+  - name: order_shipping_address
+    from: SalesOrder.shipping_address_id
+    to: Address.address_id
+    cardinality: many_to_one
+
+  - name: order_item_order
+    from: SalesOrderItem.order_id
+    to: SalesOrder.order_id
+    cardinality: many_to_one
+
+  - name: order_item_product
+    from: SalesOrderItem.product_id
+    to: Product.product_id
+    cardinality: many_to_one
+
+  - name: order_payments
+    from: SalesOrder.order_id
+    to: PaymentTransaction.order_id
+    cardinality: one_to_many
+
+  - name: order_shipments
+    from: SalesOrder.order_id
+    to: Shipment.order_id
+    cardinality: one_to_many
+
+  - name: order_returns
+    from: SalesOrder.order_id
+    to: ReturnRequest.order_id
+    cardinality: one_to_many
+
+  - name: return_order_item
+    from: ReturnRequest.order_item_id
+    to: SalesOrderItem.order_item_id
+    cardinality: many_to_one
+
+governance:
+  classification:
+    Customer.first_name: PII
+    Customer.last_name: PII
+    Customer.email: PII
+    Customer.phone_number: PII
+    Customer.date_of_birth: PII
+    Address.line_1: PII
+    Address.line_2: PII
+    Address.postal_code: CONFIDENTIAL
+    PaymentTransaction.payment_reference: CONFIDENTIAL
+  stewards:
+    commerce: retail-governance@company.com
+    analytics: analytics-governance@company.com
+
+rules:
+  - name: order_total_non_negative
+    target: SalesOrder.total_amount
+    expression: "value >= 0"
+    severity: error
+
+  - name: order_item_quantity_positive
+    target: SalesOrderItem.quantity_ordered
+    expression: "value > 0"
+    severity: error
+
+  - name: payment_captured_not_less_than_zero
+    target: PaymentTransaction.captured_amount
+    expression: "value >= 0"
+    severity: warn
+
+  - name: inventory_available_not_negative
+    target: InventorySnapshot.available_quantity
+    expression: "value >= 0"
+    severity: error

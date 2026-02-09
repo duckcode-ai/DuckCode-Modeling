@@ -1,0 +1,24 @@
+model:
+  name: commerce
+  version: 1.0.0
+  domain: sales
+  owners:
+    - data-platform@company.com
+  state: draft
+
+entities:
+  - name: Customer
+    type: table
+    fields:
+      - name: customer_id
+        type: integer
+        nullable: false
+      - name: emailAddress
+        type: string
+        nullable: false
+
+relationships:
+  - name: invalid_ref
+    from: Customer.customer_id
+    to: Order.customer_id
+    cardinality: one_to_many

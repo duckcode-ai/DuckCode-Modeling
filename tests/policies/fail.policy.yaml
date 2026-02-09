@@ -1,0 +1,11 @@
+pack:
+  name: fail_policy
+  version: 1.0.0
+
+policies:
+  - id: REQUIRE_CLASSIFICATION
+    type: classification_required_for_tags
+    severity: error
+    params:
+      field_name_regex: "^email$"
+      allowed_classifications: [PCI]

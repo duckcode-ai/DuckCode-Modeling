@@ -1,0 +1,76 @@
+name: Model Quality
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+jobs:
+  model-quality:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install Python dependencies
+        run: |
+          python3 -m pip install --upgrade pip
+          python3 -m pip install -r requirements.txt
+
+      - name: Run unit tests
+        run: |
+          python3 -m unittest -v \
+            tests/test_mvp.py \
+            tests/test_real_scenarios.py \
+            tests/test_integrations.py \
+            tests/test_performance.py
+
+      - name: Validate all model files
+        run: ./dm validate-all --schema schemas/model.schema.json
+
+      - name: Run default policy pack
+        run: ./dm policy-check model-examples/starter-commerce.model.yaml --policy policies/default.policy.yaml
+
+      - name: PR gate for changed model files
+        if: github.event_name == 'pull_request'
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          BASE_REF="origin/${{ github.base_ref }}"
+          git fetch origin "${{ github.base_ref }}" --depth=1
+
+          mapfile -t changed_files < <(git diff --name-only "${BASE_REF}"...HEAD -- '*.model.yaml')
+
+          if [ "${#changed_files[@]}" -eq 0 ]; then
+            echo "No changed .model.yaml files."
+            exit 0
+          fi
+
+          for model_path in "${changed_files[@]}"; do
+            echo "Checking ${model_path}"
+
+            if git cat-file -e "${BASE_REF}:${model_path}" 2>/dev/null; then
+              git show "${BASE_REF}:${model_path}" > /tmp/base-model.yaml
+
+              if [ -f "${model_path}" ]; then
+                ./dm gate /tmp/base-model.yaml "${model_path}" --schema schemas/model.schema.json
+              else
+                echo "Deleted model file '${model_path}' is treated as breaking."
+                exit 2
+              fi
+            else
+              if [ -f "${model_path}" ]; then
+                ./dm validate "${model_path}" --schema schemas/model.schema.json
+              fi
+            fi
+          done
