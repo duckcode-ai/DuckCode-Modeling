@@ -46,7 +46,6 @@ const BOTTOM_TABS = [
   { id: "impact", label: "Impact", icon: Network },
   { id: "model-graph", label: "Model Graph", icon: Network },
   { id: "dictionary", label: "Dictionary", icon: BookOpen },
-  { id: "import", label: "Import", icon: Import },
   { id: "search", label: "Search", icon: Search },
   { id: "history", label: "History", icon: Clock },
 ];
@@ -186,8 +185,6 @@ function BottomPanelContent({ tab }) {
       return <ModelGraphPanel />;
     case "dictionary":
       return <DictionaryPanel />;
-    case "import":
-      return <ImportPanel />;
     case "search":
       return <GlobalSearchPanel />;
     case "history":
@@ -235,6 +232,17 @@ function ConnectView() {
       </div>
       <div className="flex-1 overflow-hidden">
         <ConnectorsPanel />
+      </div>
+    </div>
+  );
+}
+
+// ── Primary content area for "import" activity ──
+function ImportView() {
+  return (
+    <div className="h-full flex flex-col bg-bg-surface">
+      <div className="flex-1 overflow-hidden">
+        <ImportPanel />
       </div>
     </div>
   );
@@ -357,7 +365,7 @@ export default function App() {
       // ⌘+1..5 — Switch activities
       if (meta && e.key >= "1" && e.key <= "5") {
         e.preventDefault();
-        const activities = ["model", "connect", "validate", "explore", "search"];
+        const activities = ["model", "connect", "explore", "search", "import"];
         const idx = parseInt(e.key) - 1;
         if (idx < activities.length) {
           useUiStore.getState().setActiveActivity(activities[idx]);
@@ -395,8 +403,9 @@ export default function App() {
   }, [error, clearError]);
 
   // Determine which primary view to show
-  const showModelView = activeActivity === "model" || activeActivity === "validate" || activeActivity === "explore" || activeActivity === "search" || activeActivity === "settings";
+  const showModelView = activeActivity === "model" || activeActivity === "explore" || activeActivity === "search" || activeActivity === "settings";
   const showConnectView = activeActivity === "connect";
+  const showImportView = activeActivity === "import";
 
   return (
     <div className="h-screen flex flex-col overflow-hidden">
@@ -412,6 +421,7 @@ export default function App() {
           {/* Primary view area */}
           <div className="flex-1 min-h-0">
             {showConnectView && <ConnectView />}
+            {showImportView && <ImportView />}
             {showModelView && (
               <ModelView
                 bottomPanelOpen={bottomPanelOpen}

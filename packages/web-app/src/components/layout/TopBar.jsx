@@ -22,7 +22,7 @@ import useUiStore from "../../stores/uiStore";
 const ACTIVITY_LABELS = {
   model: { label: "Model", icon: LayoutDashboard, color: "text-accent-blue" },
   connect: { label: "Connect", icon: Plug, color: "text-cyan-500" },
-  validate: { label: "Validate", icon: ShieldCheck, color: "text-green-500" },
+  import: { label: "Import", icon: FileCode2, color: "text-green-500" },
   explore: { label: "Explore", icon: Compass, color: "text-purple-500" },
   search: { label: "Search", icon: Search, color: "text-amber-500" },
   settings: { label: "Settings", icon: Settings, color: "text-text-muted" },

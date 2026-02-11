@@ -34,7 +34,6 @@ import EntityListPanel from "../panels/EntityListPanel";
 const ACTIVITIES = [
   { id: "model",    label: "Model",    icon: LayoutDashboard, group: "top" },
   { id: "connect",  label: "Connect",  icon: Plug,            group: "top" },
-  { id: "validate", label: "Validate", icon: ShieldCheck,     group: "top" },
   { id: "explore",  label: "Explore",  icon: Compass,         group: "top" },
   { id: "search",   label: "Search",   icon: Search,          group: "top" },
   { id: "settings", label: "Settings", icon: Settings,        group: "bottom" },
@@ -181,34 +180,60 @@ function FileSection() {
   );
 }
 
-// ── Explore side panel: quick links to tools ──
+// ── Explore side panel: model stats + all tools (merged Validate + Explore) ──
 function ExploreSection() {
   const { setBottomPanelTab } = useUiStore();
-  const items = [
-    { id: "impact",      label: "Impact Analysis",  icon: Network,    tab: "impact" },
-    { id: "diff",        label: "Diff & Gate",      icon: GitCompare, tab: "diff" },
-    { id: "model-graph", label: "Model Graph",      icon: Boxes,      tab: "model-graph" },
-    { id: "dictionary",  label: "Data Dictionary",  icon: BookOpen,   tab: "dictionary" },
-    { id: "import",      label: "Import Schema",    icon: Import,     tab: "import" },
-    { id: "history",     label: "History",           icon: FileText,   tab: "history" },
+  const { model } = useDiagramStore();
+  const entityCount = model?.entities?.length || 0;
+  const relCount = model?.relationships?.length || 0;
+
+  const tools = [
+    { id: "validation",  label: "Validation",       icon: ShieldCheck, tab: "validation" },
+    { id: "diff",        label: "Diff & Gate",      icon: GitCompare,  tab: "diff" },
+    { id: "impact",      label: "Impact Analysis",  icon: Network,     tab: "impact" },
+    { id: "model-graph", label: "Model Graph",      icon: Boxes,       tab: "model-graph" },
+    { id: "dictionary",  label: "Data Dictionary",  icon: BookOpen,    tab: "dictionary" },
+    { id: "history",     label: "History",           icon: FileText,    tab: "history" },
   ];
 
   return (
-    <div className="px-2 py-1">
-      <div className="px-1 py-1.5 text-[10px] text-text-muted uppercase tracking-wider font-semibold">
-        Tools & Views
+    <div className="px-2 py-1 space-y-3">
+      {/* Model stats */}
+      <div>
+        <div className="px-1 py-1.5 text-[10px] text-text-muted uppercase tracking-wider font-semibold">
+          Model Overview
+        </div>
+        <div className="grid grid-cols-2 gap-2 px-1">
+          <div className="text-center p-2 rounded-lg bg-bg-primary border border-border-primary">
+            <div className="text-lg font-bold text-text-primary">{entityCount}</div>
+            <div className="text-[9px] text-text-muted">Entities</div>
+          </div>
+          <div className="text-center p-2 rounded-lg bg-bg-primary border border-border-primary">
+            <div className="text-lg font-bold text-text-primary">{relCount}</div>
+            <div className="text-[9px] text-text-muted">Relationships</div>
+          </div>
+        </div>
       </div>
-      <div className="space-y-0.5">
-        {items.map(({ id, label, icon: Icon, tab }) => (
-          <button
-            key={id}
-            onClick={() => setBottomPanelTab(tab)}
-            className="flex items-center gap-2 w-full px-2 py-1.5 rounded-md text-xs text-text-secondary hover:bg-bg-hover hover:text-text-primary transition-colors"
-          >
-            <Icon size={13} />
-            {label}
-          </button>
-        ))}
+
+      <div className="mx-1 border-t border-border-primary" />
+
+      {/* Tools */}
+      <div>
+        <div className="px-1 py-1 text-[10px] text-text-muted uppercase tracking-wider font-semibold">
+          Tools
+        </div>
+        <div className="space-y-0.5">
+          {tools.map(({ id, label, icon: Icon, tab }) => (
+            <button
+              key={id}
+              onClick={() => setBottomPanelTab(tab)}
+              className="flex items-center gap-2 w-full px-2 py-1.5 rounded-md text-xs text-text-secondary hover:bg-bg-hover hover:text-text-primary transition-colors"
+            >
+              <Icon size={13} />
+              {label}
+            </button>
+          ))}
+        </div>
       </div>
     </div>
   );
@@ -239,41 +264,6 @@ function EntitySection() {
   );
 }
 
-// ── Validate side panel ──
-function ValidateSection() {
-  const { setBottomPanelTab } = useUiStore();
-  const { model } = useDiagramStore();
-  const entityCount = model?.entities?.length || 0;
-  const relCount = model?.relationships?.length || 0;
-
-  return (
-    <div className="px-2 py-1 space-y-3">
-      <div className="px-1 py-1.5 text-[10px] text-text-muted uppercase tracking-wider font-semibold">
-        Model Quality
-      </div>
-      <div className="grid grid-cols-2 gap-2 px-1">
-        <div className="text-center p-2 rounded-lg bg-bg-primary border border-border-primary">
-          <div className="text-lg font-bold text-text-primary">{entityCount}</div>
-          <div className="text-[9px] text-text-muted">Entities</div>
-        </div>
-        <div className="text-center p-2 rounded-lg bg-bg-primary border border-border-primary">
-          <div className="text-lg font-bold text-text-primary">{relCount}</div>
-          <div className="text-[9px] text-text-muted">Relationships</div>
-        </div>
-      </div>
-      <div className="space-y-0.5">
-        <button onClick={() => setBottomPanelTab("validation")}
-          className="flex items-center gap-2 w-full px-2 py-1.5 rounded-md text-xs text-text-secondary hover:bg-bg-hover hover:text-text-primary transition-colors">
-          <ShieldCheck size={13} /> Run Validation
-        </button>
-        <button onClick={() => setBottomPanelTab("diff")}
-          className="flex items-center gap-2 w-full px-2 py-1.5 rounded-md text-xs text-text-secondary hover:bg-bg-hover hover:text-text-primary transition-colors">
-          <GitCompare size={13} /> Diff & Gate
-        </button>
-      </div>
-    </div>
-  );
-}
 
 // ── Search side panel ──
 function SearchSection() {
@@ -400,10 +390,7 @@ function SidePanel({ activity }) {
                 Database Connector
               </button>
               <button
-                onClick={() => {
-                  useUiStore.getState().setActiveActivity("model");
-                  useUiStore.getState().setBottomPanelTab("import");
-                }}
+                onClick={() => useUiStore.getState().setActiveActivity("import")}
                 className="flex items-center gap-2 w-full px-2 py-1.5 rounded-md text-xs text-text-secondary hover:bg-bg-hover hover:text-text-primary transition-colors"
               >
                 <Import size={13} />
@@ -421,8 +408,14 @@ function SidePanel({ activity }) {
             </div>
           </div>
         )}
-        {activity === "validate" && <ValidateSection />}
         {activity === "explore" && <ExploreSection />}
+        {activity === "import" && (
+          <div className="px-3 py-2">
+            <p className="text-[10px] text-text-muted leading-relaxed">
+              Drag & drop or browse files to import SQL DDL, DBML, or Spark Schema JSON into a DataLex model.
+            </p>
+          </div>
+        )}
         {activity === "search" && <SearchSection />}
         {activity === "settings" && (
           <div className="px-3 py-2 space-y-2">
