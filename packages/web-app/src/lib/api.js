@@ -96,6 +96,17 @@ export async function importSchemaContent({ format, content, filename, modelName
   });
 }
 
+export async function generateForwardSql(modelPath, dialect = "snowflake") {
+  const data = await request("/forward/generate-sql", {
+    method: "POST",
+    body: JSON.stringify({
+      model_path: modelPath,
+      dialect,
+    }),
+  });
+  return data;
+}
+
 export async function fetchModelGraph(projectId) {
   return request(`/projects/${projectId}/model-graph`);
 }
