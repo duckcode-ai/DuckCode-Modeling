@@ -7,3 +7,5 @@ jsonschema>=4.0
 # pip install snowflake-connector-python  # Snowflake
 # pip install google-cloud-bigquery    # BigQuery
 # pip install databricks-sql-connector # Databricks
+# pip install pyodbc                    # SQL Server, Azure SQL, Microsoft Fabric Warehouse
+# pip install redshift-connector        # Amazon Redshift

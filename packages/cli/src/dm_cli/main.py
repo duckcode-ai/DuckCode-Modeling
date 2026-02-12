@@ -1,6 +1,8 @@
 import argparse
 import glob
 import json
+import hashlib
+import re
 import os
 import sys
 import time
@@ -712,6 +714,19 @@ def cmd_import_dbt(args: argparse.Namespace) -> int:
     return 1 if has_errors(issues) else 0
 
 
+def _build_connector_extra(args: argparse.Namespace) -> Dict[str, Any]:
+    extra: Dict[str, Any] = {}
+    if getattr(args, "odbc_driver", ""):
+        extra["odbc_driver"] = getattr(args, "odbc_driver")
+    if getattr(args, "encrypt", ""):
+        extra["encrypt"] = getattr(args, "encrypt")
+    if getattr(args, "trust_server_certificate", ""):
+        extra["trust_server_certificate"] = getattr(args, "trust_server_certificate")
+    if getattr(args, "http_path", ""):
+        extra["http_path"] = getattr(args, "http_path")
+    return extra
+
+
 def cmd_pull(args: argparse.Namespace) -> int:
     connector_type = args.connector
     connector = get_connector(connector_type)
@@ -749,6 +764,7 @@ def cmd_pull(args: argparse.Namespace) -> int:
         owners=[getattr(args, "owner", None)] if getattr(args, "owner", None) else None,
         tables=getattr(args, "tables", None),
         exclude_tables=getattr(args, "exclude_tables", None),
+        extra=_build_connector_extra(args),
     )
 
     if getattr(args, "test", False):
@@ -800,6 +816,8 @@ def _build_connector_config(args: argparse.Namespace) -> "ConnectorConfig":
         getattr(args, "host", "") or "",
         getattr(args, "port", 0) or 0,
     )
+    extra = _build_connector_extra(args)
+
     return ConnectorConfig(
         connector_type=args.connector,
         host=host,
@@ -814,6 +832,7 @@ def _build_connector_config(args: argparse.Namespace) -> "ConnectorConfig":
         catalog=getattr(args, "catalog", "") or "",
         token=getattr(args, "token", "") or "",
         private_key_path=getattr(args, "private_key_path", "") or "",
+        extra=extra,
     )
 
 
@@ -1141,6 +1160,436 @@ def cmd_migrate(args: argparse.Namespace) -> int:
     return 0
 
 
+def _split_sql_statements(sql_text: str) -> List[str]:
+    statements: List[str] = []
+    buf: List[str] = []
+    in_single = False
+    in_double = False
+    in_line_comment = False
+    in_block_comment = False
+    i = 0
+
+    while i < len(sql_text):
+        ch = sql_text[i]
+        nxt = sql_text[i + 1] if i + 1 < len(sql_text) else ""
+
+        if in_line_comment:
+            if ch == "\n":
+                in_line_comment = False
+                buf.append(ch)
+            i += 1
+            continue
+
+        if in_block_comment:
+            if ch == "*" and nxt == "/":
+                in_block_comment = False
+                i += 2
+                continue
+            i += 1
+            continue
+
+        if not in_single and not in_double and ch == "-" and nxt == "-":
+            in_line_comment = True
+            i += 2
+            continue
+
+        if not in_single and not in_double and ch == "/" and nxt == "*":
+            in_block_comment = True
+            i += 2
+            continue
+
+        if ch == "'" and not in_double:
+            if in_single and nxt == "'":
+                buf.append(ch)
+                buf.append(nxt)
+                i += 2
+                continue
+            in_single = not in_single
+            buf.append(ch)
+            i += 1
+            continue
+
+        if ch == '"' and not in_single:
+            in_double = not in_double
+            buf.append(ch)
+            i += 1
+            continue
+
+        if ch == ";" and not in_single and not in_double:
+            stmt = "".join(buf).strip()
+            if stmt:
+                statements.append(stmt)
+            buf = []
+            i += 1
+            continue
+
+        buf.append(ch)
+        i += 1
+
+    tail = "".join(buf).strip()
+    if tail:
+        statements.append(tail)
+    return statements
+
+
+def _escape_sql_string(value: str) -> str:
+    return value.replace("'", "''")
+
+
+def _sql_checksum(sql_text: str) -> str:
+    return hashlib.sha256(sql_text.encode("utf-8")).hexdigest()
+
+
+def _default_migration_name() -> str:
+    return f"migration_{time.strftime('%Y%m%d%H%M%S', time.gmtime())}"
+
+
+def _preview_sql(statement: str, max_len: int = 180) -> str:
+    flat = " ".join(statement.strip().split())
+    return flat if len(flat) <= max_len else f"{flat[: max_len - 3]}..."
+
+
+def _detect_destructive_statements(statements: List[str]) -> List[Dict[str, Any]]:
+    checks = [
+        ("DROP TABLE", re.compile(r"\bDROP\s+TABLE\b", re.IGNORECASE)),
+        ("DROP VIEW", re.compile(r"\bDROP\s+VIEW\b", re.IGNORECASE)),
+        ("DROP SCHEMA", re.compile(r"\bDROP\s+SCHEMA\b", re.IGNORECASE)),
+        ("DROP DATABASE", re.compile(r"\bDROP\s+DATABASE\b", re.IGNORECASE)),
+        ("TRUNCATE TABLE", re.compile(r"\bTRUNCATE\s+TABLE\b", re.IGNORECASE)),
+        ("ALTER TABLE DROP COLUMN", re.compile(r"\bALTER\s+TABLE\b[\s\S]*\bDROP\s+COLUMN\b", re.IGNORECASE)),
+    ]
+    findings: List[Dict[str, Any]] = []
+    for idx, statement in enumerate(statements, start=1):
+        for check_name, pattern in checks:
+            if pattern.search(statement):
+                findings.append({
+                    "statement_index": idx,
+                    "kind": check_name,
+                    "preview": _preview_sql(statement),
+                })
+                break
+    return findings
+
+
+def _write_apply_report(path: str, payload: Dict[str, Any]) -> None:
+    Path(path).write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+
+
+class ApplyExecutionError(RuntimeError):
+    def __init__(self, connector: str, statement_index: int, statement: str, error: Exception):
+        self.connector = connector
+        self.statement_index = statement_index
+        self.statement = statement
+        self.error = error
+        message = (
+            f"{connector} apply failed at statement #{statement_index}: "
+            f"{_preview_sql(statement)} ({error})"
+        )
+        super().__init__(message)
+
+
+def _apply_snowflake(config: ConnectorConfig, statements: List[str], migration_name: str, checksum: str, ledger_table: str, skip_ledger: bool) -> None:
+    import snowflake.connector
+    from dm_core.connectors.snowflake import _load_private_key
+
+    params: Dict[str, Any] = {
+        "account": config.host,
+        "user": config.user,
+        "warehouse": config.warehouse,
+        "database": config.database,
+        "schema": config.schema or "PUBLIC",
+    }
+    if config.private_key_path:
+        passphrase = config.password if config.password else None
+        params["private_key"] = _load_private_key(config.private_key_path, passphrase)
+    else:
+        params["password"] = config.password
+
+    conn = snowflake.connector.connect(**params)
+    try:
+        cur = conn.cursor()
+        try:
+            if config.warehouse:
+                try:
+                    cur.execute(f"ALTER WAREHOUSE IF EXISTS {config.warehouse} RESUME IF SUSPENDED")
+                except Exception:
+                    pass
+
+            for idx, stmt in enumerate(statements, start=1):
+                try:
+                    cur.execute(stmt)
+                except Exception as e:
+                    raise ApplyExecutionError("snowflake", idx, stmt, e) from e
+
+            if not skip_ledger:
+                schema_name = (config.schema or "PUBLIC").upper()
+                table_name = ledger_table
+                create_sql = (
+                    f'CREATE TABLE IF NOT EXISTS "{schema_name}"."{table_name}" ('
+                    'migration_name VARCHAR, checksum VARCHAR, statement_count NUMBER, '
+                    'status VARCHAR, applied_at TIMESTAMP_NTZ)'
+                )
+                cur.execute(create_sql)
+                insert_sql = (
+                    f'INSERT INTO "{schema_name}"."{table_name}" '
+                    '(migration_name, checksum, statement_count, status, applied_at) VALUES '
+                    f"('{_escape_sql_string(migration_name)}', '{checksum}', {len(statements)}, 'success', CURRENT_TIMESTAMP())"
+                )
+                cur.execute(insert_sql)
+        finally:
+            cur.close()
+    finally:
+        conn.close()
+
+
+def _apply_databricks(config: ConnectorConfig, statements: List[str], migration_name: str, checksum: str, ledger_table: str, skip_ledger: bool) -> None:
+    from databricks import sql
+
+    conn = sql.connect(
+        server_hostname=config.host,
+        http_path=config.extra.get("http_path", ""),
+        access_token=config.token,
+    )
+    try:
+        cur = conn.cursor()
+        try:
+            for idx, stmt in enumerate(statements, start=1):
+                try:
+                    cur.execute(stmt)
+                except Exception as e:
+                    raise ApplyExecutionError("databricks", idx, stmt, e) from e
+
+            if not skip_ledger:
+                catalog = config.catalog or "main"
+                schema_name = config.schema or "default"
+                qualified = f"`{catalog}`.`{schema_name}`.`{ledger_table}`"
+                cur.execute(
+                    f"CREATE TABLE IF NOT EXISTS {qualified} ("
+                    "migration_name STRING, checksum STRING, statement_count INT, status STRING, applied_at TIMESTAMP)"
+                )
+                cur.execute(
+                    f"INSERT INTO {qualified} (migration_name, checksum, statement_count, status, applied_at) VALUES ("
+                    f"'{_escape_sql_string(migration_name)}', '{checksum}', {len(statements)}, 'success', current_timestamp())"
+                )
+        finally:
+            cur.close()
+    finally:
+        conn.close()
+
+
+def _apply_bigquery(config: ConnectorConfig, statements: List[str], migration_name: str, checksum: str, ledger_table: str, skip_ledger: bool) -> None:
+    from google.cloud import bigquery
+
+    client = bigquery.Client(project=config.project)
+    for idx, stmt in enumerate(statements, start=1):
+        try:
+            client.query(stmt).result()
+        except Exception as e:
+            raise ApplyExecutionError("bigquery", idx, stmt, e) from e
+
+    if not skip_ledger:
+        dataset = config.dataset
+        if not dataset:
+            raise ValueError("--dataset is required for BigQuery migration ledger")
+        qualified = f"`{config.project}.{dataset}.{ledger_table}`"
+        client.query(
+            f"CREATE TABLE IF NOT EXISTS {qualified} ("
+            "migration_name STRING, checksum STRING, statement_count INT64, status STRING, applied_at TIMESTAMP)"
+        ).result()
+        client.query(
+            f"INSERT INTO {qualified} (migration_name, checksum, statement_count, status, applied_at) VALUES ("
+            f"'{_escape_sql_string(migration_name)}', '{checksum}', {len(statements)}, 'success', CURRENT_TIMESTAMP())"
+        ).result()
+
+
+def cmd_apply(args: argparse.Namespace) -> int:
+    connector_type = args.connector
+    dialect = (getattr(args, "dialect", "") or connector_type).lower()
+    started_ts = time.time()
+    mode = "sql_file" if args.sql_file else "model_diff"
+    policy_results: List[Dict[str, str]] = []
+
+    if connector_type not in {"snowflake", "databricks", "bigquery"}:
+        print("Apply currently supports only snowflake, databricks, and bigquery.", file=sys.stderr)
+        return 1
+
+    if dialect not in {"snowflake", "databricks", "bigquery"}:
+        print(f"Unsupported apply dialect: {dialect}", file=sys.stderr)
+        return 1
+
+    if args.sql_file and (args.old or args.new):
+        print("Use either --sql-file or --old/--new, not both.", file=sys.stderr)
+        return 1
+
+    if not args.sql_file and not (args.old and args.new):
+        print("Provide --sql-file or both --old and --new.", file=sys.stderr)
+        return 1
+
+    if (args.old and not args.new) or (args.new and not args.old):
+        print("Both --old and --new are required together.", file=sys.stderr)
+        return 1
+
+    if args.sql_file:
+        sql_text = Path(args.sql_file).read_text(encoding="utf-8")
+    else:
+        schema = load_schema(args.model_schema)
+        old_model, old_issues = _validate_model_file(args.old, schema)
+        new_model, new_issues = _validate_model_file(args.new, schema)
+        _print_issue_block(f"Old model ({args.old})", old_issues)
+        _print_issue_block(f"New model ({args.new})", new_issues)
+        combined_issues = list(old_issues) + list(new_issues)
+        if has_errors(combined_issues):
+            print("Apply failed: validation errors detected.", file=sys.stderr)
+            return 1
+        if not getattr(args, "skip_policy_check", False):
+            policy_pack = load_policy_pack_with_inheritance(args.policy_pack)
+            evaluated = policy_issues(new_model, policy_pack)
+            _print_issue_block(f"Policy evaluation ({args.policy_pack})", evaluated)
+            policy_results = _issues_as_json(evaluated)
+            if has_errors(evaluated):
+                print("Apply failed: policy check failed.", file=sys.stderr)
+                return 1
+        sql_text = generate_migration(old_model, new_model, dialect=dialect)
+
+    statements = _split_sql_statements(sql_text)
+    if not statements:
+        print("No executable SQL statements found.", file=sys.stderr)
+        return 1
+
+    migration_name = args.migration_name or _default_migration_name()
+    checksum = _sql_checksum(sql_text)
+    destructive_findings = _detect_destructive_statements(statements)
+
+    if destructive_findings and not getattr(args, "allow_destructive", False):
+        print(
+            "Apply blocked: destructive SQL detected. Re-run with --allow-destructive if this is intentional.",
+            file=sys.stderr,
+        )
+        for finding in destructive_findings[:5]:
+            print(
+                f"  - #{finding['statement_index']} {finding['kind']}: {finding['preview']}",
+                file=sys.stderr,
+            )
+        if len(destructive_findings) > 5:
+            print(f"  ... and {len(destructive_findings) - 5} more statement(s).", file=sys.stderr)
+        return 1
+
+    if getattr(args, "write_sql", ""):
+        Path(args.write_sql).write_text(sql_text.strip() + "\n", encoding="utf-8")
+
+    report: Dict[str, Any] = {
+        "connector": connector_type,
+        "dialect": dialect,
+        "mode": mode,
+        "status": "pending",
+        "migration_name": migration_name,
+        "checksum": checksum,
+        "statement_count": len(statements),
+        "destructive_statement_count": len(destructive_findings),
+        "destructive_statements": destructive_findings,
+        "policy_checked": mode == "model_diff" and not getattr(args, "skip_policy_check", False),
+        "policy_results": policy_results,
+        "skip_ledger": bool(args.skip_ledger),
+        "ledger_table": args.ledger_table,
+        "started_at_epoch": started_ts,
+        "started_at_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(started_ts)),
+    }
+
+    if getattr(args, "dry_run", False):
+        finished_ts = time.time()
+        report["status"] = "dry_run"
+        report["finished_at_epoch"] = finished_ts
+        report["finished_at_utc"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(finished_ts))
+        report["duration_ms"] = int((finished_ts - started_ts) * 1000)
+        if getattr(args, "report_json", ""):
+            _write_apply_report(args.report_json, report)
+        if getattr(args, "output_json", False):
+            print(json.dumps(report, indent=2))
+        else:
+            print(f"DRY RUN: {len(statements)} statements for {connector_type}")
+            print(f"Migration: {migration_name}")
+            print(f"Checksum: {checksum}")
+            if destructive_findings:
+                print(f"Destructive statements: {len(destructive_findings)} (allowed)")
+            print("\n" + sql_text.strip() + "\n")
+        return 0
+
+    if connector_type == "snowflake" and (not getattr(args, "host", "") or not getattr(args, "user", "") or not getattr(args, "database", "")):
+        print("Snowflake apply requires --host, --user, and --database.", file=sys.stderr)
+        return 1
+    if connector_type == "databricks" and (not getattr(args, "host", "") or not getattr(args, "token", "") or not getattr(args, "http_path", "")):
+        print("Databricks apply requires --host, --token, and --http-path.", file=sys.stderr)
+        return 1
+    if connector_type == "bigquery" and (not getattr(args, "project", "") or not getattr(args, "dataset", "")):
+        print("BigQuery apply requires --project and --dataset.", file=sys.stderr)
+        return 1
+
+    connector = get_connector(connector_type)
+    if connector is None:
+        print(f"Unknown connector: {connector_type}", file=sys.stderr)
+        return 1
+
+    ok, msg = connector.check_driver()
+    if not ok:
+        print(f"Driver check failed: {msg}", file=sys.stderr)
+        return 1
+
+    config = _build_connector_config(args)
+    try:
+        if connector_type == "snowflake":
+            _apply_snowflake(config, statements, migration_name, checksum, args.ledger_table, args.skip_ledger)
+        elif connector_type == "databricks":
+            _apply_databricks(config, statements, migration_name, checksum, args.ledger_table, args.skip_ledger)
+        elif connector_type == "bigquery":
+            _apply_bigquery(config, statements, migration_name, checksum, args.ledger_table, args.skip_ledger)
+    except ApplyExecutionError as e:
+        finished_ts = time.time()
+        report["status"] = "failed"
+        report["error"] = str(e)
+        report["failed_statement_index"] = e.statement_index
+        report["failed_statement_preview"] = _preview_sql(e.statement)
+        report["finished_at_epoch"] = finished_ts
+        report["finished_at_utc"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(finished_ts))
+        report["duration_ms"] = int((finished_ts - started_ts) * 1000)
+        if getattr(args, "report_json", ""):
+            _write_apply_report(args.report_json, report)
+        if getattr(args, "output_json", False):
+            print(json.dumps(report, indent=2))
+        else:
+            print(str(e), file=sys.stderr)
+        return 1
+    except Exception as e:
+        finished_ts = time.time()
+        report["status"] = "failed"
+        report["error"] = str(e)
+        report["finished_at_epoch"] = finished_ts
+        report["finished_at_utc"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(finished_ts))
+        report["duration_ms"] = int((finished_ts - started_ts) * 1000)
+        if getattr(args, "report_json", ""):
+            _write_apply_report(args.report_json, report)
+        if getattr(args, "output_json", False):
+            print(json.dumps(report, indent=2))
+        else:
+            print(f"Apply failed: {e}", file=sys.stderr)
+        return 1
+
+    finished_ts = time.time()
+    report["status"] = "success"
+    report["finished_at_epoch"] = finished_ts
+    report["finished_at_utc"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(finished_ts))
+    report["duration_ms"] = int((finished_ts - started_ts) * 1000)
+    if getattr(args, "report_json", ""):
+        _write_apply_report(args.report_json, report)
+
+    if getattr(args, "output_json", False):
+        print(json.dumps(report, indent=2))
+    else:
+        print(f"Applied migration '{migration_name}' ({len(statements)} statements) to {connector_type}.")
+        if not args.skip_ledger:
+            print(f"Ledger table: {args.ledger_table}")
+    return 0
+
+
 def cmd_completion(args: argparse.Namespace) -> int:
     shell = args.shell
     if shell == "bash":
@@ -1385,7 +1834,7 @@ def build_parser() -> argparse.ArgumentParser:
     import_dbt_parser.set_defaults(func=cmd_import_dbt)
 
     pull_parser = sub.add_parser("pull", help="Pull schema from a live database into a DuckCodeModeling model")
-    pull_parser.add_argument("connector", help="Connector type (postgres, mysql, snowflake, bigquery, databricks)")
+    pull_parser.add_argument("connector", help="Connector type (postgres, mysql, snowflake, bigquery, databricks, sqlserver, azure_sql, azure_fabric, redshift)")
     pull_parser.add_argument("--host", help="Database host (or Snowflake account, Databricks server hostname)")
     pull_parser.add_argument("--port", type=int, help="Database port")
     pull_parser.add_argument("--database", help="Database name")
@@ -1397,6 +1846,10 @@ def build_parser() -> argparse.ArgumentParser:
     pull_parser.add_argument("--dataset", help="BigQuery dataset")
     pull_parser.add_argument("--catalog", help="Databricks Unity Catalog name")
     pull_parser.add_argument("--token", help="Access token (Databricks)")
+    pull_parser.add_argument("--http-path", help="Databricks SQL Warehouse/Cluster HTTP path")
+    pull_parser.add_argument("--odbc-driver", help="ODBC driver for SQL Server-family connectors")
+    pull_parser.add_argument("--encrypt", help="SQL Server encryption setting (yes/no)")
+    pull_parser.add_argument("--trust-server-certificate", help="SQL Server TrustServerCertificate setting (yes/no)")
     pull_parser.add_argument("--private-key-path", help="Path to RSA private key PEM file (Snowflake key-pair auth)")
     pull_parser.add_argument("--tables", nargs="*", help="Only include these tables")
     pull_parser.add_argument("--exclude-tables", nargs="*", help="Exclude these tables")
@@ -1419,7 +1872,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     # Common connection args helper
     def _add_conn_args(p):
-        p.add_argument("connector", help="Connector type (postgres, mysql, snowflake, bigquery, databricks)")
+        p.add_argument("connector", help="Connector type (postgres, mysql, snowflake, bigquery, databricks, sqlserver, azure_sql, azure_fabric, redshift)")
         p.add_argument("--host", help="Database host")
         p.add_argument("--port", type=int, help="Database port")
         p.add_argument("--database", help="Database name")
@@ -1431,6 +1884,10 @@ def build_parser() -> argparse.ArgumentParser:
         p.add_argument("--dataset", help="BigQuery dataset")
         p.add_argument("--catalog", help="Databricks catalog")
         p.add_argument("--token", help="Access token")
+        p.add_argument("--http-path", help="Databricks SQL Warehouse/Cluster HTTP path")
+        p.add_argument("--odbc-driver", help="ODBC driver for SQL Server-family connectors")
+        p.add_argument("--encrypt", help="SQL Server encryption setting (yes/no)")
+        p.add_argument("--trust-server-certificate", help="SQL Server TrustServerCertificate setting (yes/no)")
         p.add_argument("--private-key-path", help="Path to RSA private key PEM file (Snowflake key-pair auth)")
         p.add_argument("--output-json", action="store_true", help="Print as JSON")
 
@@ -1509,6 +1966,38 @@ def build_parser() -> argparse.ArgumentParser:
     migrate_parser.add_argument("--dialect", default="postgres", choices=["postgres", "snowflake", "bigquery", "databricks"])
     migrate_parser.add_argument("--out", help="Output SQL migration file path")
     migrate_parser.set_defaults(func=cmd_migrate)
+
+    apply_parser = sub.add_parser("apply", help="Apply SQL/migration to a live database")
+    apply_parser.add_argument("connector", choices=["snowflake", "databricks", "bigquery"], help="Target connector")
+    apply_parser.add_argument("--dialect", default=None, choices=["snowflake", "bigquery", "databricks"], help="SQL dialect (defaults to connector)")
+    apply_parser.add_argument("--sql-file", help="Path to SQL file to apply")
+    apply_parser.add_argument("--old", help="Old model YAML path (for generated migration)")
+    apply_parser.add_argument("--new", help="New model YAML path (for generated migration)")
+    apply_parser.add_argument("--model-schema", default=_default_schema_path(), help="Path to model schema JSON")
+    apply_parser.add_argument("--host", help="Database host/account")
+    apply_parser.add_argument("--port", type=int, help="Database port")
+    apply_parser.add_argument("--database", help="Database name")
+    apply_parser.add_argument("--db-schema", help="Schema name")
+    apply_parser.add_argument("--user", help="Database user")
+    apply_parser.add_argument("--password", help="Database password or key passphrase")
+    apply_parser.add_argument("--warehouse", help="Snowflake warehouse")
+    apply_parser.add_argument("--project", help="BigQuery project ID")
+    apply_parser.add_argument("--dataset", help="BigQuery dataset")
+    apply_parser.add_argument("--catalog", help="Databricks catalog")
+    apply_parser.add_argument("--token", help="Databricks token")
+    apply_parser.add_argument("--http-path", help="Databricks SQL Warehouse/Cluster HTTP path")
+    apply_parser.add_argument("--private-key-path", help="Path to RSA private key PEM file (Snowflake key-pair auth)")
+    apply_parser.add_argument("--migration-name", help="Migration name override")
+    apply_parser.add_argument("--ledger-table", default="duckcodemodeling_migrations", help="Migration ledger table name")
+    apply_parser.add_argument("--skip-ledger", action="store_true", help="Skip writing migration ledger record")
+    apply_parser.add_argument("--policy-pack", default=_default_policy_path(), help="Policy pack for model-diff preflight checks")
+    apply_parser.add_argument("--skip-policy-check", action="store_true", help="Skip policy preflight checks for model-diff apply")
+    apply_parser.add_argument("--allow-destructive", action="store_true", help="Allow destructive SQL statements (DROP/TRUNCATE)")
+    apply_parser.add_argument("--write-sql", help="Write final SQL payload to file before execution")
+    apply_parser.add_argument("--report-json", help="Write structured apply report JSON to file")
+    apply_parser.add_argument("--output-json", action="store_true", help="Print structured apply report JSON")
+    apply_parser.add_argument("--dry-run", action="store_true", help="Print SQL and exit without execution")
+    apply_parser.set_defaults(func=cmd_apply)
 
     completion_parser = sub.add_parser("completion", help="Generate shell completion script")
     completion_parser.add_argument("shell", choices=["bash", "zsh", "fish"], help="Shell type")

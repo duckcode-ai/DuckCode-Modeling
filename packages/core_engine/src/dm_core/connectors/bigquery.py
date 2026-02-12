@@ -119,6 +119,7 @@ class BigQueryConnector(BaseConnector):
                 "description": f"Pulled from BigQuery {project}.{dataset}.{table_name} on {date.today().isoformat()}",
                 "fields": [],
                 "schema": dataset,
+                "database": project,
             }
 
         # --- Columns ---

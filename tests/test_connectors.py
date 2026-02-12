@@ -3,7 +3,7 @@
 Covers:
   - Spark schema importer (StructType, array, Databricks-style, type mapping)
   - Connector framework (registry, config, result)
-  - Connector driver checks (all 5 connectors)
+  - Connector driver checks (all major connectors including SQL Server, Azure SQL, Fabric, Redshift)
   - CLI parser entries (pull, connectors, import spark-schema)
   - Removal verification (old importers gone)
 """
@@ -36,6 +36,8 @@ from dm_core.connectors.mysql import MySQLConnector
 from dm_core.connectors.snowflake import SnowflakeConnector
 from dm_core.connectors.bigquery import BigQueryConnector
 from dm_core.connectors.databricks import DatabricksConnector
+from dm_core.connectors.sqlserver import SQLServerConnector, AzureSQLConnector, AzureFabricConnector
+from dm_core.connectors.redshift import RedshiftConnector
 
 
 FIXTURES = ROOT / "tests" / "fixtures"
@@ -283,13 +285,17 @@ class TestConnectorFramework(unittest.TestCase):
 
     def test_list_connectors(self):
         connectors = list_connectors()
-        self.assertGreaterEqual(len(connectors), 5)
+        self.assertGreaterEqual(len(connectors), 9)
         types = {c["type"] for c in connectors}
         self.assertIn("postgres", types)
         self.assertIn("mysql", types)
         self.assertIn("snowflake", types)
         self.assertIn("bigquery", types)
         self.assertIn("databricks", types)
+        self.assertIn("sqlserver", types)
+        self.assertIn("azure_sql", types)
+        self.assertIn("azure_fabric", types)
+        self.assertIn("redshift", types)
 
     def test_get_connector_postgres(self):
         conn = get_connector("postgres")
@@ -316,6 +322,26 @@ class TestConnectorFramework(unittest.TestCase):
         conn = get_connector("databricks")
         self.assertIsNotNone(conn)
         self.assertEqual(conn.connector_type, "databricks")
+
+    def test_get_connector_sqlserver(self):
+        conn = get_connector("sqlserver")
+        self.assertIsNotNone(conn)
+        self.assertEqual(conn.connector_type, "sqlserver")
+
+    def test_get_connector_azure_sql(self):
+        conn = get_connector("azure_sql")
+        self.assertIsNotNone(conn)
+        self.assertEqual(conn.connector_type, "azure_sql")
+
+    def test_get_connector_azure_fabric(self):
+        conn = get_connector("azure_fabric")
+        self.assertIsNotNone(conn)
+        self.assertEqual(conn.connector_type, "azure_fabric")
+
+    def test_get_connector_redshift(self):
+        conn = get_connector("redshift")
+        self.assertIsNotNone(conn)
+        self.assertEqual(conn.connector_type, "redshift")
 
     def test_get_connector_unknown(self):
         conn = get_connector("nonexistent_db")
@@ -434,6 +460,30 @@ class TestDriverChecks(unittest.TestCase):
         self.assertIsInstance(ok, bool)
         self.assertIsInstance(msg, str)
 
+    def test_sqlserver_driver_check(self):
+        conn = get_connector("sqlserver")
+        ok, msg = conn.check_driver()
+        self.assertIsInstance(ok, bool)
+        self.assertIsInstance(msg, str)
+
+    def test_azure_sql_driver_check(self):
+        conn = get_connector("azure_sql")
+        ok, msg = conn.check_driver()
+        self.assertIsInstance(ok, bool)
+        self.assertIsInstance(msg, str)
+
+    def test_azure_fabric_driver_check(self):
+        conn = get_connector("azure_fabric")
+        ok, msg = conn.check_driver()
+        self.assertIsInstance(ok, bool)
+        self.assertIsInstance(msg, str)
+
+    def test_redshift_driver_check(self):
+        conn = get_connector("redshift")
+        ok, msg = conn.check_driver()
+        self.assertIsInstance(ok, bool)
+        self.assertIsInstance(msg, str)
+
 
 # ===========================================================================
 # CLI parser
@@ -470,6 +520,55 @@ class TestCLIParser(unittest.TestCase):
         args = parser.parse_args(["pull", "databricks", "--host", "host.databricks.com", "--token", "abc", "--catalog", "main"])
         self.assertEqual(args.token, "abc")
         self.assertEqual(args.catalog, "main")
+
+    def test_pull_parser_databricks_http_path(self):
+        from dm_cli.main import build_parser
+        parser = build_parser()
+        args = parser.parse_args([
+            "pull", "databricks", "--host", "host.databricks.com", "--token", "abc",
+            "--http-path", "/sql/1.0/warehouses/123",
+        ])
+        self.assertEqual(args.http_path, "/sql/1.0/warehouses/123")
+
+    def test_pull_parser_sqlserver(self):
+        from dm_cli.main import build_parser
+        parser = build_parser()
+        args = parser.parse_args(["pull", "sqlserver", "--host", "sql.example.com", "--database", "warehouse", "--user", "svc"])
+        self.assertEqual(args.connector, "sqlserver")
+        self.assertEqual(args.database, "warehouse")
+
+    def test_pull_parser_sqlserver_odbc_options(self):
+        from dm_cli.main import build_parser
+        parser = build_parser()
+        args = parser.parse_args([
+            "pull", "sqlserver", "--host", "sql.example.com", "--database", "warehouse",
+            "--odbc-driver", "ODBC Driver 17 for SQL Server", "--encrypt", "no",
+            "--trust-server-certificate", "yes",
+        ])
+        self.assertEqual(args.odbc_driver, "ODBC Driver 17 for SQL Server")
+        self.assertEqual(args.encrypt, "no")
+        self.assertEqual(args.trust_server_certificate, "yes")
+
+    def test_pull_parser_azure_sql(self):
+        from dm_cli.main import build_parser
+        parser = build_parser()
+        args = parser.parse_args(["pull", "azure_sql", "--host", "srv.database.windows.net", "--database", "analytics"])
+        self.assertEqual(args.connector, "azure_sql")
+        self.assertEqual(args.host, "srv.database.windows.net")
+
+    def test_pull_parser_redshift(self):
+        from dm_cli.main import build_parser
+        parser = build_parser()
+        args = parser.parse_args(["pull", "redshift", "--host", "cluster.redshift.amazonaws.com", "--database", "dev"])
+        self.assertEqual(args.connector, "redshift")
+        self.assertEqual(args.database, "dev")
+
+    def test_pull_parser_azure_fabric(self):
+        from dm_cli.main import build_parser
+        parser = build_parser()
+        args = parser.parse_args(["pull", "azure_fabric", "--host", "workspace.fabric.microsoft.com", "--database", "SalesWarehouse"])
+        self.assertEqual(args.connector, "azure_fabric")
+        self.assertEqual(args.database, "SalesWarehouse")
 
     def test_pull_parser_test_flag(self):
         from dm_cli.main import build_parser
@@ -564,6 +663,29 @@ class TestCLIParser(unittest.TestCase):
         config = _build_connector_config(args)
         self.assertEqual(config.host, "127.0.0.1")
         self.assertEqual(config.port, 5432)
+
+    def test_build_connector_config_sqlserver_odbc_options(self):
+        from dm_cli.main import _build_connector_config, build_parser
+        parser = build_parser()
+        args = parser.parse_args([
+            "schemas", "sqlserver", "--host", "sql.example.com", "--database", "warehouse",
+            "--odbc-driver", "ODBC Driver 17 for SQL Server", "--encrypt", "no",
+            "--trust-server-certificate", "yes",
+        ])
+        config = _build_connector_config(args)
+        self.assertEqual(config.extra.get("odbc_driver"), "ODBC Driver 17 for SQL Server")
+        self.assertEqual(config.extra.get("encrypt"), "no")
+        self.assertEqual(config.extra.get("trust_server_certificate"), "yes")
+
+    def test_build_connector_config_databricks_http_path(self):
+        from dm_cli.main import _build_connector_config, build_parser
+        parser = build_parser()
+        args = parser.parse_args([
+            "schemas", "databricks", "--host", "dbc.example.com", "--token", "abc",
+            "--http-path", "/sql/1.0/warehouses/123",
+        ])
+        config = _build_connector_config(args)
+        self.assertEqual(config.extra.get("http_path"), "/sql/1.0/warehouses/123")
 
     def test_connectors_parser(self):
         from dm_cli.main import build_parser
@@ -670,6 +792,10 @@ class TestCLIIntegration(unittest.TestCase):
         self.assertIn("snowflake", result.stdout)
         self.assertIn("bigquery", result.stdout)
         self.assertIn("databricks", result.stdout)
+        self.assertIn("sqlserver", result.stdout)
+        self.assertIn("azure_sql", result.stdout)
+        self.assertIn("azure_fabric", result.stdout)
+        self.assertIn("redshift", result.stdout)
 
     def test_connectors_json_command(self):
         import subprocess
@@ -735,6 +861,12 @@ class TestModuleFiles(unittest.TestCase):
 
     def test_connectors_databricks(self):
         self.assertTrue((ROOT / "packages" / "core_engine" / "src" / "dm_core" / "connectors" / "databricks.py").exists())
+
+    def test_connectors_sqlserver(self):
+        self.assertTrue((ROOT / "packages" / "core_engine" / "src" / "dm_core" / "connectors" / "sqlserver.py").exists())
+
+    def test_connectors_redshift(self):
+        self.assertTrue((ROOT / "packages" / "core_engine" / "src" / "dm_core" / "connectors" / "redshift.py").exists())
 
 
 if __name__ == "__main__":

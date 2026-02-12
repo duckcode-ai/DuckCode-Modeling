@@ -360,6 +360,7 @@ class TestCompletion(unittest.TestCase):
         self.assertIn("policy-check", output)
         self.assertIn("doctor", output)
         self.assertIn("migrate", output)
+        self.assertIn("apply", output)
         self.assertIn("watch", output)
 
     def test_zsh_completion(self):
@@ -369,6 +370,7 @@ class TestCompletion(unittest.TestCase):
         self.assertIn("validate", output)
         self.assertIn("doctor", output)
         self.assertIn("migrate", output)
+        self.assertIn("apply", output)
 
     def test_fish_completion(self):
         output = generate_fish_completion()
@@ -376,6 +378,7 @@ class TestCompletion(unittest.TestCase):
         self.assertIn("validate", output)
         self.assertIn("doctor", output)
         self.assertIn("migrate", output)
+        self.assertIn("apply", output)
 
     def test_bash_includes_subcommands(self):
         output = generate_bash_completion()
@@ -447,6 +450,55 @@ class TestCLIParser(unittest.TestCase):
         args = parser.parse_args(["migrate", "old.yaml", "new.yaml", "--out", "migration.sql"])
         self.assertEqual(args.out, "migration.sql")
 
+    def test_apply_parser_sql_file_dry_run(self):
+        from dm_cli.main import build_parser
+        parser = build_parser()
+        args = parser.parse_args([
+            "apply", "snowflake", "--sql-file", "migration.sql", "--dry-run", "--dialect", "snowflake"
+        ])
+        self.assertEqual(args.connector, "snowflake")
+        self.assertEqual(args.sql_file, "migration.sql")
+        self.assertTrue(args.dry_run)
+
+    def test_apply_parser_old_new(self):
+        from dm_cli.main import build_parser
+        parser = build_parser()
+        args = parser.parse_args([
+            "apply", "bigquery", "--old", "old.model.yaml", "--new", "new.model.yaml", "--project", "p", "--dataset", "d"
+        ])
+        self.assertEqual(args.connector, "bigquery")
+        self.assertEqual(args.old, "old.model.yaml")
+        self.assertEqual(args.new, "new.model.yaml")
+        self.assertEqual(args.project, "p")
+        self.assertEqual(args.dataset, "d")
+
+    def test_apply_parser_guardrail_and_report_flags(self):
+        from dm_cli.main import build_parser
+        parser = build_parser()
+        args = parser.parse_args([
+            "apply", "snowflake", "--sql-file", "migration.sql", "--allow-destructive",
+            "--policy-pack", "policies/default.policy.yaml", "--skip-policy-check",
+            "--write-sql", "final.sql", "--report-json", "apply_report.json", "--output-json",
+        ])
+        self.assertTrue(args.allow_destructive)
+        self.assertEqual(args.policy_pack, "policies/default.policy.yaml")
+        self.assertTrue(args.skip_policy_check)
+        self.assertEqual(args.write_sql, "final.sql")
+        self.assertEqual(args.report_json, "apply_report.json")
+        self.assertTrue(args.output_json)
+
+    def test_detect_destructive_statements(self):
+        from dm_cli.main import _detect_destructive_statements
+        findings = _detect_destructive_statements([
+            "CREATE TABLE demo (id INT)",
+            "DROP TABLE demo",
+            "ALTER TABLE demo DROP COLUMN legacy_col",
+        ])
+        self.assertEqual(len(findings), 2)
+        self.assertEqual(findings[0]["statement_index"], 2)
+        self.assertEqual(findings[0]["kind"], "DROP TABLE")
+        self.assertEqual(findings[1]["statement_index"], 3)
+
     def test_completion_parser_bash(self):
         from dm_cli.main import build_parser
         parser = build_parser()
@@ -517,6 +569,74 @@ class TestCLIIntegration(unittest.TestCase):
         )
         self.assertEqual(result.returncode, 0)
         self.assertIn("Migration:", result.stdout)
+
+    def test_apply_dry_run_runs(self):
+        import subprocess
+        with tempfile.NamedTemporaryFile(suffix=".sql", delete=False) as f:
+            f.write(b"CREATE TABLE t1 (id INT);\n")
+            sql_path = f.name
+        try:
+            result = subprocess.run(
+                [sys.executable, "-m", "dm_cli.main", "apply", "snowflake", "--sql-file", sql_path, "--dry-run", "--dialect", "snowflake"],
+                capture_output=True, text=True, cwd=str(ROOT),
+                env={**os.environ, "PYTHONPATH": str(ROOT / "packages" / "core_engine" / "src") + ":" + str(ROOT / "packages" / "cli" / "src")},
+            )
+            self.assertEqual(result.returncode, 0)
+            self.assertIn("DRY RUN", result.stdout)
+        finally:
+            os.unlink(sql_path)
+
+
+    def test_apply_dry_run_blocks_destructive_sql(self):
+        import subprocess
+        with tempfile.NamedTemporaryFile(suffix=".sql", delete=False) as f:
+            f.write(b"DROP TABLE t1;\n")
+            sql_path = f.name
+        try:
+            result = subprocess.run(
+                [sys.executable, "-m", "dm_cli.main", "apply", "snowflake", "--sql-file", sql_path, "--dry-run", "--dialect", "snowflake"],
+                capture_output=True, text=True, cwd=str(ROOT),
+                env={**os.environ, "PYTHONPATH": str(ROOT / "packages" / "core_engine" / "src") + ":" + str(ROOT / "packages" / "cli" / "src")},
+            )
+            self.assertEqual(result.returncode, 1)
+            self.assertIn("destructive SQL detected", result.stderr)
+        finally:
+            os.unlink(sql_path)
+
+    def test_apply_dry_run_allow_destructive_with_report(self):
+        import subprocess
+        with tempfile.NamedTemporaryFile(suffix=".sql", delete=False) as f:
+            f.write(b"DROP TABLE t1;\n")
+            sql_path = f.name
+        with tempfile.NamedTemporaryFile(suffix=".json", delete=False) as f_report:
+            report_path = f_report.name
+        with tempfile.NamedTemporaryFile(suffix=".sql", delete=False) as f_write:
+            write_sql_path = f_write.name
+        try:
+            result = subprocess.run(
+                [
+                    sys.executable, "-m", "dm_cli.main", "apply", "snowflake", "--sql-file", sql_path,
+                    "--dry-run", "--dialect", "snowflake", "--allow-destructive",
+                    "--report-json", report_path, "--write-sql", write_sql_path, "--output-json",
+                ],
+                capture_output=True, text=True, cwd=str(ROOT),
+                env={**os.environ, "PYTHONPATH": str(ROOT / "packages" / "core_engine" / "src") + ":" + str(ROOT / "packages" / "cli" / "src")},
+            )
+            self.assertEqual(result.returncode, 0)
+            payload = json.loads(result.stdout)
+            self.assertEqual(payload.get("status"), "dry_run")
+            self.assertEqual(payload.get("destructive_statement_count"), 1)
+
+            report_payload = json.loads(Path(report_path).read_text())
+            self.assertEqual(report_payload.get("status"), "dry_run")
+            self.assertEqual(report_payload.get("destructive_statement_count"), 1)
+
+            written_sql = Path(write_sql_path).read_text()
+            self.assertIn("DROP TABLE t1", written_sql)
+        finally:
+            os.unlink(sql_path)
+            os.unlink(report_path)
+            os.unlink(write_sql_path)
 
     def test_completion_bash_runs(self):
         import subprocess

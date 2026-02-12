@@ -17,6 +17,11 @@ export async function fetchProjects() {
   return data.projects || [];
 }
 
+export async function fetchConnections() {
+  const data = await request("/connections");
+  return data.connections || [];
+}
+
 export async function addProject(name, path, createIfMissing = false) {
   const data = await request("/projects", {
     method: "POST",

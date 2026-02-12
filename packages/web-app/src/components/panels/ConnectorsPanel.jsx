@@ -69,9 +69,47 @@ const CONNECTOR_FIELDS = {
   ],
   databricks: [
     { key: "host", label: "Server Hostname", placeholder: "adb-xxx.azuredatabricks.net", required: true },
+    { key: "http_path", label: "HTTP Path", placeholder: "/sql/1.0/warehouses/xxxxxxxx", required: true },
     { key: "port", label: "Port", placeholder: "443", type: "number" },
     { key: "token", label: "Access Token", placeholder: "dapi...", secret: true, required: true },
     { key: "catalog", label: "Catalog", placeholder: "main" },
+  ],
+  sqlserver: [
+    { key: "host", label: "Host", placeholder: "sqlserver.company.internal", required: true },
+    { key: "port", label: "Port", placeholder: "1433", type: "number" },
+    { key: "database", label: "Database", placeholder: "warehouse", required: true },
+    { key: "user", label: "User", placeholder: "svc_user", required: true },
+    { key: "password", label: "Password", placeholder: "••••••••", secret: true },
+    { key: "odbc_driver", label: "ODBC Driver", placeholder: "ODBC Driver 18 for SQL Server" },
+    { key: "encrypt", label: "Encrypt", placeholder: "yes" },
+    { key: "trust_server_certificate", label: "Trust Server Certificate", placeholder: "yes" },
+  ],
+  azure_sql: [
+    { key: "host", label: "Server", placeholder: "myserver.database.windows.net", required: true },
+    { key: "port", label: "Port", placeholder: "1433", type: "number" },
+    { key: "database", label: "Database", placeholder: "analytics", required: true },
+    { key: "user", label: "User", placeholder: "user", required: true },
+    { key: "password", label: "Password", placeholder: "••••••••", secret: true },
+    { key: "odbc_driver", label: "ODBC Driver", placeholder: "ODBC Driver 18 for SQL Server" },
+    { key: "encrypt", label: "Encrypt", placeholder: "yes" },
+    { key: "trust_server_certificate", label: "Trust Server Certificate", placeholder: "yes" },
+  ],
+  redshift: [
+    { key: "host", label: "Cluster Endpoint", placeholder: "mycluster.abc123.us-east-1.redshift.amazonaws.com", required: true },
+    { key: "port", label: "Port", placeholder: "5439", type: "number" },
+    { key: "database", label: "Database", placeholder: "dev", required: true },
+    { key: "user", label: "User", placeholder: "awsuser", required: true },
+    { key: "password", label: "Password", placeholder: "••••••••", secret: true },
+  ],
+  azure_fabric: [
+    { key: "host", label: "SQL Endpoint", placeholder: "myworkspace.datawarehouse.fabric.microsoft.com", required: true },
+    { key: "port", label: "Port", placeholder: "1433", type: "number" },
+    { key: "database", label: "Warehouse", placeholder: "SalesWarehouse", required: true },
+    { key: "user", label: "User", placeholder: "fabric_user", required: true },
+    { key: "password", label: "Password", placeholder: "••••••••", secret: true },
+    { key: "odbc_driver", label: "ODBC Driver", placeholder: "ODBC Driver 18 for SQL Server" },
+    { key: "encrypt", label: "Encrypt", placeholder: "yes" },
+    { key: "trust_server_certificate", label: "Trust Server Certificate", placeholder: "yes" },
   ],
 };
 
@@ -123,6 +161,38 @@ const CONNECTOR_META = {
     bg: "bg-[#fff0ef]",
     border: "border-[#ffd3cf]",
     accent: "bg-[#ea4335]",
+  },
+  sqlserver: {
+    name: "SQL Server",
+    tag: "Enterprise",
+    color: "text-[#991b1b]",
+    bg: "bg-[#fef2f2]",
+    border: "border-[#fecaca]",
+    accent: "bg-[#b91c1c]",
+  },
+  azure_sql: {
+    name: "Azure SQL",
+    tag: "Managed",
+    color: "text-[#0f4c81]",
+    bg: "bg-[#eff6ff]",
+    border: "border-[#bfdbfe]",
+    accent: "bg-[#0078d4]",
+  },
+  redshift: {
+    name: "Redshift",
+    tag: "Warehouse",
+    color: "text-[#7c3aed]",
+    bg: "bg-[#f5f3ff]",
+    border: "border-[#ddd6fe]",
+    accent: "bg-[#ef4444]",
+  },
+  azure_fabric: {
+    name: "Azure Fabric",
+    tag: "Lakehouse",
+    color: "text-[#1e3a8a]",
+    bg: "bg-[#eef2ff]",
+    border: "border-[#c7d2fe]",
+    accent: "bg-[#1d4ed8]",
   },
 };
 
@@ -201,6 +271,39 @@ function deriveModelStemFromDbtPath(relPath, prefix = "") {
   return sanitizeModelStem(prefixed, "dbt_model");
 }
 
+function formatUtcMigrationTimestamp(date = new Date()) {
+  const yyyy = date.getUTCFullYear();
+  const mm = String(date.getUTCMonth() + 1).padStart(2, "0");
+  const dd = String(date.getUTCDate()).padStart(2, "0");
+  const hh = String(date.getUTCHours()).padStart(2, "0");
+  const min = String(date.getUTCMinutes()).padStart(2, "0");
+  const ss = String(date.getUTCSeconds()).padStart(2, "0");
+  return `${yyyy}${mm}${dd}${hh}${min}${ss}`;
+}
+
+function buildDefaultMigrationPath(projectPath, modelPath, connectorType = "snowflake") {
+  const basePath = normalizePath(projectPath || "");
+  const modelName = String(modelPath || "model")
+    .replace(/\\/g, "/")
+    .split("/")
+    .pop() || "model";
+  const modelStem = sanitizeModelStem(modelName.replace(/\.model\.ya?ml$/i, ""), "model");
+  const stamp = formatUtcMigrationTimestamp();
+  const connectorFolder = sanitizeModelStem(String(connectorType || "snowflake"), "snowflake");
+  return joinPath(basePath, `migrations/${connectorFolder}/${stamp}__${modelStem}.sql`);
+}
+
+const FORWARD_GITOPS_CONNECTORS = new Set(["snowflake", "databricks", "bigquery"]);
+
+function toProjectRelativePath(projectPath, filePath) {
+  const project = normalizePath(projectPath || "");
+  const target = String(filePath || "").replace(/\\/g, "/");
+  if (!project || !target) return "";
+  const projectPrefix = `${project}/`;
+  if (!target.startsWith(projectPrefix)) return target;
+  return target.slice(projectPrefix.length);
+}
+
 export default function ConnectorsPanel() {
   const [connectors, setConnectors] = useState(null);
   const [savedConnections, setSavedConnections] = useState([]);
@@ -240,10 +343,38 @@ export default function ConnectorsPanel() {
   const [dbtOverwrite, setDbtOverwrite] = useState(false);
   const [dbtResult, setDbtResult] = useState(null);
 
+  // GitOps forward engineering
+  const [forwardProjectId, setForwardProjectId] = useState("");
+  const [forwardModelFiles, setForwardModelFiles] = useState([]);
+  const [forwardOldModelPath, setForwardOldModelPath] = useState("");
+  const [forwardNewModelPath, setForwardNewModelPath] = useState("");
+  const [forwardSqlPreview, setForwardSqlPreview] = useState("");
+  const [forwardMigrationOutPath, setForwardMigrationOutPath] = useState("");
+  const [forwardGeneratedPath, setForwardGeneratedPath] = useState("");
+  const [forwardCommitMessage, setForwardCommitMessage] = useState("chore(model): add generated migration");
+  const [forwardGitStatus, setForwardGitStatus] = useState(null);
+  const [forwardCommitResult, setForwardCommitResult] = useState(null);
+  const [forwardBranchName, setForwardBranchName] = useState("");
+  const [forwardBaseBranch, setForwardBaseBranch] = useState("main");
+  const [forwardPrTitle, setForwardPrTitle] = useState("model: generated migration");
+  const [forwardPrBody, setForwardPrBody] = useState("Automated migration generated by DuckCodeModeling GitOps flow.");
+  const [forwardGithubToken, setForwardGithubToken] = useState("");
+  const [forwardPushResult, setForwardPushResult] = useState(null);
+  const [forwardPrResult, setForwardPrResult] = useState(null);
+  const [forwardError, setForwardError] = useState(null);
+  const [forwardLoading, setForwardLoading] = useState(false);
+  const [forwardStaging, setForwardStaging] = useState(false);
+  const [forwardCommitting, setForwardCommitting] = useState(false);
+  const [forwardPushing, setForwardPushing] = useState(false);
+  const [forwardCreatingPr, setForwardCreatingPr] = useState(false);
+
   const {
     loadImportedYaml,
     loadMultipleImportedYaml,
     activeProjectId,
+    activeFile,
+    isDirty,
+    saveCurrentFile,
     projects,
     openFile,
     loadProjects,
@@ -295,6 +426,24 @@ export default function ConnectorsPanel() {
     setDbtAutoOpen(true);
     setDbtOverwrite(false);
     setDbtResult(null);
+    setForwardProjectId("");
+    setForwardModelFiles([]);
+    setForwardOldModelPath("");
+    setForwardNewModelPath("");
+    setForwardSqlPreview("");
+    setForwardMigrationOutPath("");
+    setForwardGeneratedPath("");
+    setForwardCommitMessage("chore(model): add generated migration");
+    setForwardGitStatus(null);
+    setForwardCommitResult(null);
+    setForwardBranchName("");
+    setForwardBaseBranch("main");
+    setForwardPrTitle("model: generated migration");
+    setForwardPrBody("Automated migration generated by DuckCodeModeling GitOps flow.");
+    setForwardGithubToken("");
+    setForwardPushResult(null);
+    setForwardPrResult(null);
+    setForwardError(null);
     setError(null);
   };
 
@@ -714,6 +863,369 @@ export default function ConnectorsPanel() {
     }
   };
 
+
+  const forwardConnectorSupported = FORWARD_GITOPS_CONNECTORS.has(selectedConnector);
+  const forwardDialect = forwardConnectorSupported ? selectedConnector : "snowflake";
+  const forwardConnectorLabel = CONNECTOR_META[forwardDialect]?.name || "Warehouse";
+
+  const refreshForwardModelFiles = useCallback(async (projectId) => {
+    if (!projectId) {
+      setForwardModelFiles([]);
+      return;
+    }
+    try {
+      const data = await apiGet(`/api/projects/${projectId}/files`);
+      const files = (data.files || [])
+        .filter((f) => /\.model\.ya?ml$/i.test(String(f.name || "")))
+        .map((f) => ({ name: f.name, fullPath: f.fullPath }));
+      setForwardModelFiles(files);
+
+      if (files.length > 0) {
+        setForwardOldModelPath((prev) => prev || files[0].fullPath);
+        setForwardNewModelPath((prev) => {
+          if (prev) return prev;
+          if (activeFile?.fullPath && files.some((f) => f.fullPath === activeFile.fullPath)) {
+            return activeFile.fullPath;
+          }
+          return files.length > 1 ? files[1].fullPath : files[0].fullPath;
+        });
+      }
+    } catch (err) {
+      setForwardError(err.message || String(err));
+      setForwardModelFiles([]);
+    }
+  }, [activeFile?.fullPath]);
+
+  useEffect(() => {
+    if (!forwardConnectorSupported || step !== 3 || !pullResult) return;
+    const projectId = forwardProjectId || targetProjectId || activeProjectId;
+    if (!projectId) return;
+
+    if (!forwardProjectId && (targetProjectId || activeProjectId)) {
+      setForwardProjectId(targetProjectId || activeProjectId || "");
+    }
+
+    refreshForwardModelFiles(projectId);
+  }, [
+    forwardConnectorSupported,
+    step,
+    pullResult,
+    forwardProjectId,
+    targetProjectId,
+    activeProjectId,
+    refreshForwardModelFiles,
+  ]);
+
+  useEffect(() => {
+    if (!forwardConnectorSupported || step !== 3 || !pullResult) return;
+    const projectId = forwardProjectId || targetProjectId || activeProjectId;
+    if (!projectId) return;
+
+    let cancelled = false;
+    (async () => {
+      try {
+        const status = await apiGet(`/api/git/status?projectId=${encodeURIComponent(projectId)}`);
+        if (cancelled) return;
+        setForwardGitStatus(status);
+        if (status?.branch && status.branch !== "HEAD") {
+          setForwardBranchName((prev) => prev || status.branch);
+        }
+      } catch (_err) {
+        if (!cancelled) setForwardGitStatus(null);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [forwardConnectorSupported, step, pullResult, forwardProjectId, targetProjectId, activeProjectId]);
+
+  const validateForwardModelSelection = () => {
+    const oldModel = String(forwardOldModelPath || "").trim();
+    const newModel = String(forwardNewModelPath || "").trim();
+    if (!oldModel || !newModel) {
+      setForwardError("Select both old and new model files.");
+      return null;
+    }
+    if (oldModel === newModel) {
+      setForwardError("Old and new model files are the same. Choose two versions for migration diff.");
+      return null;
+    }
+    return { oldModel, newModel };
+  };
+
+  const getForwardProjectContext = () => {
+    const projectId = forwardProjectId || targetProjectId || activeProjectId;
+    if (!projectId) {
+      setForwardError("Select a project for GitOps migration flow.");
+      return null;
+    }
+    const project = (projects || []).find((p) => p.id === projectId) || null;
+    if (!project) {
+      setForwardError("Selected project not found.");
+      return null;
+    }
+    return { projectId, project };
+  };
+
+  useEffect(() => {
+    if (!forwardConnectorSupported || step !== 3 || !pullResult) return;
+    const project = (projects || []).find((p) => p.id === (forwardProjectId || targetProjectId || activeProjectId)) || null;
+    if (!project) return;
+    if (forwardMigrationOutPath) return;
+
+    const preferredModel = String(forwardNewModelPath || activeFile?.fullPath || "").trim();
+    if (!preferredModel) return;
+    setForwardMigrationOutPath(buildDefaultMigrationPath(project.path, preferredModel, forwardDialect));
+  }, [
+    forwardConnectorSupported,
+    step,
+    pullResult,
+    projects,
+    forwardProjectId,
+    targetProjectId,
+    activeProjectId,
+    forwardNewModelPath,
+    activeFile?.fullPath,
+    forwardDialect,
+    forwardMigrationOutPath,
+  ]);
+
+  const handleForwardPreviewSql = async () => {
+    setForwardError(null);
+
+    const selected = validateForwardModelSelection();
+    if (!selected) return;
+
+    setForwardLoading(true);
+    try {
+      const data = await apiPost("/api/forward/migrate", {
+        old_model: selected.oldModel,
+        new_model: selected.newModel,
+        dialect: forwardDialect,
+      });
+      setForwardSqlPreview(String(data.sql || data.output || "").trim());
+      addToast?.({ type: "success", message: "Generated migration SQL preview." });
+    } catch (err) {
+      setForwardError(err.message || String(err));
+    } finally {
+      setForwardLoading(false);
+    }
+  };
+
+  const handleForwardGenerateMigrationFile = async () => {
+    setForwardError(null);
+
+    const selected = validateForwardModelSelection();
+    if (!selected) return;
+
+    if (isDirty && activeFile?.fullPath && activeFile.fullPath === selected.newModel) {
+      setForwardError("Current model has unsaved changes. Save it before generating migration SQL.");
+      return;
+    }
+
+    const context = getForwardProjectContext();
+    if (!context) return;
+
+    const outPath = String(forwardMigrationOutPath || "").trim() || buildDefaultMigrationPath(context.project.path, selected.newModel, forwardDialect);
+
+    setForwardLoading(true);
+    setForwardCommitResult(null);
+    setForwardPushResult(null);
+    setForwardPrResult(null);
+    try {
+      await apiPost("/api/forward/migrate", {
+        old_model: selected.oldModel,
+        new_model: selected.newModel,
+        dialect: forwardDialect,
+        out: outPath,
+      });
+
+      const saved = await apiGet(`/api/files?path=${encodeURIComponent(outPath)}`);
+      setForwardSqlPreview(String(saved?.content || "").trim());
+      setForwardGeneratedPath(outPath);
+      setForwardMigrationOutPath(outPath);
+      setForwardGitStatus(null);
+      addToast?.({ type: "success", message: "Generated migration SQL file for GitOps flow." });
+    } catch (err) {
+      setForwardError(err.message || String(err));
+    } finally {
+      setForwardLoading(false);
+    }
+  };
+
+  const getForwardGitPaths = (projectPath) => {
+    const paths = [];
+    const newModel = String(forwardNewModelPath || "").trim();
+    const generatedPath = String(forwardGeneratedPath || forwardMigrationOutPath || "").trim();
+    if (newModel) paths.push(toProjectRelativePath(projectPath, newModel));
+    if (generatedPath) paths.push(toProjectRelativePath(projectPath, generatedPath));
+    return Array.from(new Set(paths.filter(Boolean)));
+  };
+
+  const handleForwardStageForCommit = async () => {
+    setForwardError(null);
+    const context = getForwardProjectContext();
+    if (!context) return;
+
+    const paths = getForwardGitPaths(context.project.path);
+    if (paths.length === 0) {
+      setForwardError("Generate migration SQL first so files can be staged.");
+      return;
+    }
+
+    setForwardStaging(true);
+    try {
+      const status = await apiPost("/api/git/stage", {
+        projectId: context.projectId,
+        paths,
+      });
+      setForwardGitStatus(status);
+      addToast?.({ type: "success", message: "Staged YAML + migration SQL for commit." });
+    } catch (err) {
+      setForwardError(err.message || String(err));
+    } finally {
+      setForwardStaging(false);
+    }
+  };
+
+  const handleForwardCommit = async () => {
+    setForwardError(null);
+    const context = getForwardProjectContext();
+    if (!context) return;
+
+    const message = String(forwardCommitMessage || "").trim();
+    if (!message) {
+      setForwardError("Commit message is required.");
+      return;
+    }
+
+    const paths = getForwardGitPaths(context.project.path);
+    if (paths.length === 0) {
+      setForwardError("No files selected for commit. Generate and stage migration first.");
+      return;
+    }
+
+    setForwardCommitting(true);
+    setForwardPrResult(null);
+    try {
+      const commit = await apiPost("/api/git/commit", {
+        projectId: context.projectId,
+        message,
+        paths,
+      });
+      setForwardCommitResult(commit);
+      const status = await apiGet(`/api/git/status?projectId=${encodeURIComponent(context.projectId)}`);
+      setForwardGitStatus(status);
+      addToast?.({
+        type: "success",
+        message: `Committed migration changes (${String(commit.commitHash || "").slice(0, 8)}).`,
+      });
+    } catch (err) {
+      setForwardError(err.message || String(err));
+    } finally {
+      setForwardCommitting(false);
+    }
+  };
+
+  const handleForwardCreateBranch = async () => {
+    setForwardError(null);
+    const context = getForwardProjectContext();
+    if (!context) return;
+
+    const branch = String(forwardBranchName || "").trim();
+    if (!branch) {
+      setForwardError("Branch name is required.");
+      return;
+    }
+
+    setForwardLoading(true);
+    try {
+      const data = await apiPost("/api/git/branch/create", {
+        projectId: context.projectId,
+        branch,
+      });
+      setForwardGitStatus(data);
+      setForwardBranchName(data?.branch || branch);
+      addToast?.({ type: "success", message: data?.existed ? `Checked out ${branch}.` : `Created branch ${branch}.` });
+    } catch (err) {
+      setForwardError(err.message || String(err));
+    } finally {
+      setForwardLoading(false);
+    }
+  };
+
+  const handleForwardPushBranch = async () => {
+    setForwardError(null);
+    const context = getForwardProjectContext();
+    if (!context) return;
+
+    const branch = String(forwardBranchName || forwardGitStatus?.branch || "").trim();
+    if (!branch || branch === "HEAD") {
+      setForwardError("Branch name is required before push.");
+      return;
+    }
+
+    setForwardPushing(true);
+    try {
+      const push = await apiPost("/api/git/push", {
+        projectId: context.projectId,
+        branch,
+        remote: "origin",
+        set_upstream: true,
+      });
+      setForwardPushResult(push);
+      setForwardGitStatus(push);
+      addToast?.({ type: "success", message: `Pushed ${branch} to origin.` });
+    } catch (err) {
+      setForwardError(err.message || String(err));
+    } finally {
+      setForwardPushing(false);
+    }
+  };
+
+  const handleForwardCreatePr = async () => {
+    setForwardError(null);
+    const context = getForwardProjectContext();
+    if (!context) return;
+
+    const token = String(forwardGithubToken || "").trim();
+    if (!token) {
+      setForwardError("GitHub token is required to create PR.");
+      return;
+    }
+
+    const head = String(forwardBranchName || forwardGitStatus?.branch || "").trim();
+    if (!head || head === "HEAD") {
+      setForwardError("Head branch is required for PR.");
+      return;
+    }
+
+    const title = String(forwardPrTitle || "").trim();
+    if (!title) {
+      setForwardError("PR title is required.");
+      return;
+    }
+
+    setForwardCreatingPr(true);
+    try {
+      const pr = await apiPost("/api/git/github/pr", {
+        projectId: context.projectId,
+        token,
+        head,
+        base: String(forwardBaseBranch || "main").trim() || "main",
+        title,
+        body: String(forwardPrBody || ""),
+      });
+      setForwardPrResult(pr?.pullRequest || pr);
+      addToast?.({ type: "success", message: `Opened PR #${pr?.pullRequest?.number || ""}.` });
+    } catch (err) {
+      setForwardError(err.message || String(err));
+    } finally {
+      setForwardCreatingPr(false);
+    }
+  };
+
   const fieldKey = selectedConnector === "snowflake"
     ? (snowflakeAuth === "keypair" ? "snowflake_keypair" : "snowflake_password")
     : selectedConnector;
@@ -721,6 +1233,7 @@ export default function ConnectorsPanel() {
   const fields = fieldKey ? (CONNECTOR_FIELDS[fieldKey] || []) : [];
   const meta = selectedConnector ? CONNECTOR_META[selectedConnector] : null;
   const selectedTargetProject = (projects || []).find((p) => p.id === targetProjectId) || null;
+  const forwardSelectedProject = (projects || []).find((p) => p.id === (forwardProjectId || targetProjectId)) || null;
 
   return (
     <div className="flex flex-col h-full overflow-hidden">
@@ -1505,6 +2018,320 @@ export default function ConnectorsPanel() {
                 </pre>
               </details>
             )}
+          </div>
+        )}
+        {/* GitOps forward engineering UI */}
+        {forwardConnectorSupported && step === 3 && pullResult && (
+          <div className="rounded-xl border border-blue-200 bg-blue-50/60 p-3.5 space-y-2.5 shadow-[0_8px_20px_rgba(37,99,235,0.10)]">
+            <div className="flex items-center justify-between gap-2">
+              <div className="text-xs font-semibold text-blue-800 flex items-center gap-1.5">
+                <ShieldCheck size={12} />
+                {`GitOps Migration Flow (${forwardConnectorLabel})`}
+              </div>
+              <div className="text-[10px] text-blue-700">
+                Pull → Edit model → Generate SQL → Commit → PR → CI/CD Apply
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+              <div className="rounded-md border border-blue-200 bg-white/80 p-2">
+                <label className="text-[9px] uppercase tracking-wider text-blue-700 font-semibold block mb-1">
+                  Model Project
+                </label>
+                <div className="flex items-center gap-1.5">
+                  <select
+                    value={forwardProjectId || targetProjectId || ""}
+                    onChange={(e) => {
+                      setForwardProjectId(e.target.value);
+                      setForwardOldModelPath("");
+                      setForwardNewModelPath("");
+                      setForwardModelFiles([]);
+                      setForwardSqlPreview("");
+                      setForwardGeneratedPath("");
+                      setForwardBranchName("");
+                      setForwardGitStatus(null);
+                      setForwardCommitResult(null);
+                      setForwardPushResult(null);
+                      setForwardPrResult(null);
+                      setForwardMigrationOutPath("");
+                    }}
+                    className="flex-1 text-[11px] rounded border border-border-primary bg-bg-primary text-text-primary px-2 py-1 focus:outline-none focus:border-accent-blue"
+                  >
+                    <option value="">Select a project</option>
+                    {(projects || []).map((p) => (
+                      <option key={p.id} value={p.id}>{p.name}</option>
+                    ))}
+                  </select>
+                  <button
+                    onClick={() => refreshForwardModelFiles(forwardProjectId || targetProjectId || activeProjectId)}
+                    className="px-2 py-1 rounded border border-border-primary bg-bg-primary text-[10px] text-text-secondary hover:bg-bg-hover"
+                  >
+                    <RefreshCw size={10} />
+                  </button>
+                </div>
+                <div className="text-[9px] text-blue-700 mt-1 truncate">
+                  {forwardSelectedProject?.path || "Select where your .model.yaml files live"}
+                </div>
+              </div>
+
+              <div className="rounded-md border border-blue-200 bg-white/80 p-2">
+                <label className="text-[9px] uppercase tracking-wider text-blue-700 font-semibold block mb-1">
+                  GitOps Artifact
+                </label>
+                <input
+                  type="text"
+                  value={forwardMigrationOutPath}
+                  onChange={(e) => setForwardMigrationOutPath(e.target.value)}
+                  placeholder={`/repo/migrations/${forwardDialect}/<timestamp>__model.sql`}
+                  className="w-full text-[11px] rounded border border-border-primary bg-bg-primary text-text-primary px-2 py-1 focus:outline-none focus:border-accent-blue"
+                />
+                <p className="text-[9px] text-blue-700 mt-1">
+                  Generate SQL into your modeling repo, then commit + PR.
+                </p>
+              </div>
+            </div>
+
+            <datalist id="forward-model-files">
+              {forwardModelFiles.map((f) => (
+                <option key={f.fullPath} value={f.fullPath}>
+                  {f.name}
+                </option>
+              ))}
+            </datalist>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+              <div>
+                <label className="text-[10px] text-text-muted font-medium block mb-0.5">Old Model Path</label>
+                <input
+                  type="text"
+                  list="forward-model-files"
+                  value={forwardOldModelPath}
+                  onChange={(e) => setForwardOldModelPath(e.target.value)}
+                  placeholder="/path/to/old.model.yaml"
+                  className="w-full px-2 py-1 text-[11px] rounded border border-border-primary bg-bg-primary text-text-primary focus:outline-none focus:border-accent-blue"
+                />
+              </div>
+              <div>
+                <label className="text-[10px] text-text-muted font-medium block mb-0.5">New Model Path</label>
+                <input
+                  type="text"
+                  list="forward-model-files"
+                  value={forwardNewModelPath}
+                  onChange={(e) => setForwardNewModelPath(e.target.value)}
+                  placeholder="/path/to/new.model.yaml"
+                  className="w-full px-2 py-1 text-[11px] rounded border border-border-primary bg-bg-primary text-text-primary focus:outline-none focus:border-accent-blue"
+                />
+              </div>
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+              <div>
+                <label className="text-[10px] text-text-muted font-medium block mb-0.5">Commit Message</label>
+                <input
+                  type="text"
+                  value={forwardCommitMessage}
+                  onChange={(e) => setForwardCommitMessage(e.target.value)}
+                  placeholder="chore(model): add migration"
+                  className="w-full px-2 py-1 text-[11px] rounded border border-border-primary bg-bg-primary text-text-primary focus:outline-none focus:border-accent-blue"
+                />
+              </div>
+              <div>
+                <label className="text-[10px] text-text-muted font-medium block mb-0.5">Feature Branch</label>
+                <input
+                  type="text"
+                  value={forwardBranchName}
+                  onChange={(e) => setForwardBranchName(e.target.value)}
+                  placeholder="feature/model-migration"
+                  className="w-full px-2 py-1 text-[11px] rounded border border-border-primary bg-bg-primary text-text-primary focus:outline-none focus:border-accent-blue"
+                />
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+              <div>
+                <label className="text-[10px] text-text-muted font-medium block mb-0.5">PR Title</label>
+                <input
+                  type="text"
+                  value={forwardPrTitle}
+                  onChange={(e) => setForwardPrTitle(e.target.value)}
+                  placeholder="model: generated migration"
+                  className="w-full px-2 py-1 text-[11px] rounded border border-border-primary bg-bg-primary text-text-primary focus:outline-none focus:border-accent-blue"
+                />
+              </div>
+              <div>
+                <label className="text-[10px] text-text-muted font-medium block mb-0.5">Base Branch</label>
+                <input
+                  type="text"
+                  value={forwardBaseBranch}
+                  onChange={(e) => setForwardBaseBranch(e.target.value)}
+                  placeholder="main"
+                  className="w-full px-2 py-1 text-[11px] rounded border border-border-primary bg-bg-primary text-text-primary focus:outline-none focus:border-accent-blue"
+                />
+              </div>
+            </div>
+
+            <div>
+              <label className="text-[10px] text-text-muted font-medium block mb-0.5">PR Description</label>
+              <textarea
+                value={forwardPrBody}
+                onChange={(e) => setForwardPrBody(e.target.value)}
+                rows={3}
+                className="w-full px-2 py-1 text-[11px] rounded border border-border-primary bg-bg-primary text-text-primary focus:outline-none focus:border-accent-blue"
+              />
+            </div>
+
+            <div>
+              <label className="text-[10px] text-text-muted font-medium block mb-0.5">GitHub Token (repo scope)</label>
+              <input
+                type="password"
+                value={forwardGithubToken}
+                onChange={(e) => setForwardGithubToken(e.target.value)}
+                placeholder="ghp_..."
+                className="w-full px-2 py-1 text-[11px] rounded border border-border-primary bg-bg-primary text-text-primary focus:outline-none focus:border-accent-blue"
+              />
+            </div>
+
+            <div className="flex flex-wrap items-center gap-2 pt-1">
+              <button
+                onClick={handleForwardPreviewSql}
+                disabled={forwardLoading || forwardStaging || forwardCommitting || forwardPushing || forwardCreatingPr}
+                className="flex items-center gap-1.5 px-3 py-1.5 text-[11px] font-semibold rounded-md border border-blue-300 bg-white text-blue-700 hover:bg-blue-50 disabled:opacity-50"
+              >
+                {forwardLoading ? <Loader2 size={11} className="animate-spin" /> : <FileText size={11} />}
+                Preview SQL
+              </button>
+              <button
+                onClick={handleForwardGenerateMigrationFile}
+                disabled={forwardLoading || forwardStaging || forwardCommitting || forwardPushing || forwardCreatingPr}
+                className="flex items-center gap-1.5 px-3 py-1.5 text-[11px] font-semibold rounded-md text-white bg-blue-500 hover:bg-blue-600 disabled:opacity-50"
+              >
+                {forwardLoading ? <Loader2 size={11} className="animate-spin" /> : <CheckCircle2 size={11} />}
+                Generate Migration File
+              </button>
+              <button
+                onClick={handleForwardStageForCommit}
+                disabled={forwardLoading || forwardStaging || forwardCommitting || forwardPushing || forwardCreatingPr || !forwardGeneratedPath}
+                className="flex items-center gap-1.5 px-3 py-1.5 text-[11px] font-semibold rounded-md border border-emerald-300 bg-white text-emerald-700 hover:bg-emerald-50 disabled:opacity-50"
+              >
+                {forwardStaging ? <Loader2 size={11} className="animate-spin" /> : <Check size={11} />}
+                Stage Files
+              </button>
+              <button
+                onClick={handleForwardCommit}
+                disabled={forwardLoading || forwardStaging || forwardCommitting || forwardPushing || forwardCreatingPr || !forwardGeneratedPath}
+                className="flex items-center gap-1.5 px-3 py-1.5 text-[11px] font-semibold rounded-md text-white bg-emerald-500 hover:bg-emerald-600 disabled:opacity-50"
+              >
+                {forwardCommitting ? <Loader2 size={11} className="animate-spin" /> : <CheckCircle2 size={11} />}
+                Commit for PR
+              </button>
+              <button
+                onClick={handleForwardCreateBranch}
+                disabled={forwardLoading || forwardStaging || forwardCommitting || forwardPushing || forwardCreatingPr}
+                className="flex items-center gap-1.5 px-3 py-1.5 text-[11px] font-semibold rounded-md border border-indigo-300 bg-white text-indigo-700 hover:bg-indigo-50 disabled:opacity-50"
+              >
+                {forwardLoading ? <Loader2 size={11} className="animate-spin" /> : <Check size={11} />}
+                Create/Checkout Branch
+              </button>
+              <button
+                onClick={handleForwardPushBranch}
+                disabled={forwardLoading || forwardStaging || forwardCommitting || forwardPushing || forwardCreatingPr || !forwardBranchName}
+                className="flex items-center gap-1.5 px-3 py-1.5 text-[11px] font-semibold rounded-md border border-purple-300 bg-white text-purple-700 hover:bg-purple-50 disabled:opacity-50"
+              >
+                {forwardPushing ? <Loader2 size={11} className="animate-spin" /> : <Check size={11} />}
+                Push Branch
+              </button>
+              <button
+                onClick={handleForwardCreatePr}
+                disabled={forwardLoading || forwardStaging || forwardCommitting || forwardPushing || forwardCreatingPr || !forwardGithubToken || !forwardBranchName}
+                className="flex items-center gap-1.5 px-3 py-1.5 text-[11px] font-semibold rounded-md text-white bg-indigo-500 hover:bg-indigo-600 disabled:opacity-50"
+              >
+                {forwardCreatingPr ? <Loader2 size={11} className="animate-spin" /> : <CheckCircle2 size={11} />}
+                Open GitHub PR
+              </button>
+              {isDirty && activeFile?.fullPath === forwardNewModelPath && (
+                <button
+                  onClick={async () => {
+                    await saveCurrentFile();
+                    addToast?.({ type: "success", message: "Saved current model." });
+                  }}
+                  className="px-2 py-1 rounded border border-amber-300 bg-amber-50 text-amber-700 font-semibold text-[10px]"
+                >
+                  Save Current Model
+                </button>
+              )}
+            </div>
+
+            <div className="text-[10px] text-blue-700 bg-blue-100/60 border border-blue-200 rounded px-2 py-1">
+              {`Direct apply is disabled in product mode for ${forwardConnectorLabel}. Push branch and open PR in your modeling repository to let CI/CD deploy.`}
+            </div>
+
+            {forwardGeneratedPath && (
+              <div className="text-[10px] text-emerald-700 bg-emerald-50 border border-emerald-200 rounded px-2 py-1">
+                Generated migration SQL: <strong>{forwardGeneratedPath}</strong>
+              </div>
+            )}
+
+            {forwardError && (
+              <div className="text-[10px] text-red-700 bg-red-50 border border-red-200 rounded px-2 py-1">
+                {forwardError}
+              </div>
+            )}
+
+            {forwardGitStatus && (
+              <details className="rounded border border-blue-200 bg-white/70 p-2">
+                <summary className="text-[10px] font-semibold text-blue-700 cursor-pointer">
+                  Git Status ({forwardGitStatus.branch || "unknown"})
+                </summary>
+                <pre className="mt-2 text-[10px] max-h-40 overflow-auto bg-white rounded border border-border-primary p-2">
+                  {JSON.stringify(forwardGitStatus, null, 2)}
+                </pre>
+              </details>
+            )}
+
+            {forwardCommitResult && (
+              <details className="rounded border border-emerald-200 bg-white/70 p-2" open>
+                <summary className="text-[10px] font-semibold text-emerald-700 cursor-pointer">
+                  Commit Created ({String(forwardCommitResult.commitHash || "").slice(0, 8)})
+                </summary>
+                <pre className="mt-2 text-[10px] max-h-40 overflow-auto bg-white rounded border border-border-primary p-2">
+                  {String(forwardCommitResult.summary || "")}
+                </pre>
+              </details>
+            )}
+
+            {forwardPushResult && (
+              <details className="rounded border border-purple-200 bg-white/70 p-2" open>
+                <summary className="text-[10px] font-semibold text-purple-700 cursor-pointer">
+                  Branch Pushed ({forwardPushResult.remote || "origin"}/{forwardPushResult.branch || forwardBranchName})
+                </summary>
+                <pre className="mt-2 text-[10px] max-h-32 overflow-auto bg-white rounded border border-border-primary p-2">
+                  {String(forwardPushResult.output || "Push completed")}
+                </pre>
+              </details>
+            )}
+
+            {forwardPrResult?.url && (
+              <div className="text-[10px] text-indigo-700 bg-indigo-50 border border-indigo-200 rounded px-2 py-1">
+                Pull Request opened: <a href={forwardPrResult.url} target="_blank" rel="noreferrer" className="underline font-semibold">{forwardPrResult.url}</a>
+              </div>
+            )}
+
+            {forwardSqlPreview && (
+              <details className="rounded border border-blue-200 bg-white/70 p-2" open>
+                <summary className="text-[10px] font-semibold text-blue-700 cursor-pointer">
+                  Migration SQL Preview
+                </summary>
+                <pre className="mt-2 text-[10px] max-h-56 overflow-auto bg-white rounded border border-border-primary p-2">
+                  {forwardSqlPreview}
+                </pre>
+              </details>
+            )}
+          </div>
+        )}
+
+
+        {!forwardConnectorSupported && step === 3 && pullResult && selectedConnector !== "dbt_repo" && (
+          <div className="rounded-xl border border-amber-300 bg-amber-50/70 p-3 text-[11px] text-amber-800">
+            GitOps migration automation is currently available for Snowflake, Databricks, and BigQuery connectors.
           </div>
         )}
 

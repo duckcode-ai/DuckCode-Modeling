@@ -30,6 +30,8 @@ import useWorkspaceStore from "../../stores/workspaceStore";
 import useDiagramStore from "../../stores/diagramStore";
 import useUiStore from "../../stores/uiStore";
 import EntityListPanel from "../panels/EntityListPanel";
+import ConnectorLogo from "../icons/ConnectorLogo";
+import { fetchConnections } from "../../lib/api";
 
 const ACTIVITIES = [
   { id: "model",    label: "Model",    icon: LayoutDashboard, group: "top" },
@@ -52,6 +54,86 @@ function parseInternalProjectFileDrop(dataTransfer) {
   }
 }
 
+const CONNECTOR_LABELS = {
+  dbt_repo: "dbt",
+  postgres: "PostgreSQL",
+  mysql: "MySQL",
+  snowflake: "Snowflake",
+  bigquery: "BigQuery",
+  databricks: "Databricks",
+  sqlserver: "SQL Server",
+  azure_sql: "Azure SQL",
+  azure_fabric: "Azure Fabric",
+  redshift: "Redshift",
+};
+
+function normalizeConnectorType(connector) {
+  const normalized = String(connector || "").trim().toLowerCase();
+  if (!normalized) return "";
+  if (normalized.startsWith("snowflake")) return "snowflake";
+  return normalized;
+}
+
+function normalizeProjectPath(path) {
+  return String(path || "")
+    .replace(/\\/g, "/")
+    .replace(/\/+$/, "")
+    .toLowerCase();
+}
+
+function buildProjectConnectorMap(projects, connections) {
+  const projectById = new Map((projects || []).map((project) => [project.id, project]));
+  const projectByPath = new Map(
+    (projects || [])
+      .map((project) => [normalizeProjectPath(project.path), project])
+      .filter(([projectPath]) => Boolean(projectPath))
+  );
+
+  const projectConnectorMap = {};
+
+  for (const connection of connections || []) {
+    const connector = normalizeConnectorType(connection?.connector);
+    if (!connector) continue;
+
+    const imports = Array.isArray(connection?.imports) ? connection.imports : [];
+    for (const event of imports) {
+      let project = null;
+      const eventProjectId = String(event?.projectId || "").trim();
+      if (eventProjectId) {
+        project = projectById.get(eventProjectId) || null;
+      }
+
+      if (!project) {
+        const eventProjectPath = normalizeProjectPath(event?.projectPath);
+        if (eventProjectPath) {
+          project = projectByPath.get(eventProjectPath) || null;
+        }
+      }
+
+      if (!project) continue;
+
+      const timestamp = String(
+        event?.timestamp ||
+        connection?.updatedAt ||
+        connection?.lastConnectedAt ||
+        connection?.createdAt ||
+        ""
+      );
+
+      const existing = projectConnectorMap[project.id];
+      if (!existing || timestamp > existing.timestamp) {
+        projectConnectorMap[project.id] = {
+          connector,
+          label: CONNECTOR_LABELS[connector] || connector,
+          timestamp,
+        };
+      }
+    }
+  }
+
+  return projectConnectorMap;
+}
+
 function ProjectSection() {
   const {
     projects,
@@ -65,6 +147,31 @@ function ProjectSection() {
   const { openModal, addToast } = useUiStore();
   const [expanded, setExpanded] = useState(true);
   const [dropProjectId, setDropProjectId] = useState(null);
+  const [projectConnectors, setProjectConnectors] = useState({});
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const loadProjectConnectors = async () => {
+      if (offlineMode || projects.length === 0) {
+        if (!cancelled) setProjectConnectors({});
+        return;
+      }
+
+      try {
+        const connections = await fetchConnections();
+        if (cancelled) return;
+        setProjectConnectors(buildProjectConnectorMap(projects, connections));
+      } catch (_err) {
+        if (!cancelled) setProjectConnectors({});
+      }
+    };
+
+    loadProjectConnectors();
+    return () => {
+      cancelled = true;
+    };
+  }, [offlineMode, projects]);
 
   if (offlineMode) {
     return (
@@ -115,6 +222,7 @@ function ProjectSection() {
     }
   };
 
+
   return (
     <div className="mx-2 my-1 px-2 py-1 rounded-lg border border-border-primary/80 bg-white/80">
       <div className="flex items-center gap-1.5 w-full px-1 py-1.5 text-xs text-text-muted uppercase tracking-wider font-semibold">
@@ -137,47 +245,60 @@ function ProjectSection() {
 
       {expanded && (
         <div className="ml-1 space-y-0.5 max-h-[220px] overflow-y-auto">
-          {projects.map((project) => (
-            <div
-              key={project.id}
-              className={`group flex items-center gap-2 px-2 py-1.5 rounded-md text-xs cursor-pointer transition-colors ${
-                dropProjectId === project.id
-                  ? "bg-blue-50 text-blue-700 ring-1 ring-blue-200"
-                  : activeProjectId === project.id
-                  ? "bg-blue-50 text-blue-700 border border-blue-200"
-                  : "text-text-secondary hover:bg-bg-hover hover:text-text-primary"
-              }`}
-              onClick={() => selectProject(project.id)}
-              onDragOver={(e) => { e.preventDefault(); setDropProjectId(project.id); }}
-              onDragLeave={() => setDropProjectId((curr) => (curr === project.id ? null : curr))}
-              onDrop={(e) => handleProjectDrop(project.id, e)}
-            >
-              <Database size={13} className="shrink-0" />
-              <span className="truncate flex-1">{project.name}</span>
-              {dropProjectId === project.id && (
-                <span className="text-[9px] px-1 py-0 rounded bg-blue-100 text-blue-700 shrink-0">
-                  Drop YAML
-                </span>
-              )}
-              <button
-                onClick={(e) => {
-                  e.stopPropagation();
-                  openModal("editProject", { project });
-                }}
-                className="opacity-0 group-hover:opacity-100 p-0.5 rounded hover:bg-bg-hover text-text-muted hover:text-text-accent transition-all"
-                title="Edit project"
+          {projects.map((project) => {
+            const connectorMeta = projectConnectors[project.id] || null;
+            const connectorType = connectorMeta?.connector || "";
+
+            return (
+              <div
+                key={project.id}
+                className={`group flex items-center gap-2 px-2 py-1.5 rounded-md text-xs cursor-pointer transition-colors ${
+                  dropProjectId === project.id
+                    ? "bg-blue-50 text-blue-700 ring-1 ring-blue-200"
+                    : activeProjectId === project.id
+                    ? "bg-blue-50 text-blue-700 border border-blue-200"
+                    : "text-text-secondary hover:bg-bg-hover hover:text-text-primary"
+                }`}
+                onClick={() => selectProject(project.id)}
+                onDragOver={(e) => { e.preventDefault(); setDropProjectId(project.id); }}
+                onDragLeave={() => setDropProjectId((curr) => (curr === project.id ? null : curr))}
+                onDrop={(e) => handleProjectDrop(project.id, e)}
               >
-                <Pencil size={11} />
-              </button>
-              <button
-                onClick={(e) => { e.stopPropagation(); removeProjectFolder(project.id); }}
-                className="opacity-0 group-hover:opacity-100 p-0.5 rounded hover:bg-bg-hover text-text-muted hover:text-status-error transition-all"
-                title="Remove project"
-              >
-                <Trash2 size={11} />
-              </button>
-            </div>
-          ))}
+                {connectorType ? (
+                  <ConnectorLogo
+                    type={connectorType}
+                    size={14}
+                    className="shrink-0 rounded-md"
+                  />
+                ) : (
+                  <Database size={13} className="shrink-0" />
+                )}
+                <span className="truncate flex-1">{project.name}</span>
+                {dropProjectId === project.id && (
+                  <span className="text-[9px] px-1 py-0 rounded bg-blue-100 text-blue-700 shrink-0">
+                    Drop YAML
+                  </span>
+                )}
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    openModal("editProject", { project });
+                  }}
+                  className="opacity-0 group-hover:opacity-100 p-0.5 rounded hover:bg-bg-hover text-text-muted hover:text-text-accent transition-all"
+                  title="Edit project"
+                >
+                  <Pencil size={11} />
+                </button>
+                <button
+                  onClick={(e) => { e.stopPropagation(); removeProjectFolder(project.id); }}
+                  className="opacity-0 group-hover:opacity-100 p-0.5 rounded hover:bg-bg-hover text-text-muted hover:text-status-error transition-all"
+                  title="Remove project"
+                >
+                  <Trash2 size={11} />
+                </button>
+              </div>
+            );
+          })}
           {projects.length === 0 && (
             <p className="text-xs text-text-muted px-2 py-1">No projects added yet.</p>
           )}

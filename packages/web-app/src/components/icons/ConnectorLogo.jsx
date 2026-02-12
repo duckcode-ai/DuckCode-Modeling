@@ -8,6 +8,10 @@ const BRAND = {
   snowflake: { bg: "from-[#38bdf8] to-[#0ea5e9]", ring: "ring-[#bae6fd]" },
   bigquery: { bg: "from-[#3b82f6] to-[#60a5fa]", ring: "ring-[#bfdbfe]" },
   databricks: { bg: "from-[#f87171] to-[#ef4444]", ring: "ring-[#fecaca]" },
+  sqlserver: { bg: "from-[#cc2927] to-[#7f1d1d]", ring: "ring-[#fecaca]" },
+  azure_sql: { bg: "from-[#0078d4] to-[#0ea5e9]", ring: "ring-[#bae6fd]" },
+  azure_fabric: { bg: "from-[#0078d4] to-[#312e81]", ring: "ring-[#c7d2fe]" },
+  redshift: { bg: "from-[#ff5f5f] to-[#8b5cf6]", ring: "ring-[#f5d0fe]" },
 };
 
 function Glyph({ type }) {
@@ -59,6 +63,33 @@ function Glyph({ type }) {
         <path d="M4 14c2.5-3.8 5.9-5.8 10.2-6.1 2.2-.2 4 .5 5.8 2.1" />
         <path d="M7.5 12.8c.8 2 2.4 3.2 4.8 3.7 1.5.3 3 .2 4.7-.4" />
         <path d="M18.2 8.4 20 6.6M18.7 11 21 11" />
+      </svg>
+    );
+  }
+  if (type === "sqlserver" || type === "azure_sql") {
+    return (
+      <svg viewBox="0 0 24 24" className="w-[74%] h-[74%]" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+        <rect x="4" y="4" width="16" height="5" rx="1.5" />
+        <rect x="4" y="10" width="16" height="5" rx="1.5" />
+        <rect x="4" y="16" width="16" height="4" rx="1.5" />
+        <path d="M8 6.5h.01M8 12.5h.01M8 18h.01" />
+      </svg>
+    );
+  }
+  if (type === "azure_fabric") {
+    return (
+      <svg viewBox="0 0 24 24" className="w-[74%] h-[74%]" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M5 6h4l3 3h4l3 3v6H5z" />
+        <path d="M9 6v6M15 9v9M5 12h14" />
+      </svg>
+    );
+  }
+  if (type === "redshift") {
+    return (
+      <svg viewBox="0 0 24 24" className="w-[74%] h-[74%]" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M6 18V9l6-3 6 3v9l-6 3z" />
+        <path d="M6 9l6 3 6-3" />
+        <path d="M12 12v9" />
       </svg>
     );
   }

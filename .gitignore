@@ -23,3 +23,6 @@ packages/web-app/dist/
 
 # OS
 .DS_Store
+
+# local secrets
+.secrets/

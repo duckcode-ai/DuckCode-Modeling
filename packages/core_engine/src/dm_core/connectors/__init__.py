@@ -18,6 +18,8 @@ from dm_core.connectors.mysql import MySQLConnector
 from dm_core.connectors.snowflake import SnowflakeConnector
 from dm_core.connectors.bigquery import BigQueryConnector
 from dm_core.connectors.databricks import DatabricksConnector
+from dm_core.connectors.sqlserver import SQLServerConnector, AzureSQLConnector, AzureFabricConnector
+from dm_core.connectors.redshift import RedshiftConnector
 
 __all__ = [
     "BaseConnector",
@@ -28,6 +30,10 @@ __all__ = [
     "MySQLConnector",
     "PostgresConnector",
     "SnowflakeConnector",
+    "SQLServerConnector",
+    "AzureSQLConnector",
+    "AzureFabricConnector",
+    "RedshiftConnector",
     "get_connector",
     "list_connectors",
 ]

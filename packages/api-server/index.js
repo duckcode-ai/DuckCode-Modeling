@@ -30,6 +30,7 @@ const WEB_DIST = process.env.WEB_DIST || join(REPO_ROOT, "packages", "web-app", 
 const VENV_PYTHON = join(REPO_ROOT, ".venv", "bin", "python3");
 const PYTHON = existsSync(VENV_PYTHON) ? VENV_PYTHON : "python3";
 const IS_DOCKER_RUNTIME = existsSync("/.dockerenv");
+const DIRECT_APPLY_ENABLED = ["1", "true", "yes", "on"].includes(String(process.env.DM_ENABLE_DIRECT_APPLY || "").toLowerCase());
 
 async function loadProjects() {
   try {
@@ -139,6 +140,43 @@ function parseGitStatus(output) {
     files,
   };
 }
+
+function gitRefExists(cwd, ref) {
+  try {
+    execFileSync("git", ["show-ref", "--verify", "--quiet", ref], {
+      cwd,
+      encoding: "utf-8",
+      timeout: 8000,
+      stdio: ["ignore", "ignore", "ignore"],
+    });
+    return true;
+  } catch (_err) {
+    return false;
+  }
+}
+
+function parseGitHubRemote(remoteUrl) {
+  const raw = String(remoteUrl || "").trim();
+  if (!raw) return null;
+
+  const patterns = [
+    /^https?:\/\/github\.com\/([^\/]+)\/([^\/]+?)(?:\.git)?$/i,
+    /^git@github\.com:([^\/]+)\/([^\/]+?)(?:\.git)?$/i,
+    /^ssh:\/\/git@github\.com\/([^\/]+)\/([^\/]+?)(?:\.git)?$/i,
+  ];
+
+  for (const pattern of patterns) {
+    const match = raw.match(pattern);
+    if (match) {
+      return {
+        owner: match[1],
+        repo: match[2],
+      };
+    }
+  }
+  return null;
+}
+
 
 const SECRET_KEYS = new Set(["password", "token", "private_key_content", "private_key_path"]);
 
@@ -666,6 +704,199 @@ app.get("/api/git/log", async (req, res) => {
   }
 });
 
+
+// Git: create or checkout branch
+app.post("/api/git/branch/create", express.json(), async (req, res) => {
+  try {
+    const { projectId, branch, from } = req.body || {};
+    const normalizedProjectId = String(projectId || "").trim();
+    if (!normalizedProjectId) {
+      return res.status(400).json({ error: "projectId is required" });
+    }
+
+    const branchName = String(branch || "").trim();
+    if (!branchName) {
+      return res.status(400).json({ error: "branch is required" });
+    }
+    if (/\s/.test(branchName)) {
+      return res.status(400).json({ error: "branch name cannot include spaces" });
+    }
+
+    const fromRef = String(from || "").trim();
+    const projectPath = await resolveProjectPath(normalizedProjectId);
+    if (!projectPath) {
+      return res.status(404).json({ error: "Project not found" });
+    }
+
+    const branchRef = `refs/heads/${branchName}`;
+    const exists = gitRefExists(projectPath, branchRef);
+
+    if (exists) {
+      runGit(["checkout", branchName], projectPath);
+    } else {
+      const args = fromRef
+        ? ["checkout", "-b", branchName, fromRef]
+        : ["checkout", "-b", branchName];
+      runGit(args, projectPath);
+    }
+
+    const status = parseGitStatus(runGit(["status", "--porcelain=1", "--branch"], projectPath));
+    res.json({
+      ok: true,
+      projectId: normalizedProjectId,
+      branch: status.branch,
+      existed: exists,
+      ...status,
+    });
+  } catch (err) {
+    const stderr = (err.stderr || err.message || "").toString();
+    if (stderr.includes("not a git repository")) {
+      return res.status(400).json({ error: "Selected project is not a git repository" });
+    }
+    res.status(500).json({ error: stderr.trim() || String(err.message || err) });
+  }
+});
+
+// Git: push current branch (or provided branch)
+app.post("/api/git/push", express.json(), async (req, res) => {
+  try {
+    const { projectId, remote = "origin", branch, set_upstream = true } = req.body || {};
+    const normalizedProjectId = String(projectId || "").trim();
+    if (!normalizedProjectId) {
+      return res.status(400).json({ error: "projectId is required" });
+    }
+
+    const projectPath = await resolveProjectPath(normalizedProjectId);
+    if (!projectPath) {
+      return res.status(404).json({ error: "Project not found" });
+    }
+
+    const status = parseGitStatus(runGit(["status", "--porcelain=1", "--branch"], projectPath));
+    const branchName = String(branch || "").trim() || status.branch;
+    if (!branchName || branchName === "HEAD") {
+      return res.status(400).json({ error: "Unable to determine branch to push (detached HEAD)." });
+    }
+
+    const args = ["push"];
+    if (set_upstream) args.push("-u");
+    args.push(String(remote || "origin"), branchName);
+
+    const output = execFileSync("git", args, {
+      cwd: projectPath,
+      encoding: "utf-8",
+      timeout: 120000,
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+
+    const refreshed = parseGitStatus(runGit(["status", "--porcelain=1", "--branch"], projectPath));
+    res.json({
+      ok: true,
+      projectId: normalizedProjectId,
+      branch: branchName,
+      remote: String(remote || "origin"),
+      output: String(output || "").trim(),
+      ...refreshed,
+    });
+  } catch (err) {
+    const stderr = (err.stderr || err.message || "").toString();
+    if (stderr.includes("not a git repository")) {
+      return res.status(400).json({ error: "Selected project is not a git repository" });
+    }
+    res.status(500).json({ error: stderr.trim() || String(err.message || err) });
+  }
+});
+
+// GitHub: create pull request for current branch
+app.post("/api/git/github/pr", express.json({ limit: "1mb" }), async (req, res) => {
+  try {
+    const {
+      projectId,
+      token,
+      title,
+      body = "",
+      base = "main",
+      head,
+      draft = false,
+      remote = "origin",
+    } = req.body || {};
+
+    const normalizedProjectId = String(projectId || "").trim();
+    if (!normalizedProjectId) {
+      return res.status(400).json({ error: "projectId is required" });
+    }
+    const ghToken = String(token || "").trim();
+    if (!ghToken) {
+      return res.status(400).json({ error: "token is required" });
+    }
+    const prTitle = String(title || "").trim();
+    if (!prTitle) {
+      return res.status(400).json({ error: "title is required" });
+    }
+
+    const projectPath = await resolveProjectPath(normalizedProjectId);
+    if (!projectPath) {
+      return res.status(404).json({ error: "Project not found" });
+    }
+
+    const status = parseGitStatus(runGit(["status", "--porcelain=1", "--branch"], projectPath));
+    const headBranch = String(head || "").trim() || status.branch;
+    if (!headBranch || headBranch === "HEAD") {
+      return res.status(400).json({ error: "Unable to determine head branch for PR." });
+    }
+
+    const remoteUrl = runGit(["remote", "get-url", String(remote || "origin")], projectPath).trim();
+    const ghRepo = parseGitHubRemote(remoteUrl);
+    if (!ghRepo) {
+      return res.status(400).json({ error: "Remote is not a supported GitHub URL." });
+    }
+
+    const payload = {
+      title: prTitle,
+      body: String(body || ""),
+      head: headBranch,
+      base: String(base || "main"),
+      draft: Boolean(draft),
+    };
+
+    const resp = await fetch(`https://api.github.com/repos/${ghRepo.owner}/${ghRepo.repo}/pulls`, {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${ghToken}`,
+        "Accept": "application/vnd.github+json",
+        "Content-Type": "application/json",
+        "X-GitHub-Api-Version": "2022-11-28",
+      },
+      body: JSON.stringify(payload),
+    });
+
+    const data = await resp.json().catch(() => ({}));
+    if (!resp.ok) {
+      const message = String(data?.message || `GitHub API request failed (${resp.status})`).trim();
+      if (message.toLowerCase().includes("a pull request already exists")) {
+        return res.status(409).json({ error: message });
+      }
+      return res.status(resp.status).json({ error: message });
+    }
+
+    res.json({
+      ok: true,
+      projectId: normalizedProjectId,
+      repository: `${ghRepo.owner}/${ghRepo.repo}`,
+      pullRequest: {
+        number: data.number,
+        title: data.title,
+        state: data.state,
+        url: data.html_url,
+        head: data?.head?.ref,
+        base: data?.base?.ref,
+      },
+    });
+  } catch (err) {
+    const stderr = (err.stderr || err.message || "").toString();
+    res.status(500).json({ error: stderr.trim() || String(err.message || err) });
+  }
+});
+
 async function walkYamlFiles(dir, base = dir) {
   const results = [];
   let entries;
@@ -1117,6 +1348,157 @@ app.post("/api/import", express.json({ limit: "10mb" }), async (req, res) => {
   }
 });
 
+// Forward engineering: generate SQL from model YAML
+app.post("/api/forward/generate-sql", express.json(), async (req, res) => {
+  try {
+    const { model_path, dialect = "postgres", out } = req.body || {};
+    if (!model_path) {
+      return res.status(400).json({ error: "model_path is required" });
+    }
+
+    const args = [join(REPO_ROOT, "dm"), "generate", "sql", String(model_path), "--dialect", String(dialect)];
+    if (out) args.push("--out", String(out));
+
+    const output = execFileSync(PYTHON, args, { encoding: "utf-8", timeout: 120000, cwd: REPO_ROOT });
+    res.json({
+      success: true,
+      dialect: String(dialect),
+      modelPath: String(model_path),
+      out: out ? String(out) : null,
+      sql: out ? null : output,
+      output: output.trim(),
+    });
+  } catch (err) {
+    const stderr = err.stderr || err.message;
+    res.status(500).json({ error: String(stderr).trim() });
+  }
+});
+
+// Forward engineering: generate migration SQL from old/new model YAML
+app.post("/api/forward/migrate", express.json(), async (req, res) => {
+  try {
+    const { old_model, new_model, dialect = "postgres", out } = req.body || {};
+    if (!old_model || !new_model) {
+      return res.status(400).json({ error: "old_model and new_model are required" });
+    }
+
+    const args = [join(REPO_ROOT, "dm"), "migrate", String(old_model), String(new_model), "--dialect", String(dialect)];
+    if (out) args.push("--out", String(out));
+
+    const output = execFileSync(PYTHON, args, { encoding: "utf-8", timeout: 120000, cwd: REPO_ROOT });
+    res.json({
+      success: true,
+      dialect: String(dialect),
+      oldModel: String(old_model),
+      newModel: String(new_model),
+      out: out ? String(out) : null,
+      sql: out ? null : output,
+      output: output.trim(),
+    });
+  } catch (err) {
+    const stderr = err.stderr || err.message;
+    res.status(500).json({ error: String(stderr).trim() });
+  }
+});
+
+// Forward engineering: apply SQL/migration to live warehouse
+app.post("/api/forward/apply", express.json({ limit: "10mb" }), async (req, res) => {
+  if (!DIRECT_APPLY_ENABLED) {
+    return res.status(403).json({
+      error: "Direct apply is disabled in GitOps product mode. Generate migration SQL and deploy via CI/CD.",
+    });
+  }
+
+  let conn = { args: [], cleanup: () => {} };
+  let tempSqlFile = null;
+  try {
+    const {
+      connector,
+      dialect,
+      sql_file,
+      sql,
+      old_model,
+      new_model,
+      model_schema,
+      migration_name,
+      ledger_table,
+      dry_run,
+      skip_ledger,
+      policy_pack,
+      skip_policy_check,
+      allow_destructive,
+      write_sql,
+      report_json,
+      output_json,
+      ...params
+    } = req.body || {};
+
+    if (!connector) {
+      return res.status(400).json({ error: "connector is required" });
+    }
+
+    const hasSqlFile = Boolean(sql_file);
+    const hasInlineSql = Boolean(sql);
+    const hasOldNew = Boolean(old_model && new_model);
+    const inputModes = [hasSqlFile, hasInlineSql, hasOldNew].filter(Boolean).length;
+    if (inputModes !== 1) {
+      return res.status(400).json({ error: "Provide exactly one input mode: sql_file, sql, or old_model+new_model" });
+    }
+
+    conn = buildConnArgs(params);
+    const args = [join(REPO_ROOT, "dm"), "apply", String(connector), "--dialect", String(dialect || connector), ...conn.args];
+
+    if (model_schema) args.push("--model-schema", String(model_schema));
+    if (migration_name) args.push("--migration-name", String(migration_name));
+    if (ledger_table) args.push("--ledger-table", String(ledger_table));
+    if (dry_run) args.push("--dry-run");
+    if (skip_ledger) args.push("--skip-ledger");
+    if (policy_pack) args.push("--policy-pack", String(policy_pack));
+    if (skip_policy_check) args.push("--skip-policy-check");
+    if (allow_destructive) args.push("--allow-destructive");
+    if (write_sql) args.push("--write-sql", String(write_sql));
+    if (report_json) args.push("--report-json", String(report_json));
+    const wantsOutputJson = output_json !== false;
+    if (wantsOutputJson) args.push("--output-json");
+
+    if (hasSqlFile) {
+      args.push("--sql-file", String(sql_file));
+    } else if (hasInlineSql) {
+      const tmpDir = join(REPO_ROOT, ".tmp");
+      if (!existsSync(tmpDir)) mkdirSync(tmpDir, { recursive: true });
+      tempSqlFile = join(tmpDir, `apply_${Date.now()}.sql`);
+      writeFileSync(tempSqlFile, String(sql), "utf-8");
+      args.push("--sql-file", tempSqlFile);
+    } else {
+      args.push("--old", String(old_model), "--new", String(new_model));
+    }
+
+    const output = execFileSync(PYTHON, args, { encoding: "utf-8", timeout: 300000, cwd: REPO_ROOT });
+    const trimmed = output.trim();
+    let summary = null;
+    if (output_json !== false) {
+      try {
+        summary = JSON.parse(trimmed);
+      } catch (_) {
+        summary = null;
+      }
+    }
+    res.json({
+      success: true,
+      connector: String(connector),
+      summary,
+      output: summary ? null : trimmed,
+    });
+  } catch (err) {
+    const stderr = err.stderr || err.message;
+    const stdout = err.stdout || "";
+    res.status(500).json({ error: String(stderr).trim(), output: String(stdout).trim() || null });
+  } finally {
+    try { if (tempSqlFile) unlinkSync(tempSqlFile); } catch (_) {}
+    conn.cleanup();
+  }
+});
+
 /**
  * Normalize a PEM private key string so it is valid PKCS8 format.
  * Handles literal \\n strings, missing headers, or stripped newlines
@@ -1167,6 +1549,12 @@ function buildConnArgs(params) {
   if (params.dataset) { args.push("--dataset", params.dataset); }
   if (params.catalog) { args.push("--catalog", params.catalog); }
   if (params.token) { args.push("--token", params.token); }
+  if (params.http_path) { args.push("--http-path", params.http_path); }
+  if (params.odbc_driver) { args.push("--odbc-driver", params.odbc_driver); }
+  if (params.encrypt !== undefined && params.encrypt !== null && params.encrypt !== "") { args.push("--encrypt", String(params.encrypt)); }
+  if (params.trust_server_certificate !== undefined && params.trust_server_certificate !== null && params.trust_server_certificate !== "") {
+    args.push("--trust-server-certificate", String(params.trust_server_certificate));
+  }
   if (params.private_key_path) { args.push("--private-key-path", params.private_key_path); }
   // If raw PEM key content is provided, normalize and write to a temp file
   if (params.private_key_content) {

@@ -6,7 +6,7 @@ _COMMANDS = [
     "init", "validate", "lint", "compile", "diff", "validate-all",
     "gate", "policy-check", "generate", "import", "resolve",
     "resolve-project", "diff-all", "fmt", "stats", "print-schema",
-    "print-policy-schema", "doctor", "migrate", "watch",
+    "print-policy-schema", "doctor", "migrate", "apply", "watch",
 ]
 
 _GENERATE_SUBCOMMANDS = ["sql", "dbt", "metadata", "docs", "changelog"]

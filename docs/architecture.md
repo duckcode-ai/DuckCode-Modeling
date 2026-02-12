@@ -131,9 +131,18 @@ DuckCodeModeling is a YAML-first data modeling platform (Schema v2) with three r
 ### 2.11 CLI & Developer Experience Plane
 - **`dm doctor`** (`dm_core/doctor.py`): Project health diagnostics — checks schema files, policy schema, model files, policy packs, Python dependencies, CLI entry point, requirements.txt. Human-readable output with ✓/✗/! icons and summary. JSON output via `--output-json`.
 - **`dm migrate`** (`dm_core/migrate.py`): SQL migration script generator between two model versions. Produces ALTER TABLE (ADD/DROP/ALTER COLUMN), CREATE TABLE, DROP TABLE, CREATE/DROP INDEX statements. Supports Postgres, Snowflake, BigQuery, Databricks dialects. Skips views, materialized views, external tables, snapshots. Version header in output. File output via `--out`.
+- **`dm apply`** (`dm_cli/main.py`): Forward-engineering execution command for Snowflake, Databricks, and BigQuery. Supports `--sql-file` or `--old/--new` migration generation, `--dry-run`, policy preflight checks, destructive-change guardrails, migration ledger writes, and JSON execution reports. In product mode this is intended for CI/CD runners, not interactive UI apply.
 - **`dm completion`** (`dm_core/completion.py`): Shell completion generators for bash, zsh, and fish. Covers all commands, subcommands (generate/import), dialects, and file type filters. Usage: `eval "$(dm completion bash)"`.
 - **`dm watch`**: File watcher that polls for `*.model.yaml` changes and runs schema + semantic validation on each change. Configurable glob pattern and poll interval. Zero-dependency (uses `stat()` polling).
 - **JSON output**: `--output-json` flag on `doctor`, `stats`, `policy-check`, `gate`, `diff`, `diff-all`, `resolve`, `resolve-project` commands.
+
+### 2.12 Forward Engineering API
+- `POST /api/forward/generate-sql` -> wraps `dm generate sql`
+- `POST /api/forward/migrate` -> wraps `dm migrate`
+- `POST /api/forward/apply` -> wraps `dm apply` for Snowflake/Databricks/BigQuery (disabled by default; enable with `DM_ENABLE_DIRECT_APPLY=true`)
+- `POST /api/git/branch/create` -> create/checkout feature branch in project repo
+- `POST /api/git/push` -> push branch to remote origin
+- `POST /api/git/github/pr` -> open GitHub pull request from feature branch to base branch
 
 ## 3. End-to-End Data Flow
 1. User edits/imports YAML (single or multi-model project).

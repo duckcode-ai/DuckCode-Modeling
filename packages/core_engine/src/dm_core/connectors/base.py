@@ -397,8 +397,20 @@ def register_all() -> None:
     from dm_core.connectors.snowflake import SnowflakeConnector
     from dm_core.connectors.bigquery import BigQueryConnector
     from dm_core.connectors.databricks import DatabricksConnector
+    from dm_core.connectors.sqlserver import SQLServerConnector, AzureSQLConnector, AzureFabricConnector
+    from dm_core.connectors.redshift import RedshiftConnector
 
-    for cls in [PostgresConnector, MySQLConnector, SnowflakeConnector, BigQueryConnector, DatabricksConnector]:
+    for cls in [
+        PostgresConnector,
+        MySQLConnector,
+        SnowflakeConnector,
+        BigQueryConnector,
+        DatabricksConnector,
+        SQLServerConnector,
+        AzureSQLConnector,
+        AzureFabricConnector,
+        RedshiftConnector,
+    ]:
         _register(cls())
 
 

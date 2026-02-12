@@ -227,6 +227,7 @@ class SnowflakeConnector(BaseConnector):
                 "description": f"Pulled from Snowflake {db_name}.{schema_filter}.{table_name} on {date.today().isoformat()}",
                 "fields": [],
                 "schema": schema_filter,
+                "database": db_name,
             }
 
         # --- Columns ---

@@ -132,6 +132,7 @@ class DatabricksConnector(BaseConnector):
                 "description": f"Pulled from Databricks {catalog_name}.{schema_name}.{table_name} on {date.today().isoformat()}",
                 "fields": [],
                 "schema": schema_name,
+                "database": catalog_name,
             }
 
         # --- Columns via DESCRIBE ---
