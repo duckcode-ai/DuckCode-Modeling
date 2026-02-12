@@ -328,6 +328,41 @@ app.post("/api/projects", async (req, res) => {
   }
 });
 
+// Update an existing project folder
+app.put("/api/projects/:id", async (req, res) => {
+  try {
+    const { name, path: folderPath, create_if_missing } = req.body || {};
+    if (!name || !folderPath) {
+      return res.status(400).json({ error: "name and path are required" });
+    }
+
+    if (!existsSync(folderPath)) {
+      if (create_if_missing) {
+        await mkdir(folderPath, { recursive: true });
+      } else {
+        return res.status(400).json({ error: `Path does not exist: ${folderPath}` });
+      }
+    }
+
+    const projects = await loadProjects();
+    const idx = projects.findIndex((p) => p.id === req.params.id);
+    if (idx < 0) {
+      return res.status(404).json({ error: "Project not found" });
+    }
+
+    const updated = {
+      ...projects[idx],
+      name,
+      path: folderPath,
+    };
+    projects[idx] = updated;
+    await saveProjects(projects);
+    res.json({ project: updated });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // Remove a project
 app.delete("/api/projects/:id", async (req, res) => {
   try {
@@ -340,13 +375,22 @@ app.delete("/api/projects/:id", async (req, res) => {
   }
 });
 
-// List files in a project folder (recursive, *.model.yaml and *.yml)
+// List YAML files in a project folder (recursive, *.yaml / *.yml)
 app.get("/api/projects/:id/files", async (req, res) => {
   try {
     const projects = await loadProjects();
     const project = projects.find((p) => p.id === req.params.id);
     if (!project) {
       return res.status(404).json({ error: "Project not found" });
+    }
+
+    const pathErr = await assertReadableDirectory(project.path);
+    if (pathErr) {
+      return res.status(400).json({
+        error:
+          `Project path is not accessible: ${project.path}. ` +
+          "If DataLex runs in Docker, mount the host folder and use the container path (for example /workspace/...).",
+      });
     }
 
     const files = await walkYamlFiles(project.path);
@@ -579,11 +623,7 @@ async function walkYamlFiles(dir, base = dir) {
       if (entry.name.startsWith(".") || entry.name === "node_modules") continue;
       const sub = await walkYamlFiles(fullPath, base);
       results.push(...sub);
-    } else if (
-      entry.name.endsWith(".model.yaml") ||
-      entry.name.endsWith(".model.yml") ||
-      entry.name.endsWith(".policy.yaml")
-    ) {
+    } else if (entry.name.toLowerCase().endsWith(".yaml") || entry.name.toLowerCase().endsWith(".yml")) {
       const relPath = relative(base, fullPath);
       const stats = await stat(fullPath);
       results.push({
@@ -596,6 +636,19 @@ async function walkYamlFiles(dir, base = dir) {
     }
   }
   return results;
+}
+
+async function assertReadableDirectory(dirPath) {
+  try {
+    const st = await stat(dirPath);
+    if (!st.isDirectory()) {
+      throw new Error(`Path is not a directory: ${dirPath}`);
+    }
+    await readdir(dirPath, { withFileTypes: true });
+    return null;
+  } catch (err) {
+    return err;
+  }
 }
 
 // Read a file's content
@@ -799,6 +852,15 @@ app.get("/api/projects/:id/model-graph", async (req, res) => {
     const project = projects.find((p) => p.id === req.params.id);
     if (!project) {
       return res.status(404).json({ error: "Project not found" });
+    }
+
+    const pathErr = await assertReadableDirectory(project.path);
+    if (pathErr) {
+      return res.status(400).json({
+        error:
+          `Project path is not accessible: ${project.path}. ` +
+          "If DataLex runs in Docker, mount the host folder and use the container path (for example /workspace/...).",
+      });
     }
 
     // Find all model files and parse their imports

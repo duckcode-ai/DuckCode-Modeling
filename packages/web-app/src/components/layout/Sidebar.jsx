@@ -16,6 +16,7 @@ import {
   PanelLeftOpen,
   FolderPlus,
   FileCode2,
+  Pencil,
   AlertCircle,
   CheckCircle2,
   List,
@@ -159,6 +160,16 @@ function ProjectSection() {
                 </span>
               )}
               <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  openModal("editProject", { project });
+                }}
+                className="opacity-0 group-hover:opacity-100 p-0.5 rounded hover:bg-bg-hover text-text-muted hover:text-text-accent transition-all"
+                title="Edit project"
+              >
+                <Pencil size={11} />
+              </button>
+              <button
                 onClick={(e) => { e.stopPropagation(); removeProjectFolder(project.id); }}
                 className="opacity-0 group-hover:opacity-100 p-0.5 rounded hover:bg-bg-hover text-text-muted hover:text-status-error transition-all"
                 title="Remove project"
@@ -277,7 +288,7 @@ function FileSection() {
             );
           })}
           {files.length === 0 && (
-            <p className="text-xs text-text-muted px-2 py-1">No model files found.</p>
+            <p className="text-xs text-text-muted px-2 py-1">No YAML files found.</p>
           )}
           {dropActive && !offlineMode && activeProjectId && (
             <p className="text-[10px] text-blue-600 px-2 py-1 font-medium">

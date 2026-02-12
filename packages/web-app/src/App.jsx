@@ -32,6 +32,7 @@ import {
   X,
   FolderPlus,
   Plus,
+  Pencil,
   AlertCircle,
   Search,
   Database,
@@ -171,6 +172,96 @@ function NewFileModal() {
             </button>
             <button type="submit" className="px-3 py-1.5 rounded-md text-xs font-medium bg-accent-blue text-white hover:bg-accent-blue/80 transition-colors">
               Create
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+function EditProjectModal() {
+  const { closeModal, modalPayload } = useUiStore();
+  const { updateProjectFolder } = useWorkspaceStore();
+  const project = modalPayload?.project || null;
+  const [name, setName] = useState(project?.name || "");
+  const [path, setPath] = useState(project?.path || "");
+  const [createIfMissing, setCreateIfMissing] = useState(false);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    setName(project?.name || "");
+    setPath(project?.path || "");
+    setCreateIfMissing(false);
+    setError("");
+  }, [project?.id]);
+
+  if (!project) return null;
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    if (!name.trim() || !path.trim()) {
+      setError("Both name and path are required");
+      return;
+    }
+    try {
+      await updateProjectFolder(project.id, name.trim(), path.trim(), createIfMissing);
+      closeModal();
+    } catch (err) {
+      setError(err.message);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm" onClick={closeModal}>
+      <div className="bg-bg-secondary border border-border-primary rounded-xl shadow-2xl w-[420px] max-w-[90vw]" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center justify-between px-4 py-3 border-b border-border-primary">
+          <h3 className="text-sm font-semibold text-text-primary flex items-center gap-2">
+            <Pencil size={16} className="text-accent-blue" />
+            Edit Project Folder
+          </h3>
+          <button onClick={closeModal} className="p-1 rounded-md hover:bg-bg-hover text-text-muted hover:text-text-primary transition-colors">
+            <X size={16} />
+          </button>
+        </div>
+        <form onSubmit={handleSubmit} className="p-4 space-y-3">
+          <div>
+            <label className="text-xs text-text-muted font-medium block mb-1">Project Name</label>
+            <input
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              className="w-full bg-bg-primary border border-border-primary rounded-md px-3 py-2 text-sm text-text-primary placeholder:text-text-muted outline-none focus:border-accent-blue"
+              autoFocus
+            />
+          </div>
+          <div>
+            <label className="text-xs text-text-muted font-medium block mb-1">Folder Path (absolute)</label>
+            <input
+              value={path}
+              onChange={(e) => setPath(e.target.value)}
+              className="w-full bg-bg-primary border border-border-primary rounded-md px-3 py-2 text-sm text-text-primary placeholder:text-text-muted outline-none focus:border-accent-blue font-mono text-xs"
+            />
+          </div>
+          <label className="flex items-center gap-2 text-xs text-text-muted">
+            <input
+              type="checkbox"
+              checked={createIfMissing}
+              onChange={(e) => setCreateIfMissing(e.target.checked)}
+            />
+            Create folder if it does not exist
+          </label>
+          {error && (
+            <div className="flex items-center gap-2 text-xs text-status-error">
+              <AlertCircle size={12} />
+              {error}
+            </div>
+          )}
+          <div className="flex justify-end gap-2 pt-1">
+            <button type="button" onClick={closeModal} className="px-3 py-1.5 rounded-md text-xs text-text-muted hover:bg-bg-hover transition-colors">
+              Cancel
+            </button>
+            <button type="submit" className="px-3 py-1.5 rounded-md text-xs font-medium bg-accent-blue text-white hover:bg-accent-blue/80 transition-colors">
+              Save Changes
             </button>
           </div>
         </form>
@@ -462,6 +553,7 @@ export default function App() {
 
       {/* Modals */}
       {activeModal === "addProject" && <AddProjectModal />}
+      {activeModal === "editProject" && <EditProjectModal />}
       {activeModal === "newFile" && <NewFileModal />}
       {showShortcuts && <KeyboardShortcutsPanel onClose={() => setShowShortcuts(false)} />}
 

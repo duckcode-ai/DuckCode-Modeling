@@ -47,6 +47,17 @@ def _to_model_name(text: str) -> str:
     return cleaned or "imported_model"
 
 
+def _to_snake(name: str) -> str:
+    text = re.sub(r"[^A-Za-z0-9]+", "_", str(name or "").strip())
+    text = re.sub(r"([a-z0-9])([A-Z])", r"\1_\2", text)
+    text = re.sub(r"__+", "_", text).strip("_").lower()
+    if not text:
+        return ""
+    if text[0].isdigit():
+        text = f"f_{text}"
+    return text
+
+
 def _split_top_level(body: str) -> List[str]:
     parts: List[str] = []
     current: List[str] = []
@@ -570,7 +581,7 @@ def _as_constraint_list(constraints: Any) -> List[Any]:
 def _dbt_constraint_target(constraint: Dict[str, Any]) -> Tuple[Optional[str], Optional[str]]:
     to_expr = constraint.get("to") or constraint.get("references")
     target_entity = _dbt_parse_to_entity(to_expr)
-    target_field = str(constraint.get("field") or "").strip()
+    target_field = _to_snake(str(constraint.get("field") or "").strip())
     if target_entity and target_field:
         return target_entity, target_field
 
@@ -581,11 +592,14 @@ def _dbt_constraint_target(constraint: Dict[str, Any]) -> Tuple[Optional[str], O
     if not m:
         return None, None
     entity_token = m.group(1).replace('"', "").split(".")[-1]
-    field_token = m.group(2).replace('"', "").strip()
+    field_token = _to_snake(m.group(2).replace('"', "").strip())
     return (_to_pascal(entity_token) if entity_token else None), (field_token or None)
 
 
 def _ensure_field(entity: Dict[str, Any], field_name: str) -> None:
+    field_name = _to_snake(field_name)
+    if not field_name:
+        return
     fields = entity.setdefault("fields", [])
     if any(str(f.get("name", "")) == field_name for f in fields):
         return
@@ -597,6 +611,30 @@ def _ensure_field(entity: Dict[str, Any], field_name: str) -> None:
             "description": "Inferred from dbt relationships test",
         }
     )
+
+
+def _upsert_field(entity: Dict[str, Any], field: Dict[str, Any]) -> None:
+    fields = entity.setdefault("fields", [])
+    name = str(field.get("name", ""))
+    if not name:
+        return
+    existing = next((f for f in fields if str(f.get("name", "")) == name), None)
+    if existing is None:
+        fields.append(field)
+        return
+
+    if field.get("type") and (not existing.get("type") or existing.get("type") == "string"):
+        existing["type"] = field["type"]
+    if field.get("description") and not existing.get("description"):
+        existing["description"] = field["description"]
+    if field.get("nullable") is False:
+        existing["nullable"] = False
+    if field.get("unique"):
+        existing["unique"] = True
+    if field.get("primary_key"):
+        existing["primary_key"] = True
+    if field.get("foreign_key"):
+        existing["foreign_key"] = True
 
 
 def import_dbt_schema_yml(
@@ -659,7 +697,7 @@ def import_dbt_schema_yml(
         for col in columns:
             if not isinstance(col, dict):
                 continue
-            col_name = str(col.get("name", "")).strip()
+            col_name = _to_snake(str(col.get("name", "")).strip())
             if not col_name:
                 continue
 
@@ -697,7 +735,7 @@ def import_dbt_schema_yml(
                     elif tname == "relationships":
                         cfg = test_cfg if isinstance(test_cfg, dict) else {}
                         target_entity = _dbt_parse_to_entity(cfg.get("to"))
-                        target_field = str(cfg.get("field") or "").strip()
+                        target_field = _to_snake(str(cfg.get("field") or "").strip())
                         if target_entity and target_field:
                             relationship_candidates.append(
                                 {
@@ -754,7 +792,7 @@ def import_dbt_schema_yml(
             if has_fk:
                 field["foreign_key"] = True
 
-            entity["fields"].append(field)
+            _upsert_field(entity, field)
 
     # dbt sources -> external tables
     for source in loaded.get("sources", []) if isinstance(loaded.get("sources"), list) else []:
@@ -806,7 +844,7 @@ def import_dbt_schema_yml(
             cols = constraint_def.get("columns")
             if not isinstance(cols, list):
                 continue
-            col_names = [str(c).strip() for c in cols if str(c).strip()]
+            col_names = [_to_snake(str(c).strip()) for c in cols if str(c).strip()]
             if not col_names:
                 continue
 

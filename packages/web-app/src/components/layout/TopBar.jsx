@@ -14,6 +14,7 @@ import {
   Settings,
   ChevronRight,
   FileCode2,
+  LifeBuoy,
 } from "lucide-react";
 import useWorkspaceStore from "../../stores/workspaceStore";
 import useDiagramStore from "../../stores/diagramStore";
@@ -132,6 +133,15 @@ export default function TopBar() {
           {loading && (
             <Loader2 size={12} className="text-text-muted animate-spin" />
           )}
+          <a
+            href="https://discord.gg/Dnm6bUvk"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="p-1.5 rounded-md text-text-muted border border-border-primary bg-white hover:bg-bg-hover hover:text-text-primary transition-colors"
+            title="Support community (Discord)"
+          >
+            <LifeBuoy size={13} />
+          </a>
           <button
             onClick={toggleTheme}
             className="p-1.5 rounded-md text-text-muted border border-border-primary bg-white hover:bg-bg-hover hover:text-text-primary transition-colors"

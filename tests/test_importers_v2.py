@@ -284,3 +284,36 @@ models:
 
         rels = model.get("relationships", [])
         assert any(r["from"] == "DimCustomers.customer_id" and r["to"] == "FctOrders.customer_id" for r in rels)
+
+    def test_normalizes_non_snake_case_column_names(self):
+        dbt_schema = """
+version: 2
+models:
+  - name: stg_orders
+    columns:
+      - name: OrderID
+        tests: [not_null, unique]
+      - name: Customer-ID
+        tests:
+          - relationships:
+              to: ref('dim_customers')
+              field: CustomerID
+  - name: dim_customers
+    columns:
+      - name: CustomerID
+        tests: [not_null, unique]
+"""
+        model = import_dbt_schema_yml(dbt_schema, model_name="dbt_normalized")
+        entities = {e["name"]: e for e in model["entities"]}
+        assert "StgOrders" in entities
+        assert "DimCustomers" in entities
+
+        stg_fields = {f["name"]: f for f in entities["StgOrders"]["fields"]}
+        dim_fields = {f["name"]: f for f in entities["DimCustomers"]["fields"]}
+        assert "order_id" in stg_fields
+        assert "customer_id" in stg_fields
+        assert "customer_id" in dim_fields
+        assert stg_fields["order_id"].get("primary_key") is True
+
+        rels = model.get("relationships", [])
+        assert any(r["from"] == "DimCustomers.customer_id" and r["to"] == "StgOrders.customer_id" for r in rels)

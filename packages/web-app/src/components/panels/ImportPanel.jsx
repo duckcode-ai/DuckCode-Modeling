@@ -78,6 +78,19 @@ function toPascal(name) {
   return name.replace(/["]/g, "").split(/[^A-Za-z0-9]+/).filter(Boolean).map(p => p[0].toUpperCase() + p.slice(1)).join("");
 }
 
+function toSnakeCase(name) {
+  const base = String(name || "").trim();
+  if (!base) return "";
+  const withUnderscores = base
+    .replace(/[^A-Za-z0-9]+/g, "_")
+    .replace(/([a-z0-9])([A-Z])/g, "$1_$2")
+    .replace(/__+/g, "_")
+    .replace(/^_+|_+$/g, "")
+    .toLowerCase();
+  if (!withUnderscores) return "";
+  return /^[0-9]/.test(withUnderscores) ? `f_${withUnderscores}` : withUnderscores;
+}
+
 function parseClientSide(format, text, modelName) {
   if (format === "sql") return parseSQLClient(text, modelName);
   if (format === "dbml") return parseDBMLClient(text, modelName);
@@ -220,7 +233,7 @@ function asConstraintList(constraints) {
 
 function parseDbtConstraintTarget(constraint = {}) {
   const explicitTo = parseDbtToEntity(constraint?.to || constraint?.references);
-  const explicitField = String(constraint?.field || "").trim();
+  const explicitField = toSnakeCase(String(constraint?.field || "").trim());
   if (explicitTo && explicitField) {
     return { parentEntity: explicitTo, parentField: explicitField };
   }
@@ -231,20 +244,37 @@ function parseDbtConstraintTarget(constraint = {}) {
   if (!m) return null;
   const token = String(m[1]).replace(/["`]/g, "").split(".").pop();
   const parentEntity = token ? toPascal(token) : null;
-  const parentField = String(m[2] || "").replace(/["`]/g, "").trim();
+  const parentField = toSnakeCase(String(m[2] || "").replace(/["`]/g, "").trim());
   if (!parentEntity || !parentField) return null;
   return { parentEntity, parentField };
 }
 
 function ensureField(entity, fieldName) {
+  const normalized = toSnakeCase(fieldName);
+  if (!normalized) return;
   entity.fields = Array.isArray(entity.fields) ? entity.fields : [];
-  if (entity.fields.some((f) => f.name === fieldName)) return;
+  if (entity.fields.some((f) => f.name === normalized)) return;
   entity.fields.push({
-    name: fieldName,
+    name: normalized,
     type: "string",
     nullable: true,
     description: "Inferred from dbt relationships test",
   });
+}
+
+function upsertField(entity, field) {
+  entity.fields = Array.isArray(entity.fields) ? entity.fields : [];
+  const existing = entity.fields.find((f) => f.name === field.name);
+  if (!existing) {
+    entity.fields.push(field);
+    return;
+  }
+  if (field.type && (!existing.type || existing.type === "string")) existing.type = field.type;
+  if (field.description && !existing.description) existing.description = field.description;
+  if (field.nullable === false) existing.nullable = false;
+  if (field.unique) existing.unique = true;
+  if (field.primary_key) existing.primary_key = true;
+  if (field.foreign_key) existing.foreign_key = true;
 }
 
 function parseDBTSchemaClient(text, modelName) {
@@ -280,7 +310,7 @@ function parseDBTSchemaClient(text, modelName) {
 
     for (const col of columns) {
       if (!col || typeof col !== "object") continue;
-      const colName = String(col.name || "").trim();
+      const colName = toSnakeCase(String(col.name || "").trim());
       if (!colName) continue;
 
       const field = {
@@ -308,7 +338,7 @@ function parseDBTSchemaClient(text, modelName) {
           else if (tname === "unique") hasUnique = true;
           else if (tname === "relationships") {
             const toEntity = parseDbtToEntity(cfg?.to);
-            const parentField = String(cfg?.field || "").trim();
+            const parentField = toSnakeCase(String(cfg?.field || "").trim());
             if (toEntity && parentField) {
               candidates.push({
                 parentEntity: toEntity,
@@ -359,7 +389,7 @@ function parseDBTSchemaClient(text, modelName) {
       if (hasNotNull && hasUnique) field.primary_key = true;
       if (hasFk) field.foreign_key = true;
 
-      entity.fields.push(field);
+      upsertField(entity, field);
     }
   }
 
@@ -402,7 +432,7 @@ function parseDBTSchemaClient(text, modelName) {
     for (const c of asConstraintList(mdl.constraints)) {
       if (!c || typeof c !== "object") continue;
       const ctype = String(c.type || c.constraint_type || "").toLowerCase().replace(/\s+/g, "_");
-      const cols = Array.isArray(c.columns) ? c.columns.map((x) => String(x).trim()).filter(Boolean) : [];
+      const cols = Array.isArray(c.columns) ? c.columns.map((x) => toSnakeCase(String(x).trim())).filter(Boolean) : [];
       if (cols.length === 0) continue;
 
       if (ctype === "primary_key") {

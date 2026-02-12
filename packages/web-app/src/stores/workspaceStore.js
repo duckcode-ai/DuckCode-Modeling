@@ -1,16 +1,61 @@
 import { create } from "zustand";
+import yaml from "js-yaml";
 import {
   fetchProjects,
   addProject,
+  updateProject,
   removeProject,
   fetchProjectFiles,
   fetchFileContent,
   saveFileContent,
   createProjectFile,
   moveProjectFile,
+  importSchemaContent,
 } from "../lib/api";
 import { SAMPLE_MODEL } from "../sampleModel";
 import { normalizeImportedModelFileName } from "../lib/importModelName";
+
+function parseYamlObjectSafe(text) {
+  try {
+    const doc = yaml.load(text);
+    if (!doc || typeof doc !== "object" || Array.isArray(doc)) return null;
+    return doc;
+  } catch (_err) {
+    return null;
+  }
+}
+
+function isLikelyDbtSchema(text, sourceName = "") {
+  const doc = parseYamlObjectSafe(text);
+  if (!doc) return false;
+  const hasDbtSections = Array.isArray(doc.models) || Array.isArray(doc.sources);
+  if (!hasDbtSections) return false;
+  const version = String(doc.version ?? "").trim();
+  const looksLikeSchemaFile = /(^|\/)schema\.ya?ml$/i.test(String(sourceName || ""));
+  return version === "2" || version === "2.0" || looksLikeSchemaFile;
+}
+
+function deriveModelNameFromPath(pathOrName) {
+  const raw = String(pathOrName || "imported_model").replace(/\.ya?ml$/i, "");
+  const normalizedPath = raw.replace(/\\/g, "/");
+  const parts = normalizedPath.split("/").filter(Boolean);
+
+  // Common dbt pattern: <folder>/schema.yml -> use folder name for model stem.
+  if (parts.length >= 2 && /^schema$/i.test(parts[parts.length - 1])) {
+    const folder = parts[parts.length - 2];
+    if (folder) {
+      return `${folder.replace(/[^a-zA-Z0-9]+/g, "_").toLowerCase()}_dbt`;
+    }
+  }
+
+  const cleaned = normalizedPath
+    .replace(/[^a-zA-Z0-9/]+/g, "_")
+    .replace(/_+/g, "_")
+    .replace(/^_+|_+$/g, "")
+    .replace(/\//g, "_")
+    .toLowerCase();
+  return cleaned || "imported_model";
+}
 
 const useWorkspaceStore = create((set, get) => ({
   // Projects
@@ -237,6 +282,24 @@ const useWorkspaceStore = create((set, get) => ({
     }
   },
 
+  updateProjectFolder: async (id, name, path, createIfMissing = false) => {
+    set({ loading: true, error: null });
+    try {
+      const updated = await updateProject(id, name, path, createIfMissing);
+      set((s) => ({
+        projects: s.projects.map((p) => (p.id === id ? updated : p)),
+        loading: false,
+      }));
+      if (get().activeProjectId === id) {
+        await get().selectProject(id);
+      }
+      return updated;
+    } catch (err) {
+      set({ error: err.message, loading: false });
+      throw err;
+    }
+  },
+
   removeProjectFolder: async (id) => {
     try {
       await removeProject(id);
@@ -285,14 +348,48 @@ const useWorkspaceStore = create((set, get) => ({
     set({ loading: true, error: null });
     try {
       const data = await fetchFileContent(fileInfo.fullPath);
-      const file = { ...fileInfo, content: data.content };
+      const sourceName = fileInfo.path || fileInfo.name || "";
+      let renderedContent = data.content;
+      let convertedFromDbt = false;
+
+      if (isLikelyDbtSchema(data.content, sourceName)) {
+        try {
+          const modelName = deriveModelNameFromPath(sourceName);
+          const imported = await importSchemaContent({
+            format: "dbt",
+            content: data.content,
+            filename: fileInfo.name || "schema.yml",
+            modelName,
+          });
+          if (imported?.yaml) {
+            renderedContent = imported.yaml;
+            convertedFromDbt = true;
+          }
+        } catch (_err) {
+          // Keep original content if conversion fails.
+        }
+      }
+
+      let autoSavedConvertedContent = false;
+      if (convertedFromDbt && renderedContent && renderedContent !== data.content) {
+        try {
+          await saveFileContent(fileInfo.fullPath, renderedContent);
+          autoSavedConvertedContent = true;
+        } catch (_err) {
+          autoSavedConvertedContent = false;
+        }
+      }
+
+      const file = { ...fileInfo, content: renderedContent };
       set((s) => {
         const alreadyOpen = s.openTabs.some((t) => t.fullPath === file.fullPath);
         return {
           activeFile: file,
-          activeFileContent: data.content,
-          originalContent: data.content,
-          isDirty: false,
+          activeFileContent: renderedContent,
+          originalContent: autoSavedConvertedContent
+            ? renderedContent
+            : (convertedFromDbt ? data.content : renderedContent),
+          isDirty: !autoSavedConvertedContent && convertedFromDbt && renderedContent !== data.content,
           openTabs: alreadyOpen ? s.openTabs : [...s.openTabs, file],
           loading: false,
         };
@@ -434,7 +531,26 @@ const useWorkspaceStore = create((set, get) => ({
       const created = [];
 
       for (const file of yamlFiles) {
-        const normalized = normalizeImportedModelFileName(file.name);
+        const sourcePath = file.webkitRelativePath || file.name || "";
+        const text = await file.text();
+
+        let normalized = normalizeImportedModelFileName(file.name);
+        let outContent = text;
+        if (isLikelyDbtSchema(text, sourcePath)) {
+          const modelName = deriveModelNameFromPath(sourcePath);
+          const imported = await importSchemaContent({
+            format: "dbt",
+            content: text,
+            filename: file.name,
+            modelName,
+          });
+          if (!imported?.yaml) {
+            throw new Error(`Failed to import dbt schema from ${file.name}`);
+          }
+          normalized = normalizeImportedModelFileName(`${modelName}.model.yaml`);
+          outContent = imported.yaml;
+        }
+
         const ext = normalized.endsWith(".model.yml") ? ".model.yml" : ".model.yaml";
         const rootName = normalized.slice(0, -ext.length);
         let candidate = normalized;
@@ -443,8 +559,8 @@ const useWorkspaceStore = create((set, get) => ({
           candidate = `${rootName}_${suffix}${ext}`;
           suffix += 1;
         }
-        const text = await file.text();
-        const createdFile = await createProjectFile(projectId, candidate, text);
+
+        const createdFile = await createProjectFile(projectId, candidate, outContent);
         existingNames.add(candidate);
         created.push(createdFile);
       }

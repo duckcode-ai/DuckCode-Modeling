@@ -53,6 +53,14 @@ function parseYaml(yamlText) {
   }
 }
 
+function looksLikeDbtSchemaDocument(model) {
+  if (!isObject(model)) return false;
+  const hasDbtSections = Array.isArray(model.models) || Array.isArray(model.sources);
+  if (!hasDbtSections) return false;
+  const version = String(model.version ?? "").trim();
+  return version === "2" || version === "2.0";
+}
+
 function structuralIssues(model) {
   const issues = [];
 
@@ -801,6 +809,23 @@ export function runModelChecks(yamlText) {
       errors: [parseIssue],
       warnings: [],
       hasErrors: true
+    };
+  }
+
+  if (looksLikeDbtSchemaDocument(parsed.model)) {
+    const dbtIssue = issue(
+      "warn",
+      "DBT_SCHEMA_DETECTED",
+      "This file looks like dbt schema.yml. Import it as dbt to generate a DataLex model.",
+      "/"
+    );
+    return {
+      model: null,
+      parseError: "",
+      issues: [dbtIssue],
+      errors: [],
+      warnings: [dbtIssue],
+      hasErrors: false
     };
   }
 

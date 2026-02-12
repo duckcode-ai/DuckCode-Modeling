@@ -31,6 +31,7 @@ const useUiStore = create((set, get) => ({
 
   // ── Modals ──
   activeModal: null,
+  modalPayload: null,
 
   // ── Notifications ──
   toasts: [],
@@ -63,8 +64,8 @@ const useUiStore = create((set, get) => ({
   toggleCommandPalette: () => set((s) => ({ commandPaletteOpen: !s.commandPaletteOpen })),
   setCommandPaletteOpen: (open) => set({ commandPaletteOpen: open }),
 
-  openModal: (modal) => set({ activeModal: modal }),
-  closeModal: () => set({ activeModal: null }),
+  openModal: (modal, payload = null) => set({ activeModal: modal, modalPayload: payload }),
+  closeModal: () => set({ activeModal: null, modalPayload: null }),
 
   addToast: (toast) => {
     const id = `toast_${Date.now()}`;

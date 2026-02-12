@@ -128,6 +128,7 @@ Examples:
 - Local connector profiles are stored in `.dm-connections.json`.
 - Local project registry is stored in `.dm-projects.json`.
 - `.claude`, `.vscode`, `.idea`, and local runtime files are git-ignored.
+- Support community (Discord): `https://discord.gg/Dnm6bUvk`
 
 ## License
 MIT. See `LICENSE`.

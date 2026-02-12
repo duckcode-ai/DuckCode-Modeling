@@ -29,6 +29,14 @@ export async function removeProject(id) {
   return request(`/projects/${id}`, { method: "DELETE" });
 }
 
+export async function updateProject(id, name, path, createIfMissing = false) {
+  const data = await request(`/projects/${id}`, {
+    method: "PUT",
+    body: JSON.stringify({ name, path, create_if_missing: createIfMissing }),
+  });
+  return data.project;
+}
+
 export async function fetchProjectFiles(projectId) {
   const data = await request(`/projects/${projectId}/files`);
   return data;
@@ -57,6 +65,13 @@ export async function moveProjectFile(targetProjectId, sourcePath, mode = "move"
   return request(`/projects/${targetProjectId}/move-file`, {
     method: "POST",
     body: JSON.stringify({ sourcePath, mode }),
+  });
+}
+
+export async function importSchemaContent({ format, content, filename, modelName }) {
+  return request("/import", {
+    method: "POST",
+    body: JSON.stringify({ format, content, filename, modelName }),
   });
 }
 
