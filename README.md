@@ -39,9 +39,11 @@ DataLex helps data teams treat models as code.
 - npm 9+
 - Python 3.9+
 - Git
-- Docker (optional, for container install)
+- Docker (optional)
 
-## Local Install (Recommended for Development)
+## Local Install (Recommended)
+Local install is the best experience for most users because DataLex can access your folders directly (no Docker mount/path translation issues).
+
 ### 1. Clone
 ```bash
 git clone https://github.com/duckcode-ai/DataLex.git
@@ -89,6 +91,7 @@ Per-example review guides are available for every sample YAML file:
 
 ## Docker Install (Simple Single-Container Run)
 The Docker image builds the web UI and serves it from the API server.
+Use Docker when you specifically want containerized install. For day-to-day modeling, local install is smoother.
 
 ### 1. Build image
 ```bash
@@ -102,14 +105,32 @@ docker run --rm -p 3001:3001 datalex:latest
 
 Open: `http://localhost:3001`
 
-### Optional: mount your model folder
-If you want to browse host model files from inside the container:
+### Important Docker limitation
+Inside Docker, DataLex can only see paths that are mounted into the container.
+
+### Recommended Docker mount pattern (one-time broad parent mount)
+Mount a broad parent once (for example your whole user folder), then point DataLex to container paths:
 ```bash
 docker run --rm -p 3001:3001 \
-  -v /absolute/path/to/your/models:/workspace/models \
+  -v /Users/<you>:/workspace/host \
   datalex:latest
 ```
-Then add project path `/workspace/models` from the UI.
+
+Then add project paths like:
+- `/workspace/host/Models/DuckCode`
+- `/workspace/host/dbt-projects/nba_analysis`
+
+Alternative (keep native host paths unchanged):
+```bash
+docker run --rm -p 3001:3001 \
+  -v /Users/<you>:/Users/<you> \
+  datalex:latest
+```
+With this option, you can keep using paths like `/Users/<you>/Models/...` inside DataLex.
+
+Behavior summary:
+- New or updated files inside mounted folders: no container restart needed.
+- New folders outside mounted scope: restart container with an additional `-v` mount (or keep using a broad parent mount).
 
 ## CLI Quick Start
 Activate venv first:

@@ -192,6 +192,7 @@ function FileSection() {
     projectFiles,
     activeFile,
     activeProjectId,
+    projectPath,
     openFile,
     offlineMode,
     localDocuments,
@@ -288,7 +289,15 @@ function FileSection() {
             );
           })}
           {files.length === 0 && (
-            <p className="text-xs text-text-muted px-2 py-1">No YAML files found.</p>
+            <div className="px-2 py-1 space-y-1">
+              <p className="text-xs text-text-muted">No YAML files found.</p>
+              {!offlineMode && activeProjectId && projectPath && (
+                <p className="text-[10px] text-text-muted">
+                  If this folder has files on your host and DataLex runs in Docker, mount the parent folder and use
+                  a container path such as <code>/workspace/host/...</code>.
+                </p>
+              )}
+            </div>
           )}
           {dropActive && !offlineMode && activeProjectId && (
             <p className="text-[10px] text-blue-600 px-2 py-1 font-medium">

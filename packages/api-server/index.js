@@ -29,6 +29,7 @@ const WEB_DIST = process.env.WEB_DIST || join(REPO_ROOT, "packages", "web-app", 
 // Use venv Python if available, otherwise fall back to system python3
 const VENV_PYTHON = join(REPO_ROOT, ".venv", "bin", "python3");
 const PYTHON = existsSync(VENV_PYTHON) ? VENV_PYTHON : "python3";
+const IS_DOCKER_RUNTIME = existsSync("/.dockerenv");
 
 async function loadProjects() {
   try {
@@ -386,10 +387,14 @@ app.get("/api/projects/:id/files", async (req, res) => {
 
     const pathErr = await assertReadableDirectory(project.path);
     if (pathErr) {
+      const dockerHint = IS_DOCKER_RUNTIME
+        ? " Running in Docker: mount the host parent path (for example -v /Users/<you>:/workspace/host) and use /workspace/host/... in DataLex."
+        : "";
       return res.status(400).json({
         error:
           `Project path is not accessible: ${project.path}. ` +
-          "If DataLex runs in Docker, mount the host folder and use the container path (for example /workspace/...).",
+          "Check path permissions and existence." +
+          dockerHint,
       });
     }
 
@@ -856,10 +861,14 @@ app.get("/api/projects/:id/model-graph", async (req, res) => {
 
     const pathErr = await assertReadableDirectory(project.path);
     if (pathErr) {
+      const dockerHint = IS_DOCKER_RUNTIME
+        ? " Running in Docker: mount the host parent path (for example -v /Users/<you>:/workspace/host) and use /workspace/host/... in DataLex."
+        : "";
       return res.status(400).json({
         error:
           `Project path is not accessible: ${project.path}. ` +
-          "If DataLex runs in Docker, mount the host folder and use the container path (for example /workspace/...).",
+          "Check path permissions and existence." +
+          dockerHint,
       });
     }
 

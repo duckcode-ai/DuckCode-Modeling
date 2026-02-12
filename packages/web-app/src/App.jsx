@@ -103,6 +103,10 @@ function AddProjectModal() {
               placeholder="e.g. /Users/you/projects/models"
               className="w-full bg-bg-primary border border-border-primary rounded-md px-3 py-2 text-sm text-text-primary placeholder:text-text-muted outline-none focus:border-accent-blue font-mono text-xs"
             />
+            <p className="mt-1 text-[11px] text-text-muted">
+              Recommended: run DataLex locally for full file access. In Docker, use mounted container paths like
+              {" "}<code>/workspace/host/...</code>.
+            </p>
           </div>
           <label className="flex items-center gap-2 text-xs text-text-muted">
             <input
@@ -241,6 +245,9 @@ function EditProjectModal() {
               onChange={(e) => setPath(e.target.value)}
               className="w-full bg-bg-primary border border-border-primary rounded-md px-3 py-2 text-sm text-text-primary placeholder:text-text-muted outline-none focus:border-accent-blue font-mono text-xs"
             />
+            <p className="mt-1 text-[11px] text-text-muted">
+              In Docker mode, this must be a mounted container path (for example <code>/workspace/host/Models</code>).
+            </p>
           </div>
           <label className="flex items-center gap-2 text-xs text-text-muted">
             <input
