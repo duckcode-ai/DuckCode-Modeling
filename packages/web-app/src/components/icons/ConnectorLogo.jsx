@@ -2,6 +2,7 @@ import React from "react";
 import { Database } from "lucide-react";
 
 const BRAND = {
+  dbt_repo: { bg: "from-[#1d4ed8] to-[#0ea5e9]", ring: "ring-[#bfdbfe]" },
   postgres: { bg: "from-[#1b4f8f] to-[#2f7cc1]", ring: "ring-[#b8d6f5]" },
   mysql: { bg: "from-[#0e5f8f] to-[#e48422]", ring: "ring-[#f3d3a9]" },
   snowflake: { bg: "from-[#38bdf8] to-[#0ea5e9]", ring: "ring-[#bae6fd]" },
@@ -10,6 +11,14 @@ const BRAND = {
 };
 
 function Glyph({ type }) {
+  if (type === "dbt_repo") {
+    return (
+      <svg viewBox="0 0 24 24" className="w-[74%] h-[74%]" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M3.5 7.5h6l2 2h9v8.5A2 2 0 0 1 18.5 20h-13a2 2 0 0 1-2-2z" />
+        <path d="M8 13h8M8 16h5" />
+      </svg>
+    );
+  }
   if (type === "snowflake") {
     return (
       <svg viewBox="0 0 24 24" className="w-[70%] h-[70%]" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round">

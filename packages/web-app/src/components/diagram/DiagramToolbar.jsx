@@ -277,7 +277,7 @@ export default function DiagramToolbar() {
             if (!el) return;
             import("html-to-image").then(({ toPng }) => {
               toPng(el, { backgroundColor: "#ffffff", pixelRatio: 2 }).then((dataUrl) => {
-                const a = document.createElement("a"); a.href = dataUrl; a.download = "datalex-diagram.png"; a.click();
+                const a = document.createElement("a"); a.href = dataUrl; a.download = "duckcodemodeling-diagram.png"; a.click();
               });
             });
           }}
@@ -291,7 +291,7 @@ export default function DiagramToolbar() {
             if (!el) return;
             import("html-to-image").then(({ toSvg }) => {
               toSvg(el, { backgroundColor: "#ffffff" }).then((dataUrl) => {
-                const a = document.createElement("a"); a.href = dataUrl; a.download = "datalex-diagram.svg"; a.click();
+                const a = document.createElement("a"); a.href = dataUrl; a.download = "duckcodemodeling-diagram.svg"; a.click();
               });
             });
           }}

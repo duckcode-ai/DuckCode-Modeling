@@ -1,13 +1,13 @@
-# DataLex Model Quality — GitHub Actions
-# Copy this file to .github/workflows/datalex-quality.yml in your repository.
+# DuckCodeModeling Model Quality — GitHub Actions
+# Copy this file to .github/workflows/duckcodemodeling-quality.yml in your repository.
 #
 # Prerequisites:
 #   - Python 3.9+ installed
-#   - DataLex CLI available (pip install -r requirements.txt)
+#   - DuckCodeModeling CLI available (pip install -r requirements.txt)
 #   - Model files in **/*.model.yaml
 #   - Policy pack in policies/default.policy.yaml
 
-name: DataLex Model Quality
+name: DuckCodeModeling Model Quality
 
 on:
   push:
@@ -29,7 +29,7 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: Install DataLex
+      - name: Install DuckCodeModeling
         run: |
           python3 -m pip install --upgrade pip
           python3 -m pip install -r requirements.txt

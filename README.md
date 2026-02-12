@@ -1,38 +1,52 @@
 <div align="center">
   <a href="https://duckcode.ai/" target="_blank" rel="noopener noreferrer">
-    <img src="Assets/DataLex.png" alt="DataLex by DuckCode AI Labs" width="180" />
+    <img src="Assets/DuckCodeModeling.png" alt="DuckCodeModeling by DuckCode AI Labs" width="220" />
   </a>
 
-# DataLex
+# DuckCodeModeling
 
-**Enterprise data modeling and metadata intelligence platform**
+**YAML-first data modeling and metadata intelligence platform**
 
-Built by [DuckCode AI Labs](https://duckcode.ai/).  
-Official repository for DataLex UI, API, and CLI.
-
-Design, validate, and govern data models with a visual UI and a Python CLI.
+Open source UI, API, and CLI for modeling, governance, and schema-aware workflows.
 </div>
 
-## Purpose
-DataLex helps data teams treat models as code.
+## Why DuckCodeModeling
+DuckCodeModeling helps data teams treat data models as versioned code.
 
 - Define models in YAML (`*.model.yaml`)
-- Explore relationships in an interactive diagram
-- Validate quality and governance rules
-- Track changes with Git workflows
-- Pull schemas from databases into model files
+- Explore entities and relationships in a visual graph UI
+- Validate structure, quality, and governance policies
+- Track diffs and compatibility gates in CI
+- Pull physical schemas from databases into model files
 
-## What You Get
-- React web app for modeling and exploration
-- Node API server for file/project operations and connector endpoints
-- Python CLI (`dm`) for validation, import, generation, and schema pull
+## What Is Included
+- `packages/web-app`: React + Vite modeling studio
+- `packages/api-server`: Node.js API for project/files/connectors operations
+- `packages/core_engine`: Python core engine (validation, policy, docs, importers)
+- `packages/cli`: Python CLI (`dm`) entry points and commands
+- `model-examples`: sample models and guided scenario walkthroughs
+- `schemas`: JSON schema contracts
+- `policies`: baseline and strict policy packs
+- `docs`: architecture, specs, SLOs, runbooks
 
-## Product Screenshots
-### Overview
-![DataLex Overview](screenshots/overview.png)
+## Screenshots
+![DuckCodeModeling Overview](screenshots/overview.png)
+![DuckCodeModeling Search](screenshots/search.png)
 
-### Search
-![DataLex Search](screenshots/search.png)
+## Repository Structure
+```text
+DuckCodeModeling/
+  packages/
+    api-server/
+    web-app/
+    cli/
+    core_engine/
+  docs/
+  model-examples/
+  policies/
+  schemas/
+  tests/
+```
 
 ## Prerequisites
 - Node.js 18+
@@ -41,30 +55,24 @@ DataLex helps data teams treat models as code.
 - Git
 - Docker (optional)
 
-## Local Install (Recommended)
-Local install is the best experience for most users because DataLex can access your folders directly (no Docker mount/path translation issues).
+## Quick Start (Local Recommended)
+Local setup gives the best experience because the app can access your folders directly.
 
-### 1. Clone
 ```bash
-git clone https://github.com/duckcode-ai/DataLex.git
-cd DataLex
-```
+git clone https://github.com/duckcode-ai/DuckCode-Modeling.git
+cd DuckCodeModeling
 
-### 2. Install Node dependencies
-```bash
 npm --prefix packages/api-server install
 npm --prefix packages/web-app install
-```
 
-### 3. Create Python virtual environment
-```bash
 python3 -m venv .venv
 source .venv/bin/activate
 pip install --upgrade pip
 pip install -r requirements.txt
 ```
 
-### 4. Run the app locally
+Run in two terminals:
+
 Terminal 1:
 ```bash
 npm --prefix packages/api-server run dev
@@ -79,77 +87,56 @@ Open:
 - Web UI: `http://localhost:5173`
 - API: `http://localhost:3001`
 
-### Recommended showcase model
-Open this model to explore a complete real scenario with dictionary/governance/indexes/views/snapshots:
-
-`model-examples/00-retail-ops-showcase.model.yaml`
-
-### Example guides (step-by-step)
-Per-example review guides are available for every sample YAML file:
-
-`model-examples/README.md`
-
-## Docker Install (Simple Single-Container Run)
-The Docker image builds the web UI and serves it from the API server.
-Use Docker when you specifically want containerized install. For day-to-day modeling, local install is smoother.
-
-### 1. Build image
+## Quick Start (Docker)
 ```bash
-docker build -t datalex:latest .
-```
-
-### 2. Run container
-```bash
-docker run --rm -p 3001:3001 datalex:latest
+docker build -t duckcodemodeling:latest .
+docker run --rm -p 3001:3001 duckcodemodeling:latest
 ```
 
 Open: `http://localhost:3001`
 
-### Important Docker limitation
-Inside Docker, DataLex can only see paths that are mounted into the container.
+If running in Docker, mount host paths so project folders are visible to the container:
 
-### Recommended Docker mount pattern (one-time broad parent mount)
-Mount a broad parent once (for example your whole user folder), then point DataLex to container paths:
 ```bash
 docker run --rm -p 3001:3001 \
   -v /Users/<you>:/workspace/host \
-  datalex:latest
+  duckcodemodeling:latest
 ```
-
-Then add project paths like:
-- `/workspace/host/Models/DuckCode`
-- `/workspace/host/dbt-projects/nba_analysis`
-
-Alternative (keep native host paths unchanged):
-```bash
-docker run --rm -p 3001:3001 \
-  -v /Users/<you>:/Users/<you> \
-  datalex:latest
-```
-With this option, you can keep using paths like `/Users/<you>/Models/...` inside DataLex.
-
-Behavior summary:
-- New or updated files inside mounted folders: no container restart needed.
-- New folders outside mounted scope: restart container with an additional `-v` mount (or keep using a broad parent mount).
 
 ## CLI Quick Start
-Activate venv first:
 ```bash
 source .venv/bin/activate
-```
 
-Examples:
-```bash
 ./dm validate model-examples/starter-commerce.model.yaml
 ./dm stats model-examples/starter-commerce.model.yaml
 ./dm import sql model-examples/schema.sql --out model-examples/imported.model.yaml
+./dm docs model-examples/starter-commerce.model.yaml --out docs-site
 ```
+
+## Example Models
+- Showcase model: `model-examples/00-retail-ops-showcase.model.yaml`
+- All scenario guides: `model-examples/README.md`
+
+## Documentation Map
+- Architecture: `docs/architecture.md`
+- API contracts: `docs/api-contracts.md`
+- YAML spec v1: `docs/yaml-spec-v1.md`
+- YAML spec v2: `docs/yaml-spec-v2.md`
+- Governance policy spec: `docs/governance-policy-spec.md`
+- Observability SLOs: `docs/observability-slos.md`
+- Backup and restore runbook: `docs/backup-restore-runbook.md`
+
+## Open Source
+- Contributing guide: `CONTRIBUTING.md`
+- Code of Conduct: `CODE_OF_CONDUCT.md`
+- Security policy: `SECURITY.md`
+- License: `LICENSE`
+
+## Community and Support
+- Discord: `https://discord.gg/Dnm6bUvk`
+- Issues: `https://github.com/duckcode-ai/DuckCode-Modeling/issues`
 
 ## Notes
 - Local connector profiles are stored in `.dm-connections.json`.
 - Local project registry is stored in `.dm-projects.json`.
-- `.claude`, `.vscode`, `.idea`, and local runtime files are git-ignored.
-- Support community (Discord): `https://discord.gg/Dnm6bUvk`
-
-## License
-MIT. See `LICENSE`.
+- CLI binary remains `dm` for compatibility.

@@ -1,7 +1,7 @@
 pack:
   name: default_governance
   version: 2.0.0
-  description: Baseline policy checks for DataLex repositories.
+  description: Baseline policy checks for DuckCodeModeling repositories.
 
 policies:
   - id: ENTITY_TAG_BASELINE

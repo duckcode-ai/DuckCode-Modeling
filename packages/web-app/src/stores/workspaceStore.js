@@ -25,13 +25,13 @@ function parseYamlObjectSafe(text) {
   }
 }
 
-function isDataLexModelObject(doc) {
+function isDuckCodeModelingModelObject(doc) {
   return !!doc && typeof doc === "object" && !Array.isArray(doc) && !!doc.model && Array.isArray(doc.entities);
 }
 
 function ensurePlaceholderEntityForEmptyModel(yamlText) {
   const doc = parseYamlObjectSafe(yamlText);
-  if (!isDataLexModelObject(doc)) return { content: yamlText, changed: false };
+  if (!isDuckCodeModelingModelObject(doc)) return { content: yamlText, changed: false };
   if ((doc.entities || []).length > 0) return { content: yamlText, changed: false };
   doc.entities = [
     {
@@ -383,7 +383,6 @@ const useWorkspaceStore = create((set, get) => ({
       const data = await fetchFileContent(fileInfo.fullPath);
       const sourceName = fileInfo.path || fileInfo.name || "";
       let renderedContent = data.content;
-      let convertedFromDbt = false;
 
       if (isLikelyDbtSchema(data.content, sourceName)) {
         try {
@@ -396,7 +395,6 @@ const useWorkspaceStore = create((set, get) => ({
           });
           if (imported?.yaml) {
             renderedContent = imported.yaml;
-            convertedFromDbt = true;
           }
         } catch (_err) {
           // Keep original content if conversion fails.
@@ -405,17 +403,6 @@ const useWorkspaceStore = create((set, get) => ({
 
       const placeholderFix = ensurePlaceholderEntityForEmptyModel(renderedContent);
       renderedContent = placeholderFix.content;
-      const hadEmptyModelFix = placeholderFix.changed;
-
-      let autoSavedConvertedContent = false;
-      if ((convertedFromDbt || hadEmptyModelFix) && renderedContent && renderedContent !== data.content) {
-        try {
-          await saveFileContent(fileInfo.fullPath, renderedContent);
-          autoSavedConvertedContent = true;
-        } catch (_err) {
-          autoSavedConvertedContent = false;
-        }
-      }
 
       const file = { ...fileInfo, content: renderedContent };
       set((s) => {
@@ -423,10 +410,8 @@ const useWorkspaceStore = create((set, get) => ({
         return {
           activeFile: file,
           activeFileContent: renderedContent,
-          originalContent: autoSavedConvertedContent
-            ? renderedContent
-            : (convertedFromDbt ? data.content : renderedContent),
-          isDirty: !autoSavedConvertedContent && convertedFromDbt && renderedContent !== data.content,
+          originalContent: renderedContent,
+          isDirty: false,
           openTabs: alreadyOpen ? s.openTabs : [...s.openTabs, file],
           loading: false,
         };

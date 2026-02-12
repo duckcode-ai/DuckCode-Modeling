@@ -16,7 +16,7 @@ app.use(express.json({ limit: "10mb" }));
 
 // Request logging
 app.use((req, _res, next) => {
-  console.log(`[datalex] ${req.method} ${req.url}`);
+  console.log(`[duckcodemodeling] ${req.method} ${req.url}`);
   next();
 });
 
@@ -141,6 +141,60 @@ function parseGitStatus(output) {
 }
 
 const SECRET_KEYS = new Set(["password", "token", "private_key_content", "private_key_path"]);
+
+function sanitizeModelStem(name, fallback = "dbt_model") {
+  const text = String(name || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "");
+  if (!text) return fallback;
+  return /^[0-9]/.test(text) ? `m_${text}` : text;
+}
+
+function deriveDbtRepoName(repoPath) {
+  const token = basename(String(repoPath || "").replace(/[\\\/]+$/, "")) || "dbt";
+  return token.replace(/[^A-Za-z0-9]+/g, "_").replace(/^_+|_+$/g, "").toLowerCase() || "dbt";
+}
+
+function parseDbtDocSummary(text, relPath) {
+  let loaded;
+  try {
+    loaded = yaml.load(text);
+  } catch (_err) {
+    return null;
+  }
+  if (!loaded || typeof loaded !== "object" || Array.isArray(loaded)) return null;
+
+  // Skip files already in DuckCodeModeling model format
+  if (loaded.model && typeof loaded.model === "object" && Array.isArray(loaded.entities)) {
+    return null;
+  }
+
+  const models = Array.isArray(loaded.models) ? loaded.models : [];
+  const sources = Array.isArray(loaded.sources) ? loaded.sources : [];
+  const semanticModels = Array.isArray(loaded.semantic_models) ? loaded.semantic_models : [];
+  const metrics = Array.isArray(loaded.metrics) ? loaded.metrics : [];
+  const sectionCount = models.length + sources.length + semanticModels.length + metrics.length;
+  const looksLikeDbtFile = /(^|\/)(schema|sources)\.ya?ml$/i.test(String(relPath || ""));
+
+  if (sectionCount === 0 && !looksLikeDbtFile) {
+    return null;
+  }
+
+  const version = String(loaded.version ?? "").trim();
+  if (!looksLikeDbtFile && version && !["2", "2.0"].includes(version)) {
+    return null;
+  }
+
+  return {
+    models: models.length,
+    sources: sources.length,
+    semantic_models: semanticModels.length,
+    metrics: metrics.length,
+    version: version || null,
+  };
+}
 
 function isPathInside(basePath, candidatePath) {
   const rel = relative(resolve(basePath), resolve(candidatePath));
@@ -388,7 +442,7 @@ app.get("/api/projects/:id/files", async (req, res) => {
     const pathErr = await assertReadableDirectory(project.path);
     if (pathErr) {
       const dockerHint = IS_DOCKER_RUNTIME
-        ? " Running in Docker: mount the host parent path (for example -v /Users/<you>:/workspace/host) and use /workspace/host/... in DataLex."
+        ? " Running in Docker: mount the host parent path (for example -v /Users/<you>:/workspace/host) and use /workspace/host/... in DuckCodeModeling."
         : "";
       return res.status(400).json({
         error:
@@ -862,7 +916,7 @@ app.get("/api/projects/:id/model-graph", async (req, res) => {
     const pathErr = await assertReadableDirectory(project.path);
     if (pathErr) {
       const dockerHint = IS_DOCKER_RUNTIME
-        ? " Running in Docker: mount the host parent path (for example -v /Users/<you>:/workspace/host) and use /workspace/host/... in DataLex."
+        ? " Running in Docker: mount the host parent path (for example -v /Users/<you>:/workspace/host) and use /workspace/host/... in DuckCodeModeling."
         : "";
       return res.status(400).json({
         error:
@@ -891,7 +945,7 @@ app.get("/api/projects/:id/model-graph", async (req, res) => {
 
         // Extract entity names
         const entityNames = [];
-        const entityRegex = /^\s*-\s*name:\s*([A-Z][A-Za-z0-9]*)\s*$/gm;
+        const entityRegex = /^\s*-\s*name:\s*(\S+)\s*$/gm;
         let match;
         while ((match = entityRegex.exec(content)) !== null) {
           entityNames.push(match[1]);
@@ -937,7 +991,7 @@ app.get("/api/projects/:id/model-graph", async (req, res) => {
         const modelName = nameMatch ? nameMatch[1].trim() : file.name;
 
         // Find relationship from/to references
-        const relRegex = /from:\s*([A-Z][A-Za-z0-9]*)\.(\w+)\s*\n\s*to:\s*([A-Z][A-Za-z0-9]*)\.(\w+)/g;
+        const relRegex = /from:\s*(\S+)\.(\w+)\s*\n\s*to:\s*(\S+)\.(\w+)/g;
         let rm;
         while ((rm = relRegex.exec(content)) !== null) {
           const fromEntity = rm[1];
@@ -1012,6 +1066,7 @@ app.post("/api/import", express.json({ limit: "10mb" }), async (req, res) => {
       commandOutput = execFileSync(PYTHON, args, {
         encoding: "utf-8",
         timeout: 30000,
+        cwd: REPO_ROOT,
       });
     } catch (err) {
       hadCliIssues = true;
@@ -1131,9 +1186,86 @@ app.get("/api/connectors", (req, res) => {
   try {
     const output = execFileSync(PYTHON, [
       join(REPO_ROOT, "dm"), "connectors", "--output-json",
-    ], { encoding: "utf-8", timeout: 10000 });
+    ], { encoding: "utf-8", timeout: 10000, cwd: REPO_ROOT });
     const connectors = JSON.parse(output);
     res.json(connectors);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Scan a local dbt repo path and return dbt YAML file candidates for import
+app.post("/api/connectors/dbt-repo/scan", express.json(), async (req, res) => {
+  try {
+    const repoPath = String(req.body?.repo_path || "").trim();
+    if (!repoPath) {
+      return res.status(400).json({ error: "repo_path is required" });
+    }
+
+    const pathErr = await assertReadableDirectory(repoPath);
+    if (pathErr) {
+      const dockerHint = IS_DOCKER_RUNTIME
+        ? " Running in Docker: mount the host parent path (for example -v /Users/<you>:/workspace/host) and use /workspace/host/... in DuckCodeModeling."
+        : "";
+      return res.status(400).json({
+        error:
+          `Repository path is not accessible: ${repoPath}. ` +
+          "Check path permissions and existence." +
+          dockerHint,
+      });
+    }
+
+    const yamlFiles = await walkYamlFiles(repoPath);
+    const dbtFiles = [];
+
+    for (const file of yamlFiles) {
+      let content = "";
+      try {
+        content = await readFile(file.fullPath, "utf-8");
+      } catch (_err) {
+        continue;
+      }
+      const summary = parseDbtDocSummary(content, file.path);
+      if (!summary) continue;
+      dbtFiles.push({
+        name: file.name,
+        path: file.path,
+        fullPath: file.fullPath,
+        size: file.size,
+        modifiedAt: file.modifiedAt,
+        sections: summary,
+      });
+    }
+
+    dbtFiles.sort((a, b) => a.path.localeCompare(b.path));
+    const repoName = deriveDbtRepoName(repoPath);
+    const totalSections = dbtFiles.reduce(
+      (acc, f) => {
+        acc.models += f.sections.models || 0;
+        acc.sources += f.sections.sources || 0;
+        acc.semantic_models += f.sections.semantic_models || 0;
+        acc.metrics += f.sections.metrics || 0;
+        return acc;
+      },
+      { models: 0, sources: 0, semantic_models: 0, metrics: 0 }
+    );
+
+    return res.json({
+      success: true,
+      repoPath,
+      repoName,
+      yamlFileCount: yamlFiles.length,
+      dbtFiles,
+      dbtFileCount: dbtFiles.length,
+      totals: totalSections,
+      suggestedSubfolder: "duckcodemodeling-models",
+      suggestedTargetPath: join(repoPath, "duckcodemodeling-models"),
+      suggestedProjectName: `${repoName}-duckcodemodeling`,
+      suggestedModelName: sanitizeModelStem(`${repoName}_dbt`, "dbt_model"),
+      warnings: dbtFiles.length === 0
+        ? ["No dbt schema/source/semantic/metrics YAML files found under this path."]
+        : [],
+    });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -1150,7 +1282,7 @@ app.post("/api/connectors/test", express.json(), async (req, res) => {
     const args = [join(REPO_ROOT, "dm"), "pull", connector, "--test", ...conn.args];
 
     try {
-      const output = execFileSync(PYTHON, args, { encoding: "utf-8", timeout: 30000 });
+      const output = execFileSync(PYTHON, args, { encoding: "utf-8", timeout: 30000, cwd: REPO_ROOT });
       const ok = output.startsWith("OK");
       let saved = null;
       if (ok) {
@@ -1186,7 +1318,7 @@ app.post("/api/connectors/schemas", express.json(), async (req, res) => {
 
     conn = buildConnArgs(params);
     const args = [join(REPO_ROOT, "dm"), "schemas", connector, "--output-json", ...conn.args];
-    const output = execFileSync(PYTHON, args, { encoding: "utf-8", timeout: 30000 });
+    const output = execFileSync(PYTHON, args, { encoding: "utf-8", timeout: 30000, cwd: REPO_ROOT });
     const schemas = JSON.parse(output);
     res.json(schemas);
   } catch (err) {
@@ -1206,7 +1338,7 @@ app.post("/api/connectors/tables", express.json(), async (req, res) => {
 
     conn = buildConnArgs(params);
     const args = [join(REPO_ROOT, "dm"), "tables", connector, "--output-json", ...conn.args];
-    const output = execFileSync(PYTHON, args, { encoding: "utf-8", timeout: 30000 });
+    const output = execFileSync(PYTHON, args, { encoding: "utf-8", timeout: 30000, cwd: REPO_ROOT });
     const tables = JSON.parse(output);
     res.json(tables);
   } catch (err) {
@@ -1240,7 +1372,7 @@ app.post("/api/connectors/pull", express.json(), async (req, res) => {
       if (tableList.length) { args.push("--tables", ...tableList); }
     }
 
-    const output = execFileSync(PYTHON, args, { encoding: "utf-8", timeout: 60000 });
+    const output = execFileSync(PYTHON, args, { encoding: "utf-8", timeout: 60000, cwd: REPO_ROOT });
 
     // Parse YAML output
     const yamlStart = output.indexOf("model:");
@@ -1328,7 +1460,7 @@ app.post("/api/connectors/pull-multi", express.json(), async (req, res) => {
           args.push("--tables", ...tablesToPull);
         }
 
-        const output = execFileSync(PYTHON, args, { encoding: "utf-8", timeout: 120000 });
+        const output = execFileSync(PYTHON, args, { encoding: "utf-8", timeout: 120000, cwd: REPO_ROOT });
 
         const yamlStart = output.indexOf("model:");
         const yamlText = yamlStart >= 0 ? output.substring(yamlStart) : output;
@@ -1405,11 +1537,11 @@ if (existsSync(WEB_DIST)) {
 }
 
 app.listen(PORT, () => {
-  console.log(`[datalex] Local file server running on http://localhost:${PORT}`);
-  console.log(`[datalex] Repo root: ${REPO_ROOT}`);
+  console.log(`[duckcodemodeling] Local file server running on http://localhost:${PORT}`);
+  console.log(`[duckcodemodeling] Repo root: ${REPO_ROOT}`);
   if (existsSync(WEB_DIST)) {
-    console.log(`[datalex] Serving web app from: ${WEB_DIST}`);
+    console.log(`[duckcodemodeling] Serving web app from: ${WEB_DIST}`);
   } else {
-    console.log(`[datalex] Web dist not found at: ${WEB_DIST}`);
+    console.log(`[duckcodemodeling] Web dist not found at: ${WEB_DIST}`);
   }
 });

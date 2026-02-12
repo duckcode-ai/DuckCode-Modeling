@@ -652,13 +652,13 @@ class TestDiagramExport:
         path = os.path.join(WEB_APP_DIR, "components", "diagram", "DiagramToolbar.jsx")
         with open(path) as f:
             content = f.read()
-        assert "datalex-diagram.png" in content
+        assert "duckcodemodeling-diagram.png" in content
 
     def test_toolbar_has_svg_export(self):
         path = os.path.join(WEB_APP_DIR, "components", "diagram", "DiagramToolbar.jsx")
         with open(path) as f:
             content = f.read()
-        assert "datalex-diagram.svg" in content
+        assert "duckcodemodeling-diagram.svg" in content
 
 
 # ══════════════════════════════════════════════════════════════════════════════

@@ -1,9 +1,9 @@
-# DataLex Model Quality — Bitbucket Pipelines
+# DuckCodeModeling Model Quality — Bitbucket Pipelines
 # Copy this file to bitbucket-pipelines.yml in your repository.
 #
 # Prerequisites:
 #   - Python 3.9+ available in the CI image
-#   - DataLex CLI available (pip install -r requirements.txt)
+#   - DuckCodeModeling CLI available (pip install -r requirements.txt)
 #   - Model files in **/*.model.yaml
 #   - Policy pack in policies/default.policy.yaml
 

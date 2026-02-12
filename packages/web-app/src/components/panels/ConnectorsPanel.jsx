@@ -21,6 +21,9 @@ import {
   FolderTree,
   Sparkles,
   ShieldCheck,
+  FolderOpen,
+  FileStack,
+  FileText,
 } from "lucide-react";
 import useWorkspaceStore from "../../stores/workspaceStore";
 import useUiStore from "../../stores/uiStore";
@@ -29,6 +32,9 @@ import ConnectorLogo from "../icons/ConnectorLogo";
 const API = "http://localhost:3001";
 
 const CONNECTOR_FIELDS = {
+  dbt_repo: [
+    { key: "repo_path", label: "dbt Repository Path", placeholder: "/Users/you/dbt-project", required: true },
+  ],
   postgres: [
     { key: "host", label: "Host", placeholder: "localhost", required: true },
     { key: "port", label: "Port", placeholder: "5432", type: "number" },
@@ -70,6 +76,14 @@ const CONNECTOR_FIELDS = {
 };
 
 const CONNECTOR_META = {
+  dbt_repo: {
+    name: "dbt Repo",
+    tag: "Local YAML",
+    color: "text-[#0f4c81]",
+    bg: "bg-[#ebf4ff]",
+    border: "border-[#c6dcff]",
+    accent: "bg-[#1f6fd1]",
+  },
   postgres: {
     name: "PostgreSQL",
     tag: "OLTP",
@@ -112,11 +126,17 @@ const CONNECTOR_META = {
   },
 };
 
-const STEPS = [
+const DB_STEPS = [
   { id: "connect", label: "Connect", icon: Plug },
   { id: "schemas", label: "Schemas", icon: Layers },
   { id: "tables", label: "Tables", icon: Table2 },
   { id: "pull", label: "Pull", icon: Download },
+];
+
+const DBT_STEPS = [
+  { id: "repo", label: "Repo", icon: FolderOpen },
+  { id: "scan", label: "Scan", icon: FileStack },
+  { id: "convert", label: "Convert", icon: Download },
 ];
 
 async function apiPost(path, body) {
@@ -135,6 +155,50 @@ async function apiGet(path) {
   const data = await resp.json();
   if (!resp.ok) throw new Error(data.error || `Request failed (${resp.status})`);
   return data;
+}
+
+async function apiPut(path, body) {
+  const resp = await fetch(`${API}${path}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  const data = await resp.json();
+  if (!resp.ok) throw new Error(data.error || `Request failed (${resp.status})`);
+  return data;
+}
+
+function joinPath(base, child) {
+  const b = String(base || "").replace(/[\\/]+$/, "");
+  const c = String(child || "").replace(/^[\\/]+/, "");
+  if (!b) return c;
+  if (!c) return b;
+  return `${b}/${c}`;
+}
+
+function normalizePath(path) {
+  return String(path || "").replace(/[\\/]+$/, "");
+}
+
+function sanitizeModelStem(name, fallback = "dbt_model") {
+  const stem = String(name || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "");
+  if (!stem) return fallback;
+  return /^[0-9]/.test(stem) ? `m_${stem}` : stem;
+}
+
+function deriveModelStemFromDbtPath(relPath, prefix = "") {
+  const normalized = String(relPath || "schema.yml")
+    .replace(/\\/g, "/")
+    .replace(/\.ya?ml$/i, "")
+    .replace(/^\/+|\/+$/g, "");
+  const parts = normalized.split("/").filter(Boolean);
+  const joined = parts.length > 0 ? parts.join("_") : "schema";
+  const prefixed = prefix ? `${prefix}_${joined}` : joined;
+  return sanitizeModelStem(prefixed, "dbt_model");
 }
 
 export default function ConnectorsPanel() {
@@ -165,12 +229,24 @@ export default function ConnectorsPanel() {
   const [pullResult, setPullResult] = useState(null);
   const [pullProgress, setPullProgress] = useState(null);
   const [targetProjectId, setTargetProjectId] = useState("");
+  const [dbtScan, setDbtScan] = useState(null);
+  const [dbtTargetMode, setDbtTargetMode] = useState("new_subfolder");
+  const [dbtSubfolderName, setDbtSubfolderName] = useState("duckcodemodeling-models");
+  const [dbtTargetPath, setDbtTargetPath] = useState("");
+  const [dbtProjectName, setDbtProjectName] = useState("");
+  const [dbtModelName, setDbtModelName] = useState("");
+  const [dbtCreateTargetIfMissing, setDbtCreateTargetIfMissing] = useState(true);
+  const [dbtAutoOpen, setDbtAutoOpen] = useState(true);
+  const [dbtOverwrite, setDbtOverwrite] = useState(false);
+  const [dbtResult, setDbtResult] = useState(null);
 
   const {
     loadImportedYaml,
     loadMultipleImportedYaml,
     activeProjectId,
     projects,
+    openFile,
+    loadProjects,
     selectProject,
   } = useWorkspaceStore();
   const { addToast, setBottomPanelTab } = useUiStore();
@@ -209,6 +285,16 @@ export default function ConnectorsPanel() {
     setSchemaTableSelections({});
     setPullResult(null);
     setPullProgress(null);
+    setDbtScan(null);
+    setDbtTargetMode("new_subfolder");
+    setDbtSubfolderName("duckcodemodeling-models");
+    setDbtTargetPath("");
+    setDbtProjectName("");
+    setDbtModelName("");
+    setDbtCreateTargetIfMissing(true);
+    setDbtAutoOpen(true);
+    setDbtOverwrite(false);
+    setDbtResult(null);
     setError(null);
   };
 
@@ -452,9 +538,186 @@ export default function ConnectorsPanel() {
     }
   };
 
+  const handleDbtScan = async () => {
+    const repoPath = String(formValues.repo_path || "").trim();
+    if (!repoPath) {
+      setError("dbt repository path is required.");
+      return;
+    }
+    setLoading(true);
+    setError(null);
+    setDbtResult(null);
+    try {
+      const data = await apiPost("/api/connectors/dbt-repo/scan", { repo_path: repoPath });
+      setDbtScan(data);
+      if (data.suggestedSubfolder) setDbtSubfolderName(data.suggestedSubfolder);
+      if (data.suggestedTargetPath) setDbtTargetPath(data.suggestedTargetPath);
+      if (!dbtProjectName && data.suggestedProjectName) setDbtProjectName(data.suggestedProjectName);
+      if (!dbtModelName && data.suggestedModelName) setDbtModelName(data.suggestedModelName);
+      setStep(1);
+      if ((data.dbtFileCount || 0) === 0) {
+        setError("No dbt schema/source/semantic/metrics YAML files were found at this path.");
+      }
+    } catch (err) {
+      setError(err.message);
+      setDbtScan(null);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleDbtConvert = async () => {
+    if (!dbtScan || !Array.isArray(dbtScan.dbtFiles) || dbtScan.dbtFiles.length === 0) {
+      setError("Scan a dbt repo with valid dbt YAML files before converting.");
+      return;
+    }
+
+    const repoPath = String(formValues.repo_path || "").trim();
+    const targetPath = dbtTargetMode === "new_subfolder"
+      ? joinPath(repoPath, dbtSubfolderName || "duckcodemodeling-models")
+      : String(dbtTargetPath || "").trim();
+    const modelPrefix = sanitizeModelStem(dbtModelName || "", "");
+    const projectName = String(dbtProjectName || dbtScan.suggestedProjectName || `${dbtScan.repoName || "dbt"}-duckcodemodeling`).trim();
+
+    if (!targetPath) {
+      setError("Target DuckCodeModeling folder path is required.");
+      return;
+    }
+    if (!projectName) {
+      setError("Project name is required.");
+      return;
+    }
+
+    setLoading(true);
+    setError(null);
+    setDbtResult(null);
+
+    try {
+      let targetProject = (projects || []).find(
+        (p) => normalizePath(p.path) === normalizePath(targetPath)
+      );
+      if (!targetProject) {
+        const created = await apiPost("/api/projects", {
+          name: projectName,
+          path: targetPath,
+          create_if_missing: dbtCreateTargetIfMissing,
+        });
+        targetProject = created.project;
+      }
+      if (!targetProject?.id) {
+        throw new Error("Could not resolve target project.");
+      }
+
+      const currentFiles = await apiGet(`/api/projects/${targetProject.id}/files`);
+      const existingNames = new Set((currentFiles.files || []).map((f) => f.name));
+      const reservedNames = new Set();
+      const generatedFiles = [];
+      const failedFiles = [];
+      let totalEntities = 0;
+      let totalFields = 0;
+      let totalRelationships = 0;
+
+      for (const source of dbtScan.dbtFiles) {
+        try {
+          const payload = await apiGet(`/api/files?path=${encodeURIComponent(source.fullPath)}`);
+          const baseStem = deriveModelStemFromDbtPath(source.path, modelPrefix);
+          let candidateName = `${baseStem}.model.yaml`;
+          let suffix = 1;
+          while (reservedNames.has(candidateName) || (!dbtOverwrite && existingNames.has(candidateName))) {
+            candidateName = `${baseStem}_${suffix}.model.yaml`;
+            suffix += 1;
+          }
+          reservedNames.add(candidateName);
+
+          const imported = await apiPost("/api/import", {
+            format: "dbt",
+            content: payload.content,
+            filename: source.name || source.path,
+            modelName: baseStem,
+          });
+          if (!imported?.yaml) {
+            throw new Error("dbt import returned no YAML output");
+          }
+
+          const outputPath = joinPath(targetProject.path, candidateName);
+          if (existingNames.has(candidateName) && dbtOverwrite) {
+            await apiPut("/api/files", { path: outputPath, content: imported.yaml });
+          } else {
+            await apiPost(`/api/projects/${targetProject.id}/files`, {
+              name: candidateName,
+              content: imported.yaml,
+            });
+          }
+          existingNames.add(candidateName);
+
+          generatedFiles.push({
+            sourcePath: source.path,
+            fileName: candidateName,
+            filePath: outputPath,
+            entityCount: imported.entityCount || 0,
+            fieldCount: imported.fieldCount || 0,
+            relationshipCount: imported.relationshipCount || 0,
+          });
+          totalEntities += imported.entityCount || 0;
+          totalFields += imported.fieldCount || 0;
+          totalRelationships += imported.relationshipCount || 0;
+        } catch (fileErr) {
+          failedFiles.push({
+            sourcePath: source.path,
+            error: String(fileErr.message || fileErr),
+          });
+        }
+      }
+
+      if (generatedFiles.length === 0) {
+        const firstErr = failedFiles[0]?.error || "No dbt files were converted.";
+        throw new Error(firstErr);
+      }
+
+      await loadProjects();
+      if (dbtAutoOpen) {
+        await selectProject(targetProject.id);
+        const refreshed = await apiGet(`/api/projects/${targetProject.id}/files`);
+        const firstGeneratedName = generatedFiles[0]?.fileName;
+        const modelFile = (refreshed.files || []).find((f) => f.name === firstGeneratedName);
+        if (modelFile) {
+          await openFile(modelFile);
+        }
+        setBottomPanelTab("properties");
+      }
+
+      setDbtResult({
+        success: failedFiles.length === 0,
+        project: targetProject,
+        generatedFiles,
+        failedFiles,
+        generatedCount: generatedFiles.length,
+        failedCount: failedFiles.length,
+        dbtFileCount: dbtScan.dbtFileCount,
+        totals: dbtScan.totals || {},
+        entityCount: totalEntities,
+        fieldCount: totalFields,
+        relationshipCount: totalRelationships,
+      });
+      setStep(2);
+      addToast?.({
+        type: "success",
+        message: `Converted ${generatedFiles.length} of ${dbtScan.dbtFileCount} dbt file${dbtScan.dbtFileCount === 1 ? "" : "s"} into DuckCodeModeling models`,
+      });
+      if (failedFiles.length > 0) {
+        setError(`${failedFiles.length} dbt file${failedFiles.length === 1 ? "" : "s"} could not be converted. Review the result list.`);
+      }
+    } catch (err) {
+      setError(String(err.message || err));
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const fieldKey = selectedConnector === "snowflake"
     ? (snowflakeAuth === "keypair" ? "snowflake_keypair" : "snowflake_password")
     : selectedConnector;
+  const connectorSteps = selectedConnector === "dbt_repo" ? DBT_STEPS : DB_STEPS;
   const fields = fieldKey ? (CONNECTOR_FIELDS[fieldKey] || []) : [];
   const meta = selectedConnector ? CONNECTOR_META[selectedConnector] : null;
   const selectedTargetProject = (projects || []).find((p) => p.id === targetProjectId) || null;
@@ -470,7 +733,7 @@ export default function ConnectorsPanel() {
             <div className="text-[9px] text-text-muted uppercase tracking-wider">{meta.tag}</div>
           </div>
           <div className="flex items-center gap-0.5 ml-3">
-            {STEPS.map((s, i) => {
+            {connectorSteps.map((s, i) => {
               const StepIcon = s.icon;
               const isActive = i === step;
               const isDone = i < step;
@@ -495,7 +758,7 @@ export default function ConnectorsPanel() {
             onClick={backToConnectionChooser}
             className="ml-auto px-2 py-1 rounded-md border border-border-primary bg-bg-primary text-[10px] font-medium text-text-secondary hover:bg-bg-hover"
           >
-            Change Database
+            Change Connector
           </button>
         </div>
       )}
@@ -510,7 +773,7 @@ export default function ConnectorsPanel() {
             <div className="min-w-0">
               <h2 className="text-sm font-semibold text-slate-900">Enterprise Connector Workspace</h2>
               <p className="text-[11px] text-slate-600 mt-1">
-                Connect warehouse metadata, review schemas, and generate production-ready DataLex models with one guided flow.
+                Connect warehouse metadata, review schemas, and generate production-ready DuckCodeModeling models with one guided flow.
               </p>
               <div className="flex items-center gap-3 mt-2 text-[10px] text-slate-500">
                 <span className="inline-flex items-center gap-1">
@@ -594,7 +857,7 @@ export default function ConnectorsPanel() {
 
         {/* Connector selector */}
         <div className="rounded-xl border border-border-primary/80 bg-white/90 backdrop-blur-sm shadow-[0_8px_20px_rgba(15,23,42,0.06)] p-3.5">
-          <div className="text-[10px] text-text-muted uppercase tracking-wider font-semibold mb-2.5">Select Database</div>
+          <div className="text-[10px] text-text-muted uppercase tracking-wider font-semibold mb-2.5">Select Connector</div>
           <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-5 gap-2.5">
             {Object.entries(CONNECTOR_META).map(([type, cm]) => {
               const isSelected = selectedConnector === type;
@@ -626,7 +889,7 @@ export default function ConnectorsPanel() {
         </div>
 
         {/* Step 0: Connection form */}
-        {selectedConnector && step === 0 && (
+        {selectedConnector && selectedConnector !== "dbt_repo" && step === 0 && (
           <div className={`rounded-xl border ${meta.border} ${meta.bg} p-3.5 space-y-2.5 shadow-[0_8px_20px_rgba(15,23,42,0.05)]`}>
             <div className={`text-xs font-semibold ${meta.color} flex items-center gap-1.5`}>
               <ConnectorLogo type={selectedConnector} size={20} />
@@ -707,8 +970,292 @@ export default function ConnectorsPanel() {
           </div>
         )}
 
+        {/* dbt Repo Step 0: choose repo path */}
+        {selectedConnector === "dbt_repo" && step === 0 && (
+          <div className={`rounded-xl border ${meta.border} ${meta.bg} p-3.5 space-y-3 shadow-[0_8px_20px_rgba(15,23,42,0.05)]`}>
+            <div className={`text-xs font-semibold ${meta.color} flex items-center gap-1.5`}>
+              <ConnectorLogo type={selectedConnector} size={20} />
+              <span>dbt Repository Connector</span>
+            </div>
+            <p className="text-[10px] text-text-muted">
+              Point to a local dbt project path. DuckCodeModeling will scan dbt YAML files and convert them into a separate
+              `.model.yaml` file in a clean target folder.
+            </p>
+            <div>
+              <label className="text-[10px] text-text-muted font-medium block mb-0.5">
+                dbt Repository Path <span className="text-red-400">*</span>
+              </label>
+              <input
+                type="text"
+                value={formValues.repo_path || ""}
+                onChange={(e) => handleFieldChange("repo_path", e.target.value)}
+                placeholder="/Users/you/dbt-project"
+                className="w-full px-2 py-1 text-[11px] rounded border border-border-primary bg-bg-primary text-text-primary placeholder:text-text-muted/50 focus:outline-none focus:border-accent-blue"
+              />
+              <p className="text-[9px] text-text-muted mt-1">
+                In Docker mode, use the mounted container path.
+              </p>
+            </div>
+            <div className="flex items-center gap-2 pt-1">
+              <button
+                onClick={handleDbtScan}
+                disabled={loading}
+                className={`flex items-center gap-1.5 px-4 py-1.5 text-[11px] font-semibold rounded-md text-white ${meta.accent} hover:opacity-90 transition-colors disabled:opacity-50`}
+              >
+                {loading ? <Loader2 size={11} className="animate-spin" /> : <FolderTree size={11} />}
+                Scan dbt YAML Files
+                <ChevronRight size={11} />
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* dbt Repo Step 1: review scan + configure conversion */}
+        {selectedConnector === "dbt_repo" && step === 1 && dbtScan && (
+          <div className={`rounded-xl border ${meta.border} ${meta.bg} p-3.5 space-y-3 shadow-[0_8px_20px_rgba(15,23,42,0.05)]`}>
+            <div className="flex items-center justify-between">
+              <div className={`text-xs font-semibold ${meta.color} flex items-center gap-1.5`}>
+                <ConnectorLogo type={selectedConnector} size={18} />
+                <Layers size={12} />
+                Review dbt Files
+                <span className="text-[10px] font-normal text-text-muted">
+                  ({dbtScan.dbtFileCount || 0} detected)
+                </span>
+              </div>
+              <button
+                onClick={() => setStep(0)}
+                className="flex items-center gap-1 text-[10px] text-text-muted hover:text-text-primary"
+              >
+                <ChevronLeft size={10} /> Back
+              </button>
+            </div>
+
+            <div className="grid grid-cols-2 md:grid-cols-5 gap-2 text-[10px]">
+              <div className="rounded border border-border-primary bg-white/70 px-2 py-1.5">
+                <div className="text-text-muted">dbt files</div>
+                <div className="text-sm font-semibold text-text-primary">{dbtScan.dbtFileCount || 0}</div>
+              </div>
+              <div className="rounded border border-border-primary bg-white/70 px-2 py-1.5">
+                <div className="text-text-muted">models</div>
+                <div className="text-sm font-semibold text-text-primary">{dbtScan.totals?.models || 0}</div>
+              </div>
+              <div className="rounded border border-border-primary bg-white/70 px-2 py-1.5">
+                <div className="text-text-muted">sources</div>
+                <div className="text-sm font-semibold text-text-primary">{dbtScan.totals?.sources || 0}</div>
+              </div>
+              <div className="rounded border border-border-primary bg-white/70 px-2 py-1.5">
+                <div className="text-text-muted">semantic</div>
+                <div className="text-sm font-semibold text-text-primary">{dbtScan.totals?.semantic_models || 0}</div>
+              </div>
+              <div className="rounded border border-border-primary bg-white/70 px-2 py-1.5">
+                <div className="text-text-muted">metrics</div>
+                <div className="text-sm font-semibold text-text-primary">{dbtScan.totals?.metrics || 0}</div>
+              </div>
+            </div>
+
+            <div className="max-h-44 overflow-y-auto rounded-md border border-border-primary/70 bg-white/70 p-2 space-y-1">
+              {dbtScan.dbtFiles.map((f) => (
+                <div key={f.path} className="flex items-center gap-2 text-[10px] px-1 py-1 rounded hover:bg-bg-hover/70">
+                  <FileText size={11} className="text-text-muted shrink-0" />
+                  <span className="truncate flex-1 text-text-primary">{f.path}</span>
+                  <span className="text-text-muted shrink-0">
+                    m:{f.sections?.models || 0} s:{f.sections?.sources || 0}
+                  </span>
+                </div>
+              ))}
+            </div>
+
+            <div className="rounded-md border border-border-primary/80 bg-white/70 p-2.5 space-y-2">
+              <div className="text-[10px] text-text-muted uppercase tracking-wider font-semibold">
+                Conversion Target
+              </div>
+              <div className="flex flex-wrap items-center gap-3 text-[10px]">
+                <label className="flex items-center gap-1.5">
+                  <input
+                    type="radio"
+                    name="dbt-target-mode"
+                    checked={dbtTargetMode === "new_subfolder"}
+                    onChange={() => setDbtTargetMode("new_subfolder")}
+                  />
+                  Create separate folder in dbt repo (recommended)
+                </label>
+                <label className="flex items-center gap-1.5">
+                  <input
+                    type="radio"
+                    name="dbt-target-mode"
+                    checked={dbtTargetMode === "existing_path"}
+                    onChange={() => setDbtTargetMode("existing_path")}
+                  />
+                  Use specific folder path
+                </label>
+              </div>
+
+              {dbtTargetMode === "new_subfolder" ? (
+                <div>
+                  <label className="text-[10px] text-text-muted font-medium block mb-0.5">Folder Name</label>
+                  <input
+                    type="text"
+                    value={dbtSubfolderName}
+                    onChange={(e) => setDbtSubfolderName(e.target.value)}
+                    className="w-full px-2 py-1 text-[11px] rounded border border-border-primary bg-bg-primary text-text-primary focus:outline-none focus:border-accent-blue"
+                  />
+                  <div className="text-[9px] text-text-muted mt-1">
+                    Target: {joinPath(String(formValues.repo_path || ""), dbtSubfolderName || "duckcodemodeling-models")}
+                  </div>
+                </div>
+              ) : (
+                <div>
+                  <label className="text-[10px] text-text-muted font-medium block mb-0.5">Target Folder Path</label>
+                  <input
+                    type="text"
+                    value={dbtTargetPath}
+                    onChange={(e) => setDbtTargetPath(e.target.value)}
+                    placeholder="/Users/you/models/duckcodemodeling"
+                    className="w-full px-2 py-1 text-[11px] rounded border border-border-primary bg-bg-primary text-text-primary focus:outline-none focus:border-accent-blue"
+                  />
+                </div>
+              )}
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                <div>
+                  <label className="text-[10px] text-text-muted font-medium block mb-0.5">Project Name</label>
+                  <input
+                    type="text"
+                    value={dbtProjectName}
+                    onChange={(e) => setDbtProjectName(e.target.value)}
+                    className="w-full px-2 py-1 text-[11px] rounded border border-border-primary bg-bg-primary text-text-primary focus:outline-none focus:border-accent-blue"
+                  />
+                </div>
+                <div>
+                  <label className="text-[10px] text-text-muted font-medium block mb-0.5">File Prefix (optional)</label>
+                  <input
+                    type="text"
+                    value={dbtModelName}
+                    onChange={(e) => setDbtModelName(e.target.value)}
+                    className="w-full px-2 py-1 text-[11px] rounded border border-border-primary bg-bg-primary text-text-primary focus:outline-none focus:border-accent-blue"
+                  />
+                  <div className="text-[9px] text-text-muted mt-1">
+                    Output names use folder + file path, e.g. <code>models_src_schema.model.yaml</code>.
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex flex-wrap items-center gap-3 text-[10px] text-text-muted">
+                <label className="flex items-center gap-1.5">
+                  <input
+                    type="checkbox"
+                    checked={dbtCreateTargetIfMissing}
+                    onChange={(e) => setDbtCreateTargetIfMissing(e.target.checked)}
+                  />
+                  Create target folder if missing
+                </label>
+                <label className="flex items-center gap-1.5">
+                  <input
+                    type="checkbox"
+                    checked={dbtAutoOpen}
+                    onChange={(e) => setDbtAutoOpen(e.target.checked)}
+                  />
+                  Auto-open project after conversion
+                </label>
+                <label className="flex items-center gap-1.5">
+                  <input
+                    type="checkbox"
+                    checked={dbtOverwrite}
+                    onChange={(e) => setDbtOverwrite(e.target.checked)}
+                  />
+                  Overwrite matching output files
+                </label>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2 pt-1">
+              <button
+                onClick={handleDbtConvert}
+                disabled={loading || (dbtScan.dbtFileCount || 0) === 0}
+                className={`flex items-center gap-1.5 px-4 py-1.5 text-[11px] font-semibold rounded-md text-white ${meta.accent} hover:opacity-90 transition-colors disabled:opacity-50`}
+              >
+                {loading ? <Loader2 size={11} className="animate-spin" /> : <Download size={11} />}
+                Convert to DuckCodeModeling Models
+                <ChevronRight size={11} />
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* dbt Repo Step 2: conversion result */}
+        {selectedConnector === "dbt_repo" && step === 2 && dbtResult && (
+          <div className="rounded-xl border border-green-200 bg-green-50 p-3.5 space-y-2.5 shadow-[0_8px_20px_rgba(22,163,74,0.12)]">
+            <div className="flex items-center gap-1.5 text-xs font-semibold text-green-700">
+              <CheckCircle2 size={12} />
+              dbt Repository Conversion Complete
+            </div>
+            <div className="text-[11px] text-green-800 grid grid-cols-4 gap-2">
+              <div className="text-center p-2 bg-white rounded border border-green-200">
+                <div className="text-lg font-bold">{dbtResult.dbtFileCount || 0}</div>
+                <div className="text-[9px] text-green-600">dbt Files</div>
+              </div>
+              <div className="text-center p-2 bg-white rounded border border-green-200">
+                <div className="text-lg font-bold">{dbtResult.generatedCount || 0}</div>
+                <div className="text-[9px] text-green-600">Generated</div>
+              </div>
+              <div className="text-center p-2 bg-white rounded border border-green-200">
+                <div className="text-lg font-bold">{dbtResult.failedCount || 0}</div>
+                <div className="text-[9px] text-green-600">Failed</div>
+              </div>
+              <div className="text-center p-2 bg-white rounded border border-green-200">
+                <div className="text-lg font-bold">{dbtResult.fieldCount || 0}</div>
+                <div className="text-[9px] text-green-600">Total Fields</div>
+              </div>
+            </div>
+            <div className="text-[10px] text-green-700">
+              Project: <strong>{dbtResult.project?.name}</strong>
+              <span className="text-green-600"> ({dbtResult.project?.path})</span>
+            </div>
+            {Array.isArray(dbtResult.generatedFiles) && dbtResult.generatedFiles.length > 0 && (
+              <div className="rounded border border-green-200 bg-white/80 p-2 space-y-1 max-h-44 overflow-y-auto">
+                <div className="text-[10px] font-semibold text-green-700 uppercase tracking-wider">Generated Files</div>
+                {dbtResult.generatedFiles.map((item) => (
+                  <div key={`${item.sourcePath}:${item.fileName}`} className="text-[10px] text-green-800">
+                    <div className="font-medium">{item.fileName}</div>
+                    <div className="text-green-700 truncate">{item.sourcePath}</div>
+                  </div>
+                ))}
+              </div>
+            )}
+            {Array.isArray(dbtResult.failedFiles) && dbtResult.failedFiles.length > 0 && (
+              <div className="rounded border border-amber-200 bg-amber-50/70 p-2 space-y-1 max-h-36 overflow-y-auto">
+                <div className="text-[10px] font-semibold text-amber-700 uppercase tracking-wider">Failed Files</div>
+                {dbtResult.failedFiles.map((item) => (
+                  <div key={`${item.sourcePath}:${item.error}`} className="text-[10px] text-amber-800">
+                    <div className="font-medium">{item.sourcePath}</div>
+                    <div className="truncate">{item.error}</div>
+                  </div>
+                ))}
+              </div>
+            )}
+            <div className="flex items-center gap-2 pt-1">
+              <button
+                onClick={async () => {
+                  if (!dbtResult?.project?.id) return;
+                  await selectProject(dbtResult.project.id);
+                  setBottomPanelTab("properties");
+                }}
+                className="flex items-center gap-1 px-3 py-1.5 text-[11px] font-semibold rounded-md text-white bg-green-500 hover:bg-green-600 transition-colors"
+              >
+                <CheckCircle2 size={11} /> Open Project
+              </button>
+              <button
+                onClick={() => { setStep(0); setDbtResult(null); }}
+                className="flex items-center gap-1 px-3 py-1.5 text-[11px] font-medium rounded-md border border-border-primary bg-bg-primary text-text-secondary hover:bg-bg-hover transition-colors"
+              >
+                <RefreshCw size={11} /> Convert Another Repo
+              </button>
+            </div>
+          </div>
+        )}
+
         {/* Step 1: Schema browser — multi-select */}
-        {selectedConnector && step === 1 && (
+        {selectedConnector && selectedConnector !== "dbt_repo" && step === 1 && (
           <div className={`rounded-xl border ${meta.border} ${meta.bg} p-3.5 space-y-2.5 shadow-[0_8px_20px_rgba(15,23,42,0.05)]`}>
             <div className="flex items-center justify-between">
               <div className={`text-xs font-semibold ${meta.color} flex items-center gap-1.5`}>
@@ -810,7 +1357,7 @@ export default function ConnectorsPanel() {
         )}
 
         {/* Step 2: Table preview for a specific schema */}
-        {selectedConnector && step === 2 && previewSchema && (
+        {selectedConnector && selectedConnector !== "dbt_repo" && step === 2 && previewSchema && (
           <div className={`rounded-xl border ${meta.border} ${meta.bg} p-3.5 space-y-2.5 shadow-[0_8px_20px_rgba(15,23,42,0.05)]`}>
             <div className="flex items-center justify-between">
               <div className={`text-xs font-semibold ${meta.color} flex items-center gap-1.5`}>
@@ -878,7 +1425,7 @@ export default function ConnectorsPanel() {
         )}
 
         {/* Step 3: Pull result — per-schema breakdown */}
-        {selectedConnector && step === 3 && pullResult && (
+        {selectedConnector && selectedConnector !== "dbt_repo" && step === 3 && pullResult && (
           <div className="rounded-xl border border-green-200 bg-green-50 p-3.5 space-y-2.5 shadow-[0_8px_20px_rgba(22,163,74,0.12)]">
             <div className="flex items-center gap-1.5 text-xs font-semibold text-green-700">
               <CheckCircle2 size={12} />
@@ -975,9 +1522,9 @@ export default function ConnectorsPanel() {
         {/* Help text */}
         {!selectedConnector && (
           <div className="text-[11px] text-text-muted p-4 text-center space-y-1 rounded-xl border border-border-primary/80 bg-white/85 backdrop-blur-sm">
-            <p>Select a database above to browse schemas and pull tables into a DataLex model.</p>
+            <p>Select a connector above to import metadata into a DuckCodeModeling model.</p>
             <p className="text-[10px]">
-              Workflow: <strong>Connect</strong> → <strong>Browse Schemas</strong> → <strong>Select Tables</strong> → <strong>Pull Model</strong>
+              Database flow: <strong>Connect</strong> → <strong>Browse Schemas</strong> → <strong>Select Tables</strong> → <strong>Pull Model</strong>
             </p>
           </div>
         )}

@@ -3,7 +3,7 @@
 Each connector implements the same interface:
   pull_schema(connection_string, schema=None, tables=None, **kwargs) -> Dict[str, Any]
 
-Returns a DataLex model dict ready for use.
+Returns a DuckCodeModeling model dict ready for use.
 """
 
 from dm_core.connectors.base import (

@@ -43,11 +43,20 @@ function adjacencyFromEdges(edges) {
   return map;
 }
 
+// Groups of entity types that should be shown together when a filter is selected
+const TYPE_FILTER_GROUPS = {
+  table: new Set(["table", "external_table", "snapshot"]),
+  view: new Set(["view", "materialized_view"]),
+};
+
 // Apply type/tag filters
 function applyFilters(nodes, edges, vizSettings) {
   const filtered = nodes.filter((node) => {
     const entityType = String(node.data?.type || "table");
-    if (vizSettings.entityTypeFilter !== "all" && entityType !== vizSettings.entityTypeFilter) return false;
+    if (vizSettings.entityTypeFilter !== "all") {
+      const group = TYPE_FILTER_GROUPS[vizSettings.entityTypeFilter];
+      if (group ? !group.has(entityType) : entityType !== vizSettings.entityTypeFilter) return false;
+    }
     if (vizSettings.tagFilter !== "all") {
       const tags = new Set((node.data?.tags || []).map(String));
       if (!tags.has(vizSettings.tagFilter)) return false;
@@ -416,7 +425,7 @@ function FlowCanvas() {
 }
 
 export default function DiagramCanvas() {
-  const { setGraph, largeModelBanner, setLargeModelBanner, setVisibleLimit, setViewMode } = useDiagramStore();
+  const { setGraph, largeModelBanner, setLargeModelBanner, setVisibleLimit, setViewMode, setVizSettings } = useDiagramStore();
   const { activeFileContent } = useWorkspaceStore();
   const { diagramFullscreen, setDiagramFullscreen } = useUiStore();
 
@@ -426,6 +435,8 @@ export default function DiagramCanvas() {
       setGraph({ nodes: [], edges: [], warnings: [], model: null });
       return;
     }
+    // Reset entity type filter so all types are visible for every new file
+    setVizSettings({ entityTypeFilter: "all" });
     const check = runModelChecks(activeFileContent);
     // Keep rendering whenever YAML parses to a model shape; validation issues
     // are surfaced in Validation/Status panels instead of hiding the diagram.
@@ -458,7 +469,7 @@ export default function DiagramCanvas() {
     } catch (_err) {
       setGraph({ nodes: [], edges: [], warnings: [], model: null });
     }
-  }, [activeFileContent, setGraph]);
+  }, [activeFileContent, setGraph, setVizSettings]);
 
   // Escape key exits fullscreen
   useEffect(() => {

@@ -38,7 +38,7 @@ const ACTIVITIES = [
   { id: "settings", label: "Settings", icon: Settings,        group: "bottom" },
 ];
 
-const PROJECT_FILE_DRAG_TYPE = "application/x-datalex-project-file";
+const PROJECT_FILE_DRAG_TYPE = "application/x-duckcodemodeling-project-file";
 
 function parseInternalProjectFileDrop(dataTransfer) {
   const raw = dataTransfer?.getData(PROJECT_FILE_DRAG_TYPE);
@@ -293,7 +293,7 @@ function FileSection() {
               <p className="text-xs text-text-muted">No YAML files found.</p>
               {!offlineMode && activeProjectId && projectPath && (
                 <p className="text-[10px] text-text-muted">
-                  If this folder has files on your host and DataLex runs in Docker, mount the parent folder and use
+                  If this folder has files on your host and DuckCodeModeling runs in Docker, mount the parent folder and use
                   a container path such as <code>/workspace/host/...</code>.
                 </p>
               )}
@@ -416,7 +416,7 @@ function ActivityBar({ activeActivity, onSelect, onHome }) {
         {homeActive && (
           <div className="absolute left-0 top-2 bottom-2 w-[3px] rounded-r-full bg-accent-blue" />
         )}
-        <img src="/DataLex.png" alt="DataLex" className="w-7 h-7 object-contain" />
+        <img src="/DuckCodeModeling.png" alt="DuckCodeModeling" className="w-7 h-7 object-contain" />
       </button>
 
       {/* Top activities */}
@@ -535,7 +535,7 @@ function SidePanel({ activity }) {
         {activity === "import" && (
           <div className="mx-2 my-1 px-3 py-2 rounded-lg border border-border-primary/80 bg-white/80">
             <p className="text-[10px] text-text-muted leading-relaxed">
-              Drag & drop or browse files to import SQL DDL, DBML, or Spark Schema JSON into a DataLex model.
+              Drag & drop or browse files to import SQL DDL, DBML, or Spark Schema JSON into a DuckCodeModeling model.
             </p>
           </div>
         )}

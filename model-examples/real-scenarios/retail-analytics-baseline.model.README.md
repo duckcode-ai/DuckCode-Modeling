@@ -12,7 +12,7 @@ Baseline enterprise retail analytics model used for change/gate comparisons.
 1. Activate Python environment: `source .venv/bin/activate`.
 2. Validate schema and rules: `./dm validate model-examples/real-scenarios/retail-analytics-baseline.model.yaml`.
 3. Get model statistics: `./dm stats model-examples/real-scenarios/retail-analytics-baseline.model.yaml`.
-4. Open the DataLex UI and add/open project folder `model-examples/real-scenarios`.
+4. Open the DuckCodeModeling UI and add/open project folder `model-examples/real-scenarios`.
 5. Load `retail-analytics-baseline.model.yaml`, run Search with business terms, and inspect entities/relationships in the diagram.
 6. Open the bottom panel to review properties, business descriptions, governance, and data dictionary/glossary entries when present.
 

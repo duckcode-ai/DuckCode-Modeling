@@ -1,4 +1,4 @@
-# DataLex - Enterprise Project Plan (YAML-First, Program-Based)
+# DuckCodeModeling - Enterprise Project Plan (YAML-First, Program-Based)
 
 ## 1. Vision
 Build the default platform for modern data teams to define, review, and evolve data models as code using structured YAML, with an enterprise-grade visual experience and Git-native workflow.
@@ -161,7 +161,7 @@ rules:
 
 ## 8. Repository Layout
 ```text
-DataLex/
+DuckCodeModeling/
   PROJECT_PLAN.md
   docs/
     architecture.md

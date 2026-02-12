@@ -1216,7 +1216,7 @@ def cmd_watch(args: argparse.Namespace) -> int:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="dm", description="DataLex CLI")
+    parser = argparse.ArgumentParser(prog="dm", description="DuckCodeModeling CLI")
     sub = parser.add_subparsers(dest="command", required=True)
 
     init_parser = sub.add_parser("init", help="Initialize a new workspace")
@@ -1384,7 +1384,7 @@ def build_parser() -> argparse.ArgumentParser:
     import_dbt_parser.add_argument("--schema", default=_default_schema_path(), help="Path to model schema JSON")
     import_dbt_parser.set_defaults(func=cmd_import_dbt)
 
-    pull_parser = sub.add_parser("pull", help="Pull schema from a live database into a DataLex model")
+    pull_parser = sub.add_parser("pull", help="Pull schema from a live database into a DuckCodeModeling model")
     pull_parser.add_argument("connector", help="Connector type (postgres, mysql, snowflake, bigquery, databricks)")
     pull_parser.add_argument("--host", help="Database host (or Snowflake account, Databricks server hostname)")
     pull_parser.add_argument("--port", type=int, help="Database port")

@@ -861,7 +861,7 @@ class TestCITemplates(unittest.TestCase):
         path = ROOT / "ci-templates" / "github-actions.yml"
         self.assertTrue(path.exists(), f"Missing: {path}")
         content = path.read_text()
-        self.assertIn("DataLex", content)
+        self.assertIn("DuckCodeModeling", content)
         self.assertIn("dm validate", content)
         self.assertIn("dm policy-check", content)
         self.assertIn("dm gate", content)
@@ -870,7 +870,7 @@ class TestCITemplates(unittest.TestCase):
         path = ROOT / "ci-templates" / "gitlab-ci.yml"
         self.assertTrue(path.exists(), f"Missing: {path}")
         content = path.read_text()
-        self.assertIn("DataLex", content)
+        self.assertIn("DuckCodeModeling", content)
         self.assertIn("validate-models", content)
         self.assertIn("policy-check", content)
 
@@ -878,7 +878,7 @@ class TestCITemplates(unittest.TestCase):
         path = ROOT / "ci-templates" / "bitbucket-pipelines.yml"
         self.assertTrue(path.exists(), f"Missing: {path}")
         content = path.read_text()
-        self.assertIn("DataLex", content)
+        self.assertIn("DuckCodeModeling", content)
         self.assertIn("Validate Models", content)
         self.assertIn("Policy Check", content)
 
@@ -886,7 +886,7 @@ class TestCITemplates(unittest.TestCase):
         path = ROOT / "ci-templates" / "pr-comment-bot.yml"
         self.assertTrue(path.exists(), f"Missing: {path}")
         content = path.read_text()
-        self.assertIn("DataLex", content)
+        self.assertIn("DuckCodeModeling", content)
         self.assertIn("PR Comment", content)
         self.assertIn("dm diff", content)
 

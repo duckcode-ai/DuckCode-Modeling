@@ -416,7 +416,7 @@ _SPARK_TYPE_MAP = {
 
 
 def _spark_field_type(spark_type: Any) -> str:
-    """Map a Spark schema type to a DataLex field type."""
+    """Map a Spark schema type to a DuckCodeModeling field type."""
     if isinstance(spark_type, str):
         lower = spark_type.lower()
         if lower.startswith("decimal"):
@@ -450,7 +450,7 @@ def import_spark_schema(
     owners: List[str] = None,
     table_name: Optional[str] = None,
 ) -> Dict[str, Any]:
-    """Import a Spark schema JSON file into a DataLex model.
+    """Import a Spark schema JSON file into a DuckCodeModeling model.
 
     Supports:
     - Single StructType schema (from df.schema.json() or DESCRIBE TABLE output)
@@ -1005,7 +1005,7 @@ def import_dbt_schema_yml(
             }
             _upsert_field(metric_entity, field)
 
-    # Materialize relationship tests into DataLex relationships where resolvable.
+    # Materialize relationship tests into DuckCodeModeling relationships where resolvable.
     deduped: Dict[Tuple[str, str, str, str], Dict[str, str]] = {}
     for cand in relationship_candidates:
         parent = entities_by_name.get(cand["parent_entity"])

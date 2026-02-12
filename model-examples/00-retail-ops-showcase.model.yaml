@@ -6,7 +6,7 @@ model:
     - data-platform@duckcode.ai
     - analytics@duckcode.ai
   state: draft
-  description: Real-world retail operations showcase model demonstrating DataLex features end-to-end.
+  description: Real-world retail operations showcase model demonstrating DuckCodeModeling features end-to-end.
 
 entities:
   - name: CustomerProfile

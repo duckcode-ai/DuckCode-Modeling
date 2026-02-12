@@ -31,7 +31,7 @@ const useDiagramStore = create((set, get) => ({
     dimUnrelated: true,
     dimSearch: false,
     showBackground: true,
-    entityTypeFilter: "table",
+    entityTypeFilter: "all",
     tagFilter: "all",
     layoutMode: "elk",
     layoutDensity: "normal",

@@ -1,7 +1,7 @@
-# DataLex Architecture
+# DuckCodeModeling Architecture
 
 ## 1. System Overview
-DataLex is a YAML-first data modeling platform (Schema v2) with three runtime surfaces:
+DuckCodeModeling is a YAML-first data modeling platform (Schema v2) with three runtime surfaces:
 1. CLI (`dm`) for validation, linting, diffing, formatting, stats, policy checks, generation, and imports.
 2. Core engine (`packages/core_engine`) for deterministic model processing.
 3. Web UI (`packages/web-app`) for visual modeling, quality gate review, and change tracking.

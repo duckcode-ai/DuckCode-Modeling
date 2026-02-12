@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://example.com/schemas/model.schema.json",
-  "title": "DataLex YAML v2",
+  "title": "DuckCodeModeling YAML v2",
   "type": "object",
   "required": [
     "model",

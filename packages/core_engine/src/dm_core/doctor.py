@@ -142,7 +142,7 @@ def run_diagnostics(project_dir: str) -> List[DiagnosticResult]:
 def format_diagnostics(results: List[DiagnosticResult]) -> str:
     """Format diagnostic results as a human-readable string."""
     lines: List[str] = []
-    lines.append("DataLex Doctor")
+    lines.append("DuckCodeModeling Doctor")
     lines.append("=" * 40)
 
     ok_count = sum(1 for r in results if r.status == "ok")

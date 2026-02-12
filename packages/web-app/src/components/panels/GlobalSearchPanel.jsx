@@ -142,7 +142,7 @@ export default function GlobalSearchPanel() {
           <div className={`${hasQuery ? "text-left" : "text-center"} transition-all duration-300`}>
             <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-white border border-slate-200 text-[11px] font-semibold text-slate-600 shadow-sm">
               <Sparkles size={12} className="text-blue-600" />
-              DataLex Search
+              DuckCodeModeling Search
             </div>
             <div className="mt-2 text-[12px] text-slate-500">
               Powered by{" "}

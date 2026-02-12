@@ -1,6 +1,6 @@
 # Multi-Model Demo
 
-This directory demonstrates DataLex's **multi-model cross-reference** capabilities — a key Phase 2 feature that enables real-world projects with 10-50+ model files to compose and reference entities across files.
+This directory demonstrates DuckCodeModeling's **multi-model cross-reference** capabilities — a key Phase 2 feature that enables real-world projects with 10-50+ model files to compose and reference entities across files.
 
 ## Structure
 

@@ -104,7 +104,7 @@ function AddProjectModal() {
               className="w-full bg-bg-primary border border-border-primary rounded-md px-3 py-2 text-sm text-text-primary placeholder:text-text-muted outline-none focus:border-accent-blue font-mono text-xs"
             />
             <p className="mt-1 text-[11px] text-text-muted">
-              Recommended: run DataLex locally for full file access. In Docker, use mounted container paths like
+              Recommended: run DuckCodeModeling locally for full file access. In Docker, use mounted container paths like
               {" "}<code>/workspace/host/...</code>.
             </p>
           </div>
@@ -335,7 +335,7 @@ function ConnectView() {
         </span>
         <div className="min-w-0">
           <div className="text-sm font-semibold text-text-primary">Database Connectors</div>
-          <div className="text-[11px] text-text-muted">Connect, preview, and pull physical schemas into versioned DataLex models</div>
+          <div className="text-[11px] text-text-muted">Connect, preview, and pull physical schemas into versioned DuckCodeModeling models</div>
         </div>
       </div>
       <div className="flex-1 overflow-hidden">
