@@ -1,3 +1,4 @@
+import re
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -82,9 +83,29 @@ def _sql_type(field_type: str, dialect: str) -> str:
 
 
 def _qualified_name(entity: Dict[str, Any], dialect: str) -> str:
-    table_name = _to_snake(str(entity.get("name", "")))
+    physical_name = entity.get("physical_name") or entity.get("physicalName")
+    inferred_physical = None
+    if not physical_name:
+        # Backward-compatible fallback: older connector pulls didn't store physical_name.
+        # Try to recover the warehouse identifier from the standard "Pulled from ..." description.
+        desc = str(entity.get("description") or "")
+        m = re.search(r"Pulled from Snowflake [^\s.]+\.[^\s.]+\.([^\s]+) on ", desc)
+        if m:
+            inferred_physical = m.group(1)
+
+    table_name = (
+        str(physical_name or inferred_physical).strip()
+        if (physical_name or inferred_physical)
+        else _to_snake(str(entity.get("name", "")))
+    )
+
     schema_name = entity.get("schema")
     database_name = entity.get("database")
+
+    # Snowflake treats quoted identifiers as case-sensitive; prefer uppercase identifiers by default
+    # so generated DDL matches warehouse naming conventions when physical_name isn't provided.
+    if dialect == "snowflake" and not (physical_name or inferred_physical):
+        table_name = table_name.upper()
 
     if dialect == "bigquery":
         parts = [p for p in [database_name, schema_name, table_name] if p]

@@ -128,6 +128,7 @@ class DatabricksConnector(BaseConnector):
             entity_name = self._entity_name(table_name)
             table_entities[table_name] = {
                 "name": entity_name,
+                "physical_name": table_name,
                 "type": "table",
                 "description": f"Pulled from Databricks {catalog_name}.{schema_name}.{table_name} on {date.today().isoformat()}",
                 "fields": [],

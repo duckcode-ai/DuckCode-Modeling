@@ -115,6 +115,7 @@ class BigQueryConnector(BaseConnector):
             entity_type = "view" if "VIEW" in table_type else "table"
             table_entities[table_name] = {
                 "name": entity_name,
+                "physical_name": table_name,
                 "type": entity_type,
                 "description": f"Pulled from BigQuery {project}.{dataset}.{table_name} on {date.today().isoformat()}",
                 "fields": [],

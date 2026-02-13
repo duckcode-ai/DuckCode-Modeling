@@ -185,6 +185,11 @@
           "type": "string",
           "description": "Database or catalog name"
         },
+        "physical_name": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Physical warehouse object name to use when generating SQL (e.g., FCT_PLAYER_PERFORMANCE)."
+        },
         "subject_area": {
           "type": "string",
           "description": "Logical domain grouping for diagrams"

@@ -154,6 +154,7 @@ class MySQLConnector(BaseConnector):
             entity_type = "view" if table_type == "VIEW" else "table"
             table_entities[table_name] = {
                 "name": entity_name,
+                "physical_name": table_name,
                 "type": entity_type,
                 "description": f"Pulled from MySQL {db_name}.{table_name} on {date.today().isoformat()}",
                 "fields": [],

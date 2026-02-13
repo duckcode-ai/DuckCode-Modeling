@@ -209,6 +209,7 @@ class _SqlServerBaseConnector(BaseConnector):
             entity_type = "view" if str(table_type).upper() == "VIEW" else "table"
             table_entities[table_name] = {
                 "name": entity_name,
+                "physical_name": table_name,
                 "type": entity_type,
                 "description": f"Pulled from {self.display_name} {config.database}.{schema_filter}.{table_name} on {date.today().isoformat()}",
                 "fields": [],
