@@ -351,6 +351,10 @@
         "description": {
           "type": "string",
           "description": "Human-readable description of the relationship"
+        },
+        "inferred": {
+          "type": "boolean",
+          "description": "True when relationship was inferred by a connector (not explicitly defined)."
         }
       }
     },

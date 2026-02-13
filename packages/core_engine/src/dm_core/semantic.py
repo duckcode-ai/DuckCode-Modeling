@@ -245,7 +245,7 @@ def lint_issues(model: Dict[str, Any]) -> List[Issue]:
         if entity_type in PK_REQUIRED_TYPES and not has_pk:
             issues.append(
                 Issue(
-                    severity="error",
+                    severity="warn",
                     code="MISSING_PRIMARY_KEY",
                     message=f"Table '{entity_name}' must have at least one primary key field.",
                     path=f"/entities/{entity_name}",
