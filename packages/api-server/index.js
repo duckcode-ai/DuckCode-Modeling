@@ -35,6 +35,9 @@ const DUCKCODE_CONFIG_DIRNAME = ".duckcodemodeling";
 const DUCKCODE_PROJECT_CONFIG = join(DUCKCODE_CONFIG_DIRNAME, "project.json");
 const DUCKCODE_DEFAULT_STRUCTURE = {
   version: 1,
+  // Default to snowflake so baseline DDL generation works for new projects without extra config.
+  // Connector pulls can still set this explicitly based on the chosen connector.
+  defaultDialect: "snowflake",
   modelsDir: "models",
   migrationsDir: "migrations",
   ddlDir: "ddl",

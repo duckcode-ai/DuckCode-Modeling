@@ -533,7 +533,9 @@ const useWorkspaceStore = create((set, get) => ({
       // and only when the project has a default dialect set (from the connector pull flow).
       try {
         const isModelYaml = /\.model\.ya?ml$/i.test(String(activeFile.name || activeFile.fullPath || ""));
-        const dialect = String(projectConfig?.defaultDialect || "").trim().toLowerCase();
+        // Prefer project-configured dialect, but default to snowflake so new projects still
+        // get baseline DDL generation without extra setup.
+        const dialect = String(projectConfig?.defaultDialect || "snowflake").trim().toLowerCase();
         const supported = new Set(["snowflake", "databricks", "bigquery"]);
         if (isModelYaml && supported.has(dialect) && projectPath) {
           const ddlOutPath = buildDefaultDdlPath(projectPath, projectConfig, activeFile.fullPath, dialect);
