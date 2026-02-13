@@ -33,6 +33,7 @@ DuckCodeModeling helps data teams treat data models as versioned code.
 - Validate structure, quality, and governance policies
 - Track diffs and compatibility gates in CI
 - Pull physical schemas from databases into model files
+- Generate baseline DDL (`.sql`) as an artifact for GitOps-based deployments
 
 ## What Is Included
 - `packages/web-app`: React + Vite modeling studio
@@ -116,6 +117,21 @@ npm --prefix packages/web-app run dev
 Open:
 - Web UI: `http://localhost:5173`
 - API: `http://localhost:3001`
+
+## GitOps Workflow (Recommended)
+DuckCodeModeling is intentionally Git-first: it generates code artifacts and you deploy them via your existing CI/CD.
+
+1. Create/select a project folder (a normal git repo works best).
+2. Pull from a connector (or import) to generate `models/*.model.yaml`.
+3. Edit models in the UI:
+   - Add tables, add columns, rename tables/columns, update metadata and constraints.
+4. Save (`Cmd+S` / `Ctrl+S`):
+   - Saves the YAML file.
+   - Auto-generates baseline DDL into `ddl/<dialect>/<model>.sql` (defaults to `snowflake` if unset).
+5. Commit + push from the built-in Diff & Git panel, or from your terminal.
+6. Deploy with CI/CD by applying the generated `.sql` artifacts in your warehouse (Snowflake/Databricks/BigQuery).
+
+Project config lives in `.duckcodemodeling/project.json` (folders + `defaultDialect`).
 
 ## Quick Start (Docker)
 ```bash
