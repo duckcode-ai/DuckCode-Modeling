@@ -22,6 +22,12 @@ from dm_core.loader import load_yaml_model
 
 ENTERPRISE_MODEL = str(Path(__file__).resolve().parent.parent / "model-examples" / "enterprise-dwh.model.yaml")
 STARTER_MODEL = str(Path(__file__).resolve().parent.parent / "model-examples" / "starter-commerce.model.yaml")
+REPORTING_MODEL = str(
+    Path(__file__).resolve().parent.parent
+    / "model-examples"
+    / "end-to-end-dictionary"
+    / "commerce_reporting.model.yaml"
+)
 DM_CLI = str(Path(__file__).resolve().parent.parent / "dm")
 
 
@@ -31,6 +37,10 @@ def _enterprise():
 
 def _starter():
     return load_yaml_model(STARTER_MODEL)
+
+
+def _reporting():
+    return load_yaml_model(REPORTING_MODEL)
 
 
 # ---------------------------------------------------------------------------
@@ -131,6 +141,11 @@ class TestHTMLDocs:
         assert "<!DOCTYPE html>" in content
         assert "enterprise_dwh" in content
 
+    def test_metrics_section_rendered_html(self):
+        html = generate_html_docs(_reporting())
+        assert "Metric Contracts" in html
+        assert "daily_gross_revenue" in html
+
 
 # ---------------------------------------------------------------------------
 # Markdown Generation
@@ -198,6 +213,11 @@ class TestMarkdownDocs:
         content = Path(result).read_text()
         assert "enterprise_dwh" in content
 
+    def test_metrics_section_rendered_markdown(self):
+        md = generate_markdown_docs(_reporting())
+        assert "## Metric Contracts" in md
+        assert "daily_gross_revenue" in md
+
 
 # ---------------------------------------------------------------------------
 # Changelog Generation
@@ -257,6 +277,13 @@ class TestChangelog:
         cl = generate_changelog(diff)
         assert "Entities added: 0" in cl
         assert "Entities removed: 0" in cl
+
+    def test_changelog_includes_metric_summary(self):
+        old = _starter()
+        new = _reporting()
+        diff = semantic_diff(old, new)
+        cl = generate_changelog(diff)
+        assert "Metrics added:" in cl
 
 
 # ---------------------------------------------------------------------------

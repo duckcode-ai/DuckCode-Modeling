@@ -196,6 +196,7 @@ def generate_html_docs(
     entities = model.get("entities", [])
     relationships = model.get("relationships", [])
     indexes = model.get("indexes", [])
+    metrics = model.get("metrics", [])
     glossary = model.get("glossary", [])
     rules = model.get("rules", [])
     governance = model.get("governance", {})
@@ -207,6 +208,7 @@ def generate_html_docs(
     total_fields = sum(len(e.get("fields", [])) for e in entities)
     total_rels = len(relationships)
     total_indexes = len(indexes)
+    total_metrics = len(metrics)
     total_glossary = len(glossary)
 
     # Build index of entity fields for cross-referencing
@@ -277,6 +279,7 @@ def generate_html_docs(
   <div class="stat"><div class="stat-value">{total_fields}</div><div class="stat-label">Fields</div></div>
   <div class="stat"><div class="stat-value">{total_rels}</div><div class="stat-label">Relationships</div></div>
   <div class="stat"><div class="stat-value">{total_indexes}</div><div class="stat-label">Indexes</div></div>
+  <div class="stat"><div class="stat-value">{total_metrics}</div><div class="stat-label">Metrics</div></div>
   <div class="stat"><div class="stat-value">{total_glossary}</div><div class="stat-label">Glossary Terms</div></div>
 </div>
 """)
@@ -410,6 +413,32 @@ def generate_html_docs(
             parts.append(f'<div class="rel-card"><span class="rel-name">{_esc(rname)}</span> <code>{_esc(rel.get("from", ""))}</code> <span class="rel-arrow">→</span> <code>{_esc(rel.get("to", ""))}</code> <span class="cardinality {card_class}">{_esc(card.replace("_", ":"))}</span></div>')
         parts.append("</div>")
 
+    # Metrics section
+    if metrics:
+        parts.append('<div class="section" id="metrics"><h2>Metric Contracts</h2><table>')
+        parts.append("<thead><tr><th>Metric</th><th>Entity</th><th>Aggregation</th><th>Grain</th><th>Dimensions</th><th>Description</th></tr></thead><tbody>")
+        for metric in metrics:
+            mname = metric.get("name", "")
+            mentity = metric.get("entity", "")
+            magg = metric.get("aggregation", "")
+            mgrain = ", ".join(metric.get("grain", []))
+            mdims = ", ".join(metric.get("dimensions", []))
+            mdesc = metric.get("description", "")
+            if metric.get("deprecated"):
+                dep_msg = f" ({metric.get('deprecated_message', 'deprecated')})"
+                mdesc = (mdesc + dep_msg).strip()
+            parts.append(
+                "<tr>"
+                f"<td><code>{_esc(mname)}</code></td>"
+                f"<td><code>{_esc(mentity)}</code></td>"
+                f"<td>{_esc(magg)}</td>"
+                f"<td>{_esc(mgrain)}</td>"
+                f"<td>{_esc(mdims)}</td>"
+                f"<td>{_esc(mdesc)}</td>"
+                "</tr>"
+            )
+        parts.append("</tbody></table></div>")
+
     # Glossary section
     if glossary:
         parts.append('<div class="section" id="glossary"><h2>Business Glossary</h2>')
@@ -478,6 +507,7 @@ def generate_markdown_docs(
     entities = model.get("entities", [])
     relationships = model.get("relationships", [])
     indexes = model.get("indexes", [])
+    metrics = model.get("metrics", [])
     glossary = model.get("glossary", [])
     governance = model.get("governance", {})
     classifications = governance.get("classification", {})
@@ -496,9 +526,9 @@ def generate_markdown_docs(
 
     # Stats
     total_fields = sum(len(e.get("fields", [])) for e in entities)
-    lines.append(f"| Entities | Fields | Relationships | Indexes | Glossary |")
-    lines.append(f"|----------|--------|---------------|---------|----------|")
-    lines.append(f"| {len(entities)} | {total_fields} | {len(relationships)} | {len(indexes)} | {len(glossary)} |")
+    lines.append(f"| Entities | Fields | Relationships | Indexes | Metrics | Glossary |")
+    lines.append(f"|----------|--------|---------------|---------|---------|----------|")
+    lines.append(f"| {len(entities)} | {total_fields} | {len(relationships)} | {len(indexes)} | {len(metrics)} | {len(glossary)} |")
     lines.append("")
 
     # TOC
@@ -510,6 +540,8 @@ def generate_markdown_docs(
         lines.append(f"- [{ename}](#{ename.lower()}) ({etype})")
     if relationships:
         lines.append("- [Relationships](#relationships)")
+    if metrics:
+        lines.append("- [Metric Contracts](#metric-contracts)")
     if glossary:
         lines.append("- [Glossary](#glossary)")
     if classifications:
@@ -599,6 +631,27 @@ def generate_markdown_docs(
             lines.append(f"| {rname} | `{rfrom}` | `{rto}` | {rcard} | {rdesc} |")
         lines.append("")
 
+    # Metrics
+    if metrics:
+        lines.append("---")
+        lines.append("")
+        lines.append("## Metric Contracts")
+        lines.append("")
+        lines.append("| Metric | Entity | Aggregation | Grain | Dimensions | Description |")
+        lines.append("|--------|--------|-------------|-------|------------|-------------|")
+        for metric in metrics:
+            mname = metric.get("name", "")
+            mentity = metric.get("entity", "")
+            magg = metric.get("aggregation", "")
+            mgrain = ", ".join(metric.get("grain", []))
+            mdims = ", ".join(metric.get("dimensions", []))
+            mdesc = metric.get("description", "")
+            if metric.get("deprecated"):
+                dep_msg = metric.get("deprecated_message", "deprecated")
+                mdesc = (mdesc + f" (DEPRECATED: {dep_msg})").strip()
+            lines.append(f"| `{mname}` | `{mentity}` | {magg} | {mgrain} | {mdims} | {mdesc} |")
+        lines.append("")
+
     # Glossary
     if glossary:
         lines.append("---")
@@ -657,6 +710,9 @@ def generate_changelog(
     lines.append(f"- Relationships removed: {summary.get('removed_relationships', 0)}")
     lines.append(f"- Indexes added: {summary.get('added_indexes', 0)}")
     lines.append(f"- Indexes removed: {summary.get('removed_indexes', 0)}")
+    lines.append(f"- Metrics added: {summary.get('added_metrics', 0)}")
+    lines.append(f"- Metrics removed: {summary.get('removed_metrics', 0)}")
+    lines.append(f"- Metrics changed: {summary.get('changed_metrics', 0)}")
     has_breaking = diff_result.get("has_breaking_changes", False)
     lines.append(f"- Breaking changes: {'Yes' if has_breaking else 'None'}")
     lines.append("")
@@ -690,6 +746,15 @@ def generate_changelog(
             for nc in change.get("nullability_changes", []):
                 lines.append(f"- Nullability changed: `{nc['field']}` ({nc['from_nullable']} → {nc['to_nullable']})")
             lines.append("")
+
+    changed_metrics = diff_result.get("changed_metrics", [])
+    if changed_metrics:
+        lines.append("## Changed Metrics")
+        for metric_change in changed_metrics:
+            mname = metric_change.get("metric", "")
+            changed_fields = metric_change.get("changed_fields", [])
+            lines.append(f"- `{mname}`: {', '.join(changed_fields)}")
+        lines.append("")
 
     breaking = diff_result.get("breaking_changes", [])
     if breaking:

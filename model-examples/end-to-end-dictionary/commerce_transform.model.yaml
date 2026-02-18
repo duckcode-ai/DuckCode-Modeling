@@ -1,0 +1,125 @@
+model:
+  name: commerce_transform
+  spec_version: 2
+  version: 1.0.0
+  domain: sales
+  owners:
+    - analytics-engineering@example.com
+  state: draft
+  layer: transform
+  description: Transform layer business models derived from raw sources.
+  imports:
+    - model: source_sales_raw
+      alias: src
+      path: ./source_sales_raw.model.yaml
+
+entities:
+  - name: CustomerDim
+    type: table
+    description: Conformed customer dimension for analytics.
+    tags: [SILVER, DIMENSION, CUSTOMER]
+    schema: analytics
+    subject_area: customer_domain
+    owner: analytics-engineering@example.com
+    grain: [customer_id]
+    sla:
+      freshness: 8h
+      quality_score: 99
+    fields:
+      - name: customer_id
+        type: string
+        primary_key: true
+        nullable: false
+        description: Conformed customer key.
+        tags: [IDENTIFIER]
+      - name: email
+        type: string
+        nullable: false
+        description: Customer email used by lifecycle reporting.
+        tags: [PII, CONTACT]
+        sensitivity: restricted
+      - name: customer_tier
+        type: string
+        nullable: false
+        description: Normalized customer segment derived from source events.
+        tags: [SEGMENT]
+
+  - name: OrderFact
+    type: table
+    description: Atomic order-level fact table for finance and growth analytics.
+    tags: [SILVER, FACT, ORDER]
+    schema: analytics
+    subject_area: order_domain
+    owner: analytics-engineering@example.com
+    grain: [order_id]
+    sla:
+      freshness: 4h
+      quality_score: 99
+    fields:
+      - name: order_id
+        type: string
+        primary_key: true
+        nullable: false
+        description: Unique order key.
+        tags: [IDENTIFIER]
+      - name: customer_id
+        type: string
+        nullable: false
+        foreign_key: true
+        description: Foreign key to customer dimension.
+        tags: [JOIN_KEY]
+      - name: order_date
+        type: date
+        nullable: false
+        description: Business order date used for reporting grain.
+        tags: [REPORTING_DATE]
+      - name: net_revenue
+        type: decimal(12,2)
+        nullable: false
+        description: Revenue after discount normalization.
+        tags: [AMOUNT, FINANCE]
+      - name: order_status
+        type: string
+        nullable: false
+        description: Standardized business order status.
+        tags: [STATUS]
+
+relationships:
+  - name: order_fact_customer_dim
+    from: OrderFact.customer_id
+    to: CustomerDim.customer_id
+    cardinality: many_to_one
+    description: Fact row belongs to one customer.
+
+indexes:
+  - name: idx_order_fact_order_date
+    entity: OrderFact
+    fields: [order_date]
+  - name: idx_order_fact_customer_id
+    entity: OrderFact
+    fields: [customer_id]
+
+governance:
+  classification:
+    CustomerDim.email: PII
+  stewards:
+    customer_domain: analytics-engineering@example.com
+    order_domain: analytics-engineering@example.com
+  retention:
+    period: 5y
+    policy: transformed_contract
+
+glossary:
+  - term: Order Fact
+    definition: One row per order after transformation and standardization.
+    owner: analytics-engineering@example.com
+    related_fields:
+      - OrderFact.order_id
+      - OrderFact.net_revenue
+    tags: [FACT]
+
+rules:
+  - name: order_fact_revenue_non_negative
+    target: OrderFact.net_revenue
+    expression: "value >= 0"
+    severity: error

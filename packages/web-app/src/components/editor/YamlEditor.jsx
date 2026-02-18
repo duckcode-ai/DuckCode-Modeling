@@ -1,4 +1,4 @@
-import React, { useCallback, useRef, useMemo } from "react";
+import React, { useCallback, useRef } from "react";
 import CodeMirror from "@uiw/react-codemirror";
 import { yaml } from "@codemirror/lang-yaml";
 import { EditorView } from "@codemirror/view";
@@ -52,35 +52,63 @@ const lightTheme = EditorView.theme({
 
 // Schema-aware YAML completions
 const SCHEMA_KEYWORDS = {
-  root: ["model:", "entities:", "relationships:", "indexes:", "governance:", "glossary:"],
-  model: ["name:", "version:", "domain:", "owners:", "state:", "description:", "spec_version:", "imports:"],
-  entity: ["name:", "type:", "description:", "fields:", "tags:", "schema:", "database:", "subject_area:", "owner:", "sla:"],
+  root: ["model:", "entities:", "relationships:", "indexes:", "metrics:", "rules:", "governance:", "glossary:", "display:"],
+  model: ["name:", "spec_version:", "version:", "domain:", "owners:", "state:", "layer:", "description:", "imports:"],
+  entity: ["name:", "type:", "description:", "fields:", "grain:", "tags:", "schema:", "database:", "subject_area:", "owner:", "sla:"],
   field: ["name:", "type:", "nullable:", "primary_key:", "unique:", "foreign_key:", "default:", "check:", "computed:", "computed_expression:", "sensitivity:", "description:", "deprecated:", "deprecated_message:", "examples:"],
   relationship: ["name:", "from:", "to:", "cardinality:", "on_update:", "description:"],
   index: ["name:", "entity:", "fields:", "unique:"],
+  metric: ["name:", "entity:", "description:", "expression:", "aggregation:", "grain:", "dimensions:", "time_dimension:", "owner:", "tags:", "deprecated:", "deprecated_message:"],
+  rule: ["name:", "target:", "expression:", "severity:"],
+  governance: ["classification:", "stewards:", "retention:"],
+  glossary: ["term:", "abbreviation:", "definition:", "related_fields:", "tags:"],
   types: ["string", "integer", "bigint", "float", "decimal", "boolean", "date", "timestamp", "datetime", "uuid", "json", "text", "varchar"],
   cardinalities: ["one_to_one", "one_to_many", "many_to_one", "many_to_many"],
   states: ["draft", "approved", "deprecated"],
+  layers: ["source", "transform", "report"],
   entityTypes: ["table", "view", "materialized_view", "external_table", "snapshot"],
+  aggregations: ["sum", "count", "count_distinct", "avg", "min", "max", "custom"],
+  severity: ["info", "warn", "error"],
   sensitivity: ["public", "internal", "confidential", "restricted"],
 };
+
+function findCurrentSection(doc, lineNumber) {
+  for (let i = lineNumber; i >= 1; i--) {
+    const text = doc.line(i).text;
+    const match = text.match(/^([a-z_]+):\s*$/);
+    if (match) return match[1];
+  }
+  return "";
+}
 
 function yamlCompletions(context) {
   const line = context.state.doc.lineAt(context.pos);
   const textBefore = line.text.slice(0, context.pos - line.from);
-  const indent = textBefore.search(/\S/);
+  const indent = textBefore.match(/^\s*/)?.[0]?.length ?? 0;
   const trimmed = textBefore.trim();
+  const section = findCurrentSection(context.state.doc, line.number);
 
   // After "type: " suggest types
   if (/type:\s*$/.test(textBefore)) {
-    if (indent <= 6) return { from: context.pos, options: SCHEMA_KEYWORDS.entityTypes.map(t => ({ label: t, type: "enum" })) };
-    return { from: context.pos, options: SCHEMA_KEYWORDS.types.map(t => ({ label: t, type: "type" })) };
+    if (section === "entities" && indent <= 6) return { from: context.pos, options: SCHEMA_KEYWORDS.entityTypes.map((t) => ({ label: t, type: "enum" })) };
+    return { from: context.pos, options: SCHEMA_KEYWORDS.types.map((t) => ({ label: t, type: "type" })) };
   }
-  if (/cardinality:\s*$/.test(textBefore)) return { from: context.pos, options: SCHEMA_KEYWORDS.cardinalities.map(t => ({ label: t, type: "enum" })) };
-  if (/state:\s*$/.test(textBefore)) return { from: context.pos, options: SCHEMA_KEYWORDS.states.map(t => ({ label: t, type: "enum" })) };
-  if (/sensitivity:\s*$/.test(textBefore)) return { from: context.pos, options: SCHEMA_KEYWORDS.sensitivity.map(t => ({ label: t, type: "enum" })) };
-  if (/nullable:\s*$/.test(textBefore) || /primary_key:\s*$/.test(textBefore) || /unique:\s*$/.test(textBefore) || /foreign_key:\s*$/.test(textBefore) || /deprecated:\s*$/.test(textBefore) || /computed:\s*$/.test(textBefore))
+  if (/cardinality:\s*$/.test(textBefore)) return { from: context.pos, options: SCHEMA_KEYWORDS.cardinalities.map((t) => ({ label: t, type: "enum" })) };
+  if (/state:\s*$/.test(textBefore)) return { from: context.pos, options: SCHEMA_KEYWORDS.states.map((t) => ({ label: t, type: "enum" })) };
+  if (/layer:\s*$/.test(textBefore)) return { from: context.pos, options: SCHEMA_KEYWORDS.layers.map((t) => ({ label: t, type: "enum" })) };
+  if (/aggregation:\s*$/.test(textBefore)) return { from: context.pos, options: SCHEMA_KEYWORDS.aggregations.map((t) => ({ label: t, type: "enum" })) };
+  if (/severity:\s*$/.test(textBefore)) return { from: context.pos, options: SCHEMA_KEYWORDS.severity.map((t) => ({ label: t, type: "enum" })) };
+  if (/sensitivity:\s*$/.test(textBefore)) return { from: context.pos, options: SCHEMA_KEYWORDS.sensitivity.map((t) => ({ label: t, type: "enum" })) };
+  if (
+    /nullable:\s*$/.test(textBefore) ||
+    /primary_key:\s*$/.test(textBefore) ||
+    /unique:\s*$/.test(textBefore) ||
+    /foreign_key:\s*$/.test(textBefore) ||
+    /deprecated:\s*$/.test(textBefore) ||
+    /computed:\s*$/.test(textBefore)
+  ) {
     return { from: context.pos, options: [{ label: "true", type: "keyword" }, { label: "false", type: "keyword" }] };
+  }
 
   // Determine context by indentation
   const word = context.matchBefore(/[\w-]*/);
@@ -88,14 +116,18 @@ function yamlCompletions(context) {
   const from = word ? word.from : context.pos;
 
   let options;
-  if (indent <= 0) options = SCHEMA_KEYWORDS.root;
-  else if (indent <= 2) options = SCHEMA_KEYWORDS.model;
-  else if (indent <= 6 && trimmed.startsWith("- ")) options = SCHEMA_KEYWORDS.entity;
-  else if (indent <= 6) options = SCHEMA_KEYWORDS.entity;
-  else if (indent <= 10) options = SCHEMA_KEYWORDS.field;
-  else options = SCHEMA_KEYWORDS.field;
+  if (indent === 0) options = SCHEMA_KEYWORDS.root;
+  else if (section === "model") options = SCHEMA_KEYWORDS.model;
+  else if (section === "entities") options = indent <= 6 ? SCHEMA_KEYWORDS.entity : SCHEMA_KEYWORDS.field;
+  else if (section === "relationships") options = SCHEMA_KEYWORDS.relationship;
+  else if (section === "indexes") options = SCHEMA_KEYWORDS.index;
+  else if (section === "metrics") options = SCHEMA_KEYWORDS.metric;
+  else if (section === "rules") options = SCHEMA_KEYWORDS.rule;
+  else if (section === "governance") options = SCHEMA_KEYWORDS.governance;
+  else if (section === "glossary") options = SCHEMA_KEYWORDS.glossary;
+  else options = SCHEMA_KEYWORDS.root;
 
-  return { from, options: options.map(k => ({ label: k, type: "property" })) };
+  return { from, options: options.map((k) => ({ label: k, type: "property" })) };
 }
 
 // Inline validation linter

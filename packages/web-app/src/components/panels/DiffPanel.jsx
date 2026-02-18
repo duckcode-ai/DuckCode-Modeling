@@ -381,7 +381,7 @@ export default function DiffPanel() {
               )}
               {diff && (
                 <div className="space-y-2">
-                  <div className="grid grid-cols-2 gap-2">
+                  <div className="grid grid-cols-2 lg:grid-cols-4 gap-2">
                     <div className="px-3 py-2 bg-bg-primary border border-border-primary rounded-md">
                       <div className="text-[10px] text-text-muted uppercase mb-1">Entities</div>
                       <div className="flex items-center gap-3 text-xs">
@@ -397,7 +397,39 @@ export default function DiffPanel() {
                         <span className="flex items-center gap-1 text-red-600"><Minus size={10} /> {diff.summary.removed_relationships}</span>
                       </div>
                     </div>
+                    <div className="px-3 py-2 bg-bg-primary border border-border-primary rounded-md">
+                      <div className="text-[10px] text-text-muted uppercase mb-1">Indexes</div>
+                      <div className="flex items-center gap-3 text-xs">
+                        <span className="flex items-center gap-1 text-green-600"><Plus size={10} /> {diff.summary.added_indexes || 0}</span>
+                        <span className="flex items-center gap-1 text-red-600"><Minus size={10} /> {diff.summary.removed_indexes || 0}</span>
+                      </div>
+                    </div>
+                    <div className="px-3 py-2 bg-bg-primary border border-border-primary rounded-md">
+                      <div className="text-[10px] text-text-muted uppercase mb-1">Metrics</div>
+                      <div className="flex items-center gap-3 text-xs">
+                        <span className="flex items-center gap-1 text-green-600"><Plus size={10} /> {diff.summary.added_metrics || 0}</span>
+                        <span className="flex items-center gap-1 text-red-600"><Minus size={10} /> {diff.summary.removed_metrics || 0}</span>
+                        <span className="flex items-center gap-1 text-amber-600"><RefreshCw size={10} /> {diff.summary.changed_metrics || 0}</span>
+                      </div>
+                    </div>
                   </div>
+                  {(diff.changed_metrics || []).length > 0 && (
+                    <div className="space-y-1.5">
+                      <h4 className="text-[10px] text-text-muted uppercase tracking-wider font-semibold">
+                        Metric Contract Changes ({diff.changed_metrics.length})
+                      </h4>
+                      {diff.changed_metrics.map((metricChange) => (
+                        <div
+                          key={metricChange.metric}
+                          className="px-3 py-2 bg-bg-primary border border-border-primary rounded-md text-xs text-text-secondary"
+                        >
+                          <span className="font-semibold text-text-primary">{metricChange.metric}</span>
+                          <span className="text-text-muted"> changed: </span>
+                          <span>{(metricChange.changed_fields || []).join(", ") || "unknown"}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                   {diff.summary.breaking_change_count > 0 && (
                     <div className="space-y-1.5">
                       <h4 className="text-[10px] text-status-error uppercase tracking-wider font-semibold flex items-center gap-1">

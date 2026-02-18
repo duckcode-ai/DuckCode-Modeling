@@ -159,8 +159,22 @@ source .venv/bin/activate
 ./dm docs model-examples/starter-commerce.model.yaml --out docs-site
 ```
 
+## End-to-End Modeling Template
+Use this to scaffold source, transform, reporting, and dictionary workflows in one repo structure.
+
+```bash
+./dm init --path my-modeling-repo --template end-to-end
+
+cd my-modeling-repo
+dm validate-all --glob "models/**/*.model.yaml"
+dm policy-check models/report/commerce_reporting.model.yaml --policy policies/end_to_end_dictionary.policy.yaml --inherit
+dm resolve-project models
+dm generate docs models/report/commerce_reporting.model.yaml --format html --out docs/dictionary/reporting-dictionary.html
+```
+
 ## Example Models
 - Showcase model: `model-examples/00-retail-ops-showcase.model.yaml`
+- End-to-end dictionary example: `model-examples/end-to-end-dictionary/README.md`
 - All scenario guides: `model-examples/README.md`
 
 ## Documentation Map
@@ -169,6 +183,7 @@ source .venv/bin/activate
 - YAML spec v1: `docs/yaml-spec-v1.md`
 - YAML spec v2: `docs/yaml-spec-v2.md`
 - Governance policy spec: `docs/governance-policy-spec.md`
+- End-to-end modeling dictionary blueprint: `docs/end-to-end-modeling-dictionary.md`
 - Observability SLOs: `docs/observability-slos.md`
 - Backup and restore runbook: `docs/backup-restore-runbook.md`
 

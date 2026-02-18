@@ -11,6 +11,7 @@ relationships: []
 indexes: []
 governance: {}
 glossary: []
+metrics: []
 rules: []
 display: {}
 ```
@@ -31,6 +32,7 @@ Optional keys:
 1. `spec_version` (integer, `1` or `2`, default `2`)
 2. `description` (string)
 3. `imports` (array of import references for multi-model projects)
+4. `layer` (`source` | `transform` | `report`) — logical modeling layer used for stricter linting.
 
 ### `model.imports`
 Cross-model imports enable multi-file projects where entities from one model can be referenced in another.
@@ -72,6 +74,7 @@ Optional entity keys:
 5. `subject_area` (string) — logical domain grouping for diagrams
 6. `owner` (string) — entity-level owner email or team
 7. `sla` (object) — data SLA with `freshness` (string) and `quality_score` (number 0–100)
+8. `grain` (string array) — explicit uniqueness grain for the entity.
 
 ### `fields`
 Each field requires:
@@ -134,6 +137,23 @@ Optional glossary term keys:
 3. `related_fields` (array of `Entity.field` references)
 4. `tags` (string array)
 
+## `metrics` (new in v2)
+Each metric requires:
+1. `name` (snake_case)
+2. `entity` (PascalCase entity name)
+3. `expression` (string)
+4. `aggregation` (`sum` | `count` | `count_distinct` | `avg` | `min` | `max` | `custom`)
+5. `grain` (array of field names defined in the metric entity)
+
+Optional metric keys:
+1. `description` (string)
+2. `dimensions` (array of field names in metric entity)
+3. `time_dimension` (field name in metric entity)
+4. `owner` (string)
+5. `tags` (string array)
+6. `deprecated` (boolean)
+7. `deprecated_message` (string)
+
 ## `rules`
 Each rule requires:
 1. `name`
@@ -153,6 +173,13 @@ Each rule requires:
 9. `computed: true` fields should have a `computed_expression`.
 10. `deprecated: true` fields are reported as warnings.
 11. Circular relationships are allowed but reported as warnings.
+12. In `transform` and `report` layer models, entities of type `table`/`view`/`materialized_view` must declare `grain`.
+13. `entity.grain` fields must exist in that entity.
+14. Metric names must be unique.
+15. `metrics.entity` must reference an existing entity.
+16. Metric `grain` and `dimensions` fields must exist in the metric entity.
+17. Metric `time_dimension` must exist in the metric entity.
+18. In `report` layer models, at least one metric is required.
 
 ## Example v2 Model
 ```yaml
@@ -164,6 +191,7 @@ model:
   owners:
     - data-platform@company.com
   state: draft
+  layer: report
   description: Enterprise data warehouse model
 
 entities:
@@ -175,6 +203,7 @@ entities:
     database: warehouse
     subject_area: customer_domain
     owner: customer-team@company.com
+    grain: [customer_id]
     sla:
       freshness: 24h
       quality_score: 99.5
@@ -206,6 +235,7 @@ entities:
     type: materialized_view
     description: Pre-aggregated customer metrics
     subject_area: customer_domain
+    grain: [customer_id]
     fields:
       - name: customer_id
         type: integer
@@ -250,6 +280,17 @@ glossary:
     owner: analytics-team@company.com
     related_fields:
       - Customer.lifetime_value
+    tags: [KPI, FINANCE]
+
+metrics:
+  - name: customer_lifetime_value
+    entity: Customer
+    expression: lifetime_value
+    aggregation: sum
+    grain: [customer_id]
+    dimensions: [customer_id]
+    time_dimension: created_at
+    owner: analytics-team@company.com
     tags: [KPI, FINANCE]
 
 rules:

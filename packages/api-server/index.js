@@ -9,7 +9,7 @@ const require = createRequire(import.meta.url);
 const yaml = require("js-yaml");
 
 const app = express();
-const PORT = process.env.PORT || 3001;
+const PORT = process.env.PORT || 3006;
 
 app.use(cors());
 app.use(express.json({ limit: "10mb" }));

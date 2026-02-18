@@ -75,6 +75,24 @@ export function removeField(yamlText, entityName, fieldName) {
         (r) => r.from !== `${entityName}.${fieldName}` && r.to !== `${entityName}.${fieldName}`
       );
     }
+    // Clean up metric references
+    if (Array.isArray(model.metrics)) {
+      model.metrics = model.metrics
+        .map((metric) => {
+          if (metric.entity !== entityName) return metric;
+          const grain = Array.isArray(metric.grain) ? metric.grain.filter((f) => f !== fieldName) : metric.grain;
+          const dimensions = Array.isArray(metric.dimensions) ? metric.dimensions.filter((f) => f !== fieldName) : metric.dimensions;
+          const expression = metric.expression === fieldName ? "" : metric.expression;
+          const time_dimension = metric.time_dimension === fieldName ? undefined : metric.time_dimension;
+          return { ...metric, grain, dimensions, expression, ...(time_dimension ? { time_dimension } : {}) };
+        })
+        .filter((metric) => {
+          if (metric.entity !== entityName) return true;
+          const hasGrain = Array.isArray(metric.grain) ? metric.grain.length > 0 : true;
+          const hasExpression = String(metric.expression || "").trim().length > 0;
+          return hasGrain && hasExpression;
+        });
+    }
   });
 }
 
@@ -135,6 +153,10 @@ export function removeEntity(yamlText, entityName) {
     if (Array.isArray(model.indexes)) {
       model.indexes = model.indexes.filter((idx) => idx.entity !== entityName);
     }
+    // Clean up metrics
+    if (Array.isArray(model.metrics)) {
+      model.metrics = model.metrics.filter((metric) => metric.entity !== entityName);
+    }
   });
 }
 
@@ -189,6 +211,22 @@ export function renameField(yamlText, entityName, oldFieldName, newFieldName) {
         return changed ? { ...idx, fields } : idx;
       });
     }
+
+    // Update metric references that point at this field
+    if (Array.isArray(model.metrics)) {
+      model.metrics = model.metrics.map((metric) => {
+        if (metric.entity !== entityName) return metric;
+        const grain = Array.isArray(metric.grain)
+          ? metric.grain.map((f) => (f === oldFieldName ? next : f))
+          : metric.grain;
+        const dimensions = Array.isArray(metric.dimensions)
+          ? metric.dimensions.map((f) => (f === oldFieldName ? next : f))
+          : metric.dimensions;
+        const expression = metric.expression === oldFieldName ? next : metric.expression;
+        const time_dimension = metric.time_dimension === oldFieldName ? next : metric.time_dimension;
+        return { ...metric, grain, dimensions, expression, time_dimension };
+      });
+    }
   });
 }
 
@@ -236,6 +274,11 @@ export function renameEntity(yamlText, oldEntityName, newEntityName) {
       model.indexes = model.indexes.map((idx) => (idx.entity === oldEntityName ? { ...idx, entity: next } : idx));
     }
 
-    // Update glossary/rules later if they ever reference entities (keep this minimal for now)
+    // Update metric entity references
+    if (Array.isArray(model.metrics)) {
+      model.metrics = model.metrics.map((metric) =>
+        metric.entity === oldEntityName ? { ...metric, entity: next } : metric
+      );
+    }
   });
 }

@@ -1,0 +1,110 @@
+model:
+  name: source_sales_raw
+  spec_version: 2
+  version: 1.0.0
+  domain: sales
+  owners:
+    - data-platform@example.com
+  state: draft
+  layer: source
+  description: Source layer contract pulled from warehouse raw schemas.
+
+entities:
+  - name: RawCustomers
+    type: table
+    description: Raw customer profile records from CRM.
+    tags: [BRONZE, SOURCE, CUSTOMER]
+    schema: raw
+    subject_area: customer_domain
+    owner: customer-data@example.com
+    grain: [customer_id]
+    sla:
+      freshness: 4h
+      quality_score: 98
+    fields:
+      - name: customer_id
+        type: string
+        primary_key: true
+        nullable: false
+        description: Stable customer identifier from CRM.
+        tags: [IDENTIFIER]
+      - name: email
+        type: string
+        nullable: false
+        description: Customer email from source system.
+        tags: [PII, CONTACT]
+        sensitivity: restricted
+      - name: created_at
+        type: timestamp
+        nullable: false
+        description: Customer creation timestamp from source.
+        tags: [AUDIT]
+
+  - name: RawOrders
+    type: table
+    description: Raw order transactions from commerce platform.
+    tags: [BRONZE, SOURCE, ORDER]
+    schema: raw
+    subject_area: order_domain
+    owner: order-data@example.com
+    grain: [order_id]
+    sla:
+      freshness: 2h
+      quality_score: 97
+    fields:
+      - name: order_id
+        type: string
+        primary_key: true
+        nullable: false
+        description: Unique order identifier.
+        tags: [IDENTIFIER]
+      - name: customer_id
+        type: string
+        nullable: false
+        foreign_key: true
+        description: Customer identifier attached to the order.
+        tags: [JOIN_KEY]
+      - name: order_ts
+        type: timestamp
+        nullable: false
+        description: Order creation timestamp.
+        tags: [EVENT_TIME]
+      - name: gross_amount
+        type: decimal(12,2)
+        nullable: false
+        description: Total order amount before discounts and tax allocations.
+        tags: [AMOUNT, FINANCE]
+      - name: status
+        type: string
+        nullable: false
+        description: Raw order lifecycle status.
+        tags: [STATUS]
+
+relationships:
+  - name: raw_orders_customer
+    from: RawOrders.customer_id
+    to: RawCustomers.customer_id
+    cardinality: many_to_one
+    description: Raw order row belongs to a raw customer row.
+
+governance:
+  classification:
+    RawCustomers.email: PII
+  stewards:
+    customer_domain: customer-data@example.com
+    order_domain: order-data@example.com
+  retention:
+    period: 3y
+    policy: source_contract_baseline
+
+glossary:
+  - term: Raw Zone
+    definition: Ingested source-aligned data before business transformations.
+    owner: data-platform@example.com
+    tags: [INGESTION]
+
+rules:
+  - name: raw_orders_amount_non_negative
+    target: RawOrders.gross_amount
+    expression: "value >= 0"
+    severity: error

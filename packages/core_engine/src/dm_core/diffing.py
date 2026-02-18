@@ -47,6 +47,51 @@ def _diff_indexes(
     return added, removed, breaking
 
 
+def _diff_metrics(
+    old_canonical: Dict[str, Any], new_canonical: Dict[str, Any]
+) -> Tuple[List[str], List[str], List[Dict[str, Any]], List[str]]:
+    old_metrics = {m.get("name", ""): m for m in old_canonical.get("metrics", []) if m.get("name")}
+    new_metrics = {m.get("name", ""): m for m in new_canonical.get("metrics", []) if m.get("name")}
+
+    old_names = set(old_metrics.keys())
+    new_names = set(new_metrics.keys())
+
+    added = sorted(new_names - old_names)
+    removed = sorted(old_names - new_names)
+    changed: List[Dict[str, Any]] = []
+    breaking: List[str] = []
+
+    for name in removed:
+        breaking.append(f"Metric removed: {name}")
+
+    for name in sorted(old_names & new_names):
+        old_metric = old_metrics[name]
+        new_metric = new_metrics[name]
+        if old_metric == new_metric:
+            continue
+
+        changed_fields: List[str] = []
+        for field in (
+            "entity",
+            "expression",
+            "aggregation",
+            "grain",
+            "dimensions",
+            "time_dimension",
+            "owner",
+            "deprecated",
+        ):
+            if old_metric.get(field) != new_metric.get(field):
+                changed_fields.append(field)
+
+        changed.append({"metric": name, "changed_fields": sorted(changed_fields)})
+
+        if any(f in {"entity", "expression", "aggregation", "grain", "time_dimension"} for f in changed_fields):
+            breaking.append(f"Metric contract changed: {name}")
+
+    return added, removed, changed, breaking
+
+
 def semantic_diff(old_model: Dict[str, Any], new_model: Dict[str, Any]) -> Dict[str, Any]:
     old_canonical = compile_model(old_model)
     new_canonical = compile_model(new_model)
@@ -135,6 +180,8 @@ def semantic_diff(old_model: Dict[str, Any], new_model: Dict[str, Any]) -> Dict[
 
     added_indexes, removed_indexes, index_breaking = _diff_indexes(old_canonical, new_canonical)
     breaking_changes.extend(index_breaking)
+    added_metrics, removed_metrics, changed_metrics, metric_breaking = _diff_metrics(old_canonical, new_canonical)
+    breaking_changes.extend(metric_breaking)
 
     return {
         "summary": {
@@ -145,6 +192,9 @@ def semantic_diff(old_model: Dict[str, Any], new_model: Dict[str, Any]) -> Dict[
             "removed_relationships": len(removed_relationships),
             "added_indexes": len(added_indexes),
             "removed_indexes": len(removed_indexes),
+            "added_metrics": len(added_metrics),
+            "removed_metrics": len(removed_metrics),
+            "changed_metrics": len(changed_metrics),
             "breaking_change_count": len(sorted(set(breaking_changes))),
         },
         "added_entities": added_entities,
@@ -154,6 +204,9 @@ def semantic_diff(old_model: Dict[str, Any], new_model: Dict[str, Any]) -> Dict[
         "removed_relationships": removed_relationships,
         "added_indexes": added_indexes,
         "removed_indexes": removed_indexes,
+        "added_metrics": added_metrics,
+        "removed_metrics": removed_metrics,
+        "changed_metrics": changed_metrics,
         "breaking_changes": sorted(set(breaking_changes)),
         "has_breaking_changes": bool(breaking_changes),
     }
@@ -209,6 +262,9 @@ def project_diff(
             or diff["summary"]["removed_relationships"] > 0
             or diff["summary"]["added_indexes"] > 0
             or diff["summary"]["removed_indexes"] > 0
+            or diff["summary"]["added_metrics"] > 0
+            or diff["summary"]["removed_metrics"] > 0
+            or diff["summary"]["changed_metrics"] > 0
         )
 
         if has_changes:

@@ -14,6 +14,7 @@ import {
   ChevronRight,
   ArrowRightLeft,
   ListOrdered,
+  Gauge,
 } from "lucide-react";
 import useDiagramStore from "../../stores/diagramStore";
 
@@ -70,13 +71,14 @@ function EntitySection({ entity, classifications, indexes, relationships, isExpa
       {isExpanded && (
         <div className="border-t border-border-primary">
           {/* Meta */}
-          {(entity.description || entity.schema || entity.subject_area || entity.owner || tags.length > 0) && (
+          {(entity.description || entity.schema || entity.subject_area || entity.owner || tags.length > 0 || (entity.grain || []).length > 0) && (
             <div className="px-3 py-1.5 text-[11px] text-text-muted space-y-0.5 border-b border-border-primary bg-bg-secondary/30">
               {entity.description && <div>{entity.description}</div>}
               <div className="flex flex-wrap gap-2">
                 {entity.schema && <span>Schema: <strong>{entity.schema}</strong></span>}
                 {entity.subject_area && <span>Area: <strong>{entity.subject_area}</strong></span>}
                 {entity.owner && <span>Owner: <strong>{entity.owner}</strong></span>}
+                {(entity.grain || []).length > 0 && <span>Grain: <strong>{(entity.grain || []).join(", ")}</strong></span>}
               </div>
               {tags.length > 0 && (
                 <div className="flex gap-1 flex-wrap">
@@ -171,7 +173,9 @@ export default function DictionaryPanel() {
   const entities = model?.entities || [];
   const relationships = model?.relationships || [];
   const indexes = model?.indexes || [];
+  const metrics = model?.metrics || [];
   const glossary = model?.glossary || [];
+  const modelLayer = model?.model?.layer || "";
   const classifications = model?.governance?.classification || {};
 
   const filtered = useMemo(() => {
@@ -201,6 +205,24 @@ export default function DictionaryPanel() {
       );
     });
   }, [glossary, search]);
+
+  const filteredMetrics = useMemo(() => {
+    if (!search.trim()) return metrics;
+    const q = search.toLowerCase();
+    return metrics.filter((metric) => {
+      return (
+        (metric.name || "").toLowerCase().includes(q) ||
+        (metric.entity || "").toLowerCase().includes(q) ||
+        (metric.description || "").toLowerCase().includes(q) ||
+        (metric.expression || "").toLowerCase().includes(q) ||
+        (metric.aggregation || "").toLowerCase().includes(q) ||
+        (metric.time_dimension || "").toLowerCase().includes(q) ||
+        (metric.grain || []).some((item) => String(item).toLowerCase().includes(q)) ||
+        (metric.dimensions || []).some((item) => String(item).toLowerCase().includes(q)) ||
+        (metric.tags || []).some((item) => String(item).toLowerCase().includes(q))
+      );
+    });
+  }, [metrics, search]);
 
   const toggleEntity = (name) => {
     setExpandedEntities((prev) => {
@@ -232,8 +254,13 @@ export default function DictionaryPanel() {
         <div className="flex items-center gap-1.5">
           <BookOpen size={12} className="text-accent-blue" />
           <span className="text-xs font-semibold text-text-primary">Data Dictionary</span>
+          {modelLayer && (
+            <span className="px-1.5 py-0 rounded text-[9px] font-semibold bg-blue-50 text-blue-700 border border-blue-200">
+              {modelLayer}
+            </span>
+          )}
           <span className="text-[10px] text-text-muted">
-            {entities.length} entities · {totalFields} fields
+            {entities.length} entities · {totalFields} fields · {metrics.length} metrics
           </span>
         </div>
         <div className="flex items-center gap-1">
@@ -278,6 +305,52 @@ export default function DictionaryPanel() {
         {filtered.length === 0 && search && (
           <div className="text-xs text-text-muted text-center py-4">
             No entities match "{search}"
+          </div>
+        )}
+
+        {/* Metrics */}
+        {filteredMetrics.length > 0 && (
+          <div className="mt-3">
+            <div className="text-[10px] text-text-muted uppercase tracking-wider font-semibold flex items-center gap-1 mb-1.5">
+              <Gauge size={10} />
+              Metric Contracts ({filteredMetrics.length})
+            </div>
+            <div className="space-y-1.5">
+              {filteredMetrics.map((metric) => (
+                <div key={metric.name} className="border border-border-primary rounded-lg p-2.5 bg-bg-primary">
+                  <div className="flex items-center gap-1.5 mb-0.5">
+                    <span className="text-xs font-semibold text-text-primary">{metric.name}</span>
+                    {metric.aggregation && (
+                      <span className="px-1 py-0 rounded text-[9px] font-semibold bg-green-50 text-green-700 border border-green-200">
+                        {metric.aggregation}
+                      </span>
+                    )}
+                    {metric.entity && (
+                      <code className="text-[9px] font-mono px-1 py-0 rounded bg-bg-secondary border border-border-primary text-purple-600">
+                        {metric.entity}
+                      </code>
+                    )}
+                  </div>
+                  {metric.description && (
+                    <p className="text-[11px] text-text-muted">{metric.description}</p>
+                  )}
+                  <div className="text-[10px] text-text-secondary mt-1 space-y-0.5">
+                    {(metric.grain || []).length > 0 && <div>Grain: {(metric.grain || []).join(", ")}</div>}
+                    {(metric.dimensions || []).length > 0 && <div>Dimensions: {(metric.dimensions || []).join(", ")}</div>}
+                    {metric.time_dimension && <div>Time: {metric.time_dimension}</div>}
+                  </div>
+                  {(metric.tags || []).length > 0 && (
+                    <div className="flex flex-wrap gap-1 mt-1">
+                      {(metric.tags || []).map((tag) => (
+                        <span key={`${metric.name}-${tag}`} className="px-1 py-0 rounded bg-bg-secondary border border-border-primary text-[9px]">
+                          {tag}
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
           </div>
         )}
 

@@ -1,0 +1,184 @@
+model:
+  name: commerce_reporting
+  spec_version: 2
+  version: 1.0.0
+  domain: sales
+  owners:
+    - bi-team@example.com
+  state: draft
+  layer: report
+  description: Reporting layer metric contracts and dictionary-ready semantic views.
+  imports:
+    - model: commerce_transform
+      alias: tr
+      path: ./commerce_transform.model.yaml
+
+entities:
+  - name: DailyRevenueMetric
+    type: view
+    description: Daily revenue KPI contract used by executive dashboards.
+    tags: [GOLD, METRIC, KPI, REPORTING]
+    schema: reporting
+    subject_area: executive_kpis
+    owner: bi-team@example.com
+    grain: [metric_date]
+    sla:
+      freshness: 24h
+      quality_score: 99
+    fields:
+      - name: metric_date
+        type: date
+        nullable: false
+        description: Daily reporting grain for KPI trend lines.
+        tags: [GRAIN, REPORTING_DATE]
+      - name: gross_revenue
+        type: decimal(12,2)
+        nullable: false
+        computed: true
+        computed_expression: "SUM(OrderFact.net_revenue)"
+        description: Sum of net revenue at daily grain.
+        tags: [METRIC, FINANCE]
+      - name: order_count
+        type: integer
+        nullable: false
+        computed: true
+        computed_expression: "COUNT_DISTINCT(OrderFact.order_id)"
+        description: Distinct order count at daily grain.
+        tags: [METRIC, VOLUME]
+      - name: avg_order_value
+        type: decimal(12,2)
+        nullable: false
+        computed: true
+        computed_expression: "gross_revenue / NULLIF(order_count, 0)"
+        description: Average order value derived from daily metrics.
+        tags: [METRIC, FINANCE]
+
+  - name: CustomerRevenueMetric
+    type: view
+    description: Customer-level revenue KPI contract for retention analysis.
+    tags: [GOLD, METRIC, CUSTOMER]
+    schema: reporting
+    subject_area: customer_kpis
+    owner: bi-team@example.com
+    grain: [customer_id, report_month]
+    sla:
+      freshness: 24h
+      quality_score: 99
+    fields:
+      - name: customer_id
+        type: string
+        nullable: false
+        description: Customer identifier for customer KPI cuts.
+        tags: [DIMENSION, IDENTIFIER]
+      - name: report_month
+        type: date
+        nullable: false
+        description: Monthly reporting period for customer metrics.
+        tags: [GRAIN]
+      - name: customer_revenue
+        type: decimal(12,2)
+        nullable: false
+        computed: true
+        computed_expression: "SUM(OrderFact.net_revenue)"
+        description: Total monthly customer revenue.
+        tags: [METRIC, FINANCE]
+      - name: active_order_count
+        type: integer
+        nullable: false
+        computed: true
+        computed_expression: "COUNT_DISTINCT(OrderFact.order_id)"
+        description: Distinct active orders for the customer period.
+        tags: [METRIC]
+
+indexes:
+  - name: idx_daily_revenue_metric_date
+    entity: DailyRevenueMetric
+    fields: [metric_date]
+  - name: idx_customer_revenue_metric_customer
+    entity: CustomerRevenueMetric
+    fields: [customer_id]
+
+governance:
+  classification:
+    CustomerRevenueMetric.customer_id: INTERNAL
+  stewards:
+    executive_kpis: bi-team@example.com
+    customer_kpis: bi-team@example.com
+  retention:
+    period: 7y
+    policy: reporting_contract
+
+glossary:
+  - term: Gross Revenue
+    abbreviation: GR
+    definition: Sum of net revenue values over the reporting grain.
+    owner: bi-team@example.com
+    related_fields:
+      - DailyRevenueMetric.gross_revenue
+    tags: [KPI, FINANCE]
+  - term: Average Order Value
+    abbreviation: AOV
+    definition: Gross revenue divided by distinct order count for the period.
+    owner: bi-team@example.com
+    related_fields:
+      - DailyRevenueMetric.avg_order_value
+    tags: [KPI, COMMERCE]
+  - term: Customer Revenue
+    definition: Total revenue attributed to a customer within report_month.
+    owner: bi-team@example.com
+    related_fields:
+      - CustomerRevenueMetric.customer_revenue
+    tags: [KPI, CUSTOMER]
+
+rules:
+  - name: gross_revenue_non_negative
+    target: DailyRevenueMetric.gross_revenue
+    expression: "value >= 0"
+    severity: error
+  - name: order_count_non_negative
+    target: DailyRevenueMetric.order_count
+    expression: "value >= 0"
+    severity: error
+  - name: customer_revenue_non_negative
+    target: CustomerRevenueMetric.customer_revenue
+    expression: "value >= 0"
+    severity: error
+
+metrics:
+  - name: daily_gross_revenue
+    entity: DailyRevenueMetric
+    description: Daily gross revenue KPI for executive reporting.
+    expression: gross_revenue
+    aggregation: sum
+    grain: [metric_date]
+    dimensions: [metric_date]
+    time_dimension: metric_date
+    owner: bi-team@example.com
+    tags: [KPI, METRIC, FINANCE]
+  - name: daily_order_count
+    entity: DailyRevenueMetric
+    description: Daily distinct order count.
+    expression: order_count
+    aggregation: count_distinct
+    grain: [metric_date]
+    dimensions: [metric_date]
+    time_dimension: metric_date
+    owner: bi-team@example.com
+    tags: [KPI, METRIC, VOLUME]
+  - name: monthly_customer_revenue
+    entity: CustomerRevenueMetric
+    description: Monthly revenue by customer.
+    expression: customer_revenue
+    aggregation: sum
+    grain: [customer_id, report_month]
+    dimensions: [customer_id]
+    time_dimension: report_month
+    owner: bi-team@example.com
+    tags: [KPI, METRIC, CUSTOMER]
+
+display:
+  sections:
+    - name: Executive KPIs
+      entities: [DailyRevenueMetric]
+    - name: Customer KPIs
+      entities: [CustomerRevenueMetric]

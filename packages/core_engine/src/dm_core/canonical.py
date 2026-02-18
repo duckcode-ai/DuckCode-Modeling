@@ -11,6 +11,8 @@ def _sort_entities(entities: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     for entity in entities:
         cloned = deepcopy(entity)
         cloned["fields"] = _sort_fields(cloned.get("fields", []))
+        if "grain" in cloned and isinstance(cloned["grain"], list):
+            cloned["grain"] = sorted(cloned["grain"])
         if "tags" in cloned and isinstance(cloned["tags"], list):
             cloned["tags"] = sorted(cloned["tags"])
         sorted_entities.append(cloned)
@@ -52,6 +54,20 @@ def _sort_glossary(glossary: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     return sorted(sorted_terms, key=lambda item: item.get("term", ""))
 
 
+def _sort_metrics(metrics: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    sorted_metrics = []
+    for metric in metrics:
+        cloned = deepcopy(metric)
+        if "grain" in cloned and isinstance(cloned["grain"], list):
+            cloned["grain"] = sorted(cloned["grain"])
+        if "dimensions" in cloned and isinstance(cloned["dimensions"], list):
+            cloned["dimensions"] = sorted(cloned["dimensions"])
+        if "tags" in cloned and isinstance(cloned["tags"], list):
+            cloned["tags"] = sorted(cloned["tags"])
+        sorted_metrics.append(cloned)
+    return sorted(sorted_metrics, key=lambda item: item.get("name", ""))
+
+
 def compile_model(model: Dict[str, Any]) -> Dict[str, Any]:
     canonical: Dict[str, Any] = {
         "model": deepcopy(model.get("model", {})),
@@ -59,6 +75,7 @@ def compile_model(model: Dict[str, Any]) -> Dict[str, Any]:
         "relationships": _sort_relationships(model.get("relationships", [])),
         "indexes": _sort_indexes(model.get("indexes", [])),
         "rules": _sort_rules(model.get("rules", [])),
+        "metrics": _sort_metrics(model.get("metrics", [])),
     }
 
     governance = deepcopy(model.get("governance", {}))

@@ -1,0 +1,70 @@
+pack:
+  name: end_to_end_dictionary
+  version: 1.0.0
+  description: Strict policy profile for end-to-end modeling + dictionary-first projects.
+  extends: strict.policy.yaml
+
+policies:
+  - id: REQUIRE_MODEL_GOVERNANCE
+    type: custom_expression
+    severity: error
+    params:
+      scope: model
+      expression: "has_governance"
+      message: "Model '{name}' must define governance metadata."
+
+  - id: REQUIRE_MODEL_GLOSSARY
+    type: custom_expression
+    severity: error
+    params:
+      scope: model
+      expression: "has_glossary"
+      message: "Model '{name}' must define glossary terms for dictionary coverage."
+
+  - id: REQUIRE_MODEL_RULES
+    type: custom_expression
+    severity: error
+    params:
+      scope: model
+      expression: "has_rules"
+      message: "Model '{name}' must define rules for business logic checks."
+
+  - id: REQUIRE_REPORT_LAYER_METRICS
+    type: custom_expression
+    severity: error
+    params:
+      scope: model
+      expression: "layer != 'report' or has_metrics"
+      message: "Report layer model '{name}' must define metrics."
+
+  - id: REQUIRE_ENTITY_SUBJECT_AREA
+    type: custom_expression
+    severity: error
+    params:
+      scope: entity
+      expression: "subject_area != ''"
+      message: "Entity '{name}' must define subject_area for dictionary organization."
+
+  - id: REQUIRE_ENTITY_DESCRIPTION
+    type: custom_expression
+    severity: error
+    params:
+      scope: entity
+      expression: "has_description"
+      message: "Entity '{name}' must include a description."
+
+  - id: REQUIRE_FIELD_DESCRIPTION
+    type: custom_expression
+    severity: error
+    params:
+      scope: field
+      expression: "primary_key or has_description"
+      message: "Field '{name}' must include a description unless it is a primary key."
+
+  - id: REQUIRE_FIELD_TAGS
+    type: custom_expression
+    severity: error
+    params:
+      scope: field
+      expression: "primary_key or tags != []"
+      message: "Field '{name}' must include at least one tag unless it is a primary key."

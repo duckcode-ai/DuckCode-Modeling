@@ -466,6 +466,39 @@ class TestCLIMultiModel:
         config = (tmp_path / "dm.config.yaml").read_text()
         assert "multi_model: true" in config
 
+    def test_dm_init_end_to_end_template(self, tmp_path):
+        result = subprocess.run(
+            [sys.executable, DM_CLI, "init", "--path", str(tmp_path), "--template", "end-to-end"],
+            capture_output=True, text=True,
+        )
+        assert result.returncode == 0
+        assert "end-to-end modeling workspace" in result.stdout
+        assert (tmp_path / "models" / "source" / "source_sales_raw.model.yaml").exists()
+        assert (tmp_path / "models" / "transform" / "commerce_transform.model.yaml").exists()
+        assert (tmp_path / "models" / "report" / "commerce_reporting.model.yaml").exists()
+        assert (tmp_path / "docs" / "dictionary" / "README.md").exists()
+        assert (tmp_path / "policies" / "end_to_end_dictionary.policy.yaml").exists()
+        config = (tmp_path / "dm.config.yaml").read_text()
+        assert "policy_pack: policies/end_to_end_dictionary.policy.yaml" in config
+
+    def test_dm_init_end_to_end_rejects_multi_model_flag(self, tmp_path):
+        result = subprocess.run(
+            [
+                sys.executable,
+                DM_CLI,
+                "init",
+                "--path",
+                str(tmp_path),
+                "--template",
+                "end-to-end",
+                "--multi-model",
+            ],
+            capture_output=True,
+            text=True,
+        )
+        assert result.returncode == 1
+        assert "--multi-model cannot be combined" in result.stderr
+
     def test_dm_resolve_transitive(self):
         result = subprocess.run(
             [sys.executable, DM_CLI, "resolve", f"{DEMO_DIR}/products.model.yaml", "--output-json"],

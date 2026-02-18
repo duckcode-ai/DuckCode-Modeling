@@ -249,6 +249,99 @@ class TestEntityProperties:
 
 
 # ---------------------------------------------------------------------------
+# Layer, grain, metrics
+# ---------------------------------------------------------------------------
+
+class TestLayerGrainMetrics:
+    def test_valid_model_layer(self):
+        model = _base_model()
+        model["model"]["layer"] = "transform"
+        issues = schema_issues(model, _schema())
+        assert len(issues) == 0
+
+    def test_invalid_model_layer_rejected(self):
+        model = _base_model()
+        model["model"]["layer"] = "semantic"
+        issues = schema_issues(model, _schema())
+        assert any(i.severity == "error" for i in issues)
+
+    def test_entity_grain_valid(self):
+        model = _base_model()
+        model["entities"][0]["grain"] = ["widget_id"]
+        issues = schema_issues(model, _schema())
+        assert len(issues) == 0
+        lint = lint_issues(model)
+        assert not any(i.code == "GRAIN_FIELD_NOT_FOUND" for i in lint)
+
+    def test_entity_grain_missing_field(self):
+        model = _base_model()
+        model["entities"][0]["grain"] = ["missing_col"]
+        lint = lint_issues(model)
+        assert any(i.code == "GRAIN_FIELD_NOT_FOUND" for i in lint)
+
+    def test_transform_layer_requires_grain(self):
+        model = _base_model()
+        model["model"]["layer"] = "transform"
+        lint = lint_issues(model)
+        assert any(i.code == "MISSING_GRAIN" for i in lint)
+
+    def test_report_layer_requires_metrics(self):
+        model = _base_model()
+        model["model"]["layer"] = "report"
+        model["entities"][0]["grain"] = ["widget_id"]
+        lint = lint_issues(model)
+        assert any(i.code == "MISSING_METRICS" for i in lint)
+
+    def test_metric_schema_valid(self):
+        model = _base_model()
+        model["model"]["layer"] = "report"
+        model["entities"][0]["grain"] = ["widget_id"]
+        model["metrics"] = [
+            {
+                "name": "widget_count",
+                "entity": "Widget",
+                "expression": "widget_id",
+                "aggregation": "count_distinct",
+                "grain": ["widget_id"],
+                "dimensions": ["name"],
+                "time_dimension": "widget_id",
+            }
+        ]
+        issues = schema_issues(model, _schema())
+        assert len(issues) == 0
+        lint = lint_issues(model)
+        assert not any(i.severity == "error" for i in lint)
+
+    def test_metric_entity_must_exist(self):
+        model = _base_model()
+        model["metrics"] = [
+            {
+                "name": "bad_metric",
+                "entity": "Missing",
+                "expression": "foo",
+                "aggregation": "sum",
+                "grain": ["widget_id"],
+            }
+        ]
+        lint = lint_issues(model)
+        assert any(i.code == "METRIC_ENTITY_NOT_FOUND" for i in lint)
+
+    def test_metric_grain_field_must_exist(self):
+        model = _base_model()
+        model["metrics"] = [
+            {
+                "name": "bad_metric",
+                "entity": "Widget",
+                "expression": "foo",
+                "aggregation": "sum",
+                "grain": ["missing_col"],
+            }
+        ]
+        lint = lint_issues(model)
+        assert any(i.code == "METRIC_GRAIN_FIELD_NOT_FOUND" for i in lint)
+
+
+# ---------------------------------------------------------------------------
 # Indexes
 # ---------------------------------------------------------------------------
 
@@ -422,6 +515,16 @@ class TestCanonicalV2:
         assert field["sensitivity"] == "confidential"
         assert field["default"] == "active"
 
+    def test_metrics_sorted(self):
+        model = _base_model()
+        model["metrics"] = [
+            {"name": "z_metric", "entity": "Widget", "expression": "name", "aggregation": "count", "grain": ["widget_id"]},
+            {"name": "a_metric", "entity": "Widget", "expression": "name", "aggregation": "count", "grain": ["widget_id"]},
+        ]
+        canonical = compile_model(model)
+        assert canonical["metrics"][0]["name"] == "a_metric"
+        assert canonical["metrics"][1]["name"] == "z_metric"
+
 
 # ---------------------------------------------------------------------------
 # Diff engine v2
@@ -453,6 +556,41 @@ class TestDiffV2:
         diff = semantic_diff(old, new)
         assert diff["summary"]["added_indexes"] == 0
         assert diff["summary"]["removed_indexes"] == 0
+
+    def test_metric_added(self):
+        old = _base_model()
+        new = _base_model()
+        new["metrics"] = [
+            {"name": "widget_count", "entity": "Widget", "expression": "widget_id", "aggregation": "count_distinct", "grain": ["widget_id"]},
+        ]
+        diff = semantic_diff(old, new)
+        assert "widget_count" in diff["added_metrics"]
+        assert diff["summary"]["added_metrics"] == 1
+
+    def test_metric_removed_is_breaking(self):
+        old = _base_model()
+        old["metrics"] = [
+            {"name": "widget_count", "entity": "Widget", "expression": "widget_id", "aggregation": "count_distinct", "grain": ["widget_id"]},
+        ]
+        new = _base_model()
+        diff = semantic_diff(old, new)
+        assert "widget_count" in diff["removed_metrics"]
+        assert diff["has_breaking_changes"]
+        assert any("Metric removed" in bc for bc in diff["breaking_changes"])
+
+    def test_metric_contract_change_is_breaking(self):
+        old = _base_model()
+        old["metrics"] = [
+            {"name": "widget_count", "entity": "Widget", "expression": "widget_id", "aggregation": "count_distinct", "grain": ["widget_id"]},
+        ]
+        new = _base_model()
+        new["metrics"] = [
+            {"name": "widget_count", "entity": "Widget", "expression": "name", "aggregation": "count_distinct", "grain": ["widget_id"]},
+        ]
+        diff = semantic_diff(old, new)
+        assert diff["summary"]["changed_metrics"] == 1
+        assert diff["has_breaking_changes"]
+        assert any("Metric contract changed" in bc for bc in diff["breaking_changes"])
 
 
 # ---------------------------------------------------------------------------

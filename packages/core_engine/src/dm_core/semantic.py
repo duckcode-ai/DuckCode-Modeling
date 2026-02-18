@@ -156,6 +156,141 @@ def _lint_glossary(model: Dict[str, Any], refs: Set[str]) -> List[Issue]:
     return issues
 
 
+def _lint_grain_and_metrics(
+    model: Dict[str, Any],
+    entity_field_map: Dict[str, Set[str]],
+) -> List[Issue]:
+    issues: List[Issue] = []
+    model_layer = str(model.get("model", {}).get("layer", "")).lower().strip()
+    requires_grain = model_layer in {"transform", "report"}
+
+    # Entity grain checks
+    for entity in model.get("entities", []):
+        entity_name = str(entity.get("name", ""))
+        entity_type = str(entity.get("type", "table"))
+        grain = entity.get("grain", []) if isinstance(entity.get("grain"), list) else []
+        entity_fields = entity_field_map.get(entity_name, set())
+
+        if requires_grain and entity_type in {"table", "view", "materialized_view"} and not grain:
+            issues.append(
+                Issue(
+                    severity="error",
+                    code="MISSING_GRAIN",
+                    message=f"Entity '{entity_name}' must declare grain in '{model_layer}' layer models.",
+                    path=f"/entities/{entity_name}",
+                )
+            )
+
+        seen_grain: Set[str] = set()
+        for field_name in grain:
+            if field_name in seen_grain:
+                issues.append(
+                    Issue(
+                        severity="error",
+                        code="DUPLICATE_GRAIN_FIELD",
+                        message=f"Entity '{entity_name}' grain contains duplicate field '{field_name}'.",
+                        path=f"/entities/{entity_name}/grain",
+                    )
+                )
+            seen_grain.add(field_name)
+
+            if field_name not in entity_fields:
+                issues.append(
+                    Issue(
+                        severity="error",
+                        code="GRAIN_FIELD_NOT_FOUND",
+                        message=f"Entity '{entity_name}' grain references non-existent field '{field_name}'.",
+                        path=f"/entities/{entity_name}/grain",
+                    )
+                )
+
+    # Metric checks
+    metrics = model.get("metrics", [])
+    if model_layer == "report" and not metrics:
+        issues.append(
+            Issue(
+                severity="error",
+                code="MISSING_METRICS",
+                message="Report layer models must define at least one metric.",
+                path="/metrics",
+            )
+        )
+
+    seen_metric_names: Set[str] = set()
+    for metric in metrics:
+        name = str(metric.get("name", ""))
+        entity_name = str(metric.get("entity", ""))
+        entity_fields = entity_field_map.get(entity_name, set())
+
+        if name in seen_metric_names:
+            issues.append(
+                Issue(
+                    severity="error",
+                    code="DUPLICATE_METRIC",
+                    message=f"Duplicate metric name '{name}'.",
+                    path="/metrics",
+                )
+            )
+        else:
+            seen_metric_names.add(name)
+
+        if entity_name not in entity_field_map:
+            issues.append(
+                Issue(
+                    severity="error",
+                    code="METRIC_ENTITY_NOT_FOUND",
+                    message=f"Metric '{name}' references non-existent entity '{entity_name}'.",
+                    path="/metrics",
+                )
+            )
+            continue
+
+        for grain_field in metric.get("grain", []) if isinstance(metric.get("grain"), list) else []:
+            if grain_field not in entity_fields:
+                issues.append(
+                    Issue(
+                        severity="error",
+                        code="METRIC_GRAIN_FIELD_NOT_FOUND",
+                        message=f"Metric '{name}' grain field '{entity_name}.{grain_field}' does not exist.",
+                        path=f"/metrics/{name}",
+                    )
+                )
+
+        for dim_field in metric.get("dimensions", []) if isinstance(metric.get("dimensions"), list) else []:
+            if dim_field not in entity_fields:
+                issues.append(
+                    Issue(
+                        severity="error",
+                        code="METRIC_DIMENSION_NOT_FOUND",
+                        message=f"Metric '{name}' dimension field '{entity_name}.{dim_field}' does not exist.",
+                        path=f"/metrics/{name}",
+                    )
+                )
+
+        time_dim = str(metric.get("time_dimension", "")).strip()
+        if time_dim and time_dim not in entity_fields:
+            issues.append(
+                Issue(
+                    severity="error",
+                    code="METRIC_TIME_DIMENSION_NOT_FOUND",
+                    message=f"Metric '{name}' time_dimension '{entity_name}.{time_dim}' does not exist.",
+                    path=f"/metrics/{name}",
+                )
+            )
+
+        if metric.get("deprecated") is True and not metric.get("deprecated_message"):
+            issues.append(
+                Issue(
+                    severity="warn",
+                    code="METRIC_DEPRECATED_WITHOUT_MESSAGE",
+                    message=f"Metric '{name}' is deprecated but missing deprecated_message.",
+                    path=f"/metrics/{name}",
+                )
+            )
+
+    return issues
+
+
 def lint_issues(model: Dict[str, Any]) -> List[Issue]:
     issues: List[Issue] = []
 
@@ -318,6 +453,7 @@ def lint_issues(model: Dict[str, Any]) -> List[Issue]:
 
     issues.extend(_lint_indexes(model, entity_field_map))
     issues.extend(_lint_glossary(model, refs))
+    issues.extend(_lint_grain_and_metrics(model, entity_field_map))
 
     graph = _relationship_graph(model)
     if graph and _has_cycle(graph):

@@ -156,6 +156,539 @@ relationships:
     description: Order belongs to a customer (cross-model)
 """
 
+END_TO_END_SOURCE = """model:
+  name: source_sales_raw
+  spec_version: 2
+  version: 1.0.0
+  domain: sales
+  owners:
+    - data-platform@example.com
+  state: draft
+  layer: source
+  description: Source layer contract pulled from warehouse raw schemas.
+
+entities:
+  - name: RawCustomers
+    type: table
+    description: Raw customer profile records from CRM.
+    tags: [BRONZE, SOURCE, CUSTOMER]
+    schema: raw
+    subject_area: customer_domain
+    owner: customer-data@example.com
+    grain: [customer_id]
+    sla:
+      freshness: 4h
+      quality_score: 98
+    fields:
+      - name: customer_id
+        type: string
+        primary_key: true
+        nullable: false
+        description: Stable customer identifier from CRM.
+        tags: [IDENTIFIER]
+      - name: email
+        type: string
+        nullable: false
+        description: Customer email from source system.
+        tags: [PII, CONTACT]
+        sensitivity: restricted
+      - name: created_at
+        type: timestamp
+        nullable: false
+        description: Customer creation timestamp from source.
+        tags: [AUDIT]
+
+  - name: RawOrders
+    type: table
+    description: Raw order transactions from commerce platform.
+    tags: [BRONZE, SOURCE, ORDER]
+    schema: raw
+    subject_area: order_domain
+    owner: order-data@example.com
+    grain: [order_id]
+    sla:
+      freshness: 2h
+      quality_score: 97
+    fields:
+      - name: order_id
+        type: string
+        primary_key: true
+        nullable: false
+        description: Unique order identifier.
+        tags: [IDENTIFIER]
+      - name: customer_id
+        type: string
+        nullable: false
+        foreign_key: true
+        description: Customer identifier attached to the order.
+        tags: [JOIN_KEY]
+      - name: order_ts
+        type: timestamp
+        nullable: false
+        description: Order creation timestamp.
+        tags: [EVENT_TIME]
+      - name: gross_amount
+        type: decimal(12,2)
+        nullable: false
+        description: Total order amount before discounts and tax allocations.
+        tags: [AMOUNT, FINANCE]
+      - name: status
+        type: string
+        nullable: false
+        description: Raw order lifecycle status.
+        tags: [STATUS]
+
+relationships:
+  - name: raw_orders_customer
+    from: RawOrders.customer_id
+    to: RawCustomers.customer_id
+    cardinality: many_to_one
+    description: Raw order row belongs to a raw customer row.
+
+governance:
+  classification:
+    RawCustomers.email: PII
+  stewards:
+    customer_domain: customer-data@example.com
+    order_domain: order-data@example.com
+  retention:
+    period: 3y
+    policy: source_contract_baseline
+
+glossary:
+  - term: Raw Zone
+    definition: Ingested source-aligned data before business transformations.
+    owner: data-platform@example.com
+    tags: [INGESTION]
+
+rules:
+  - name: raw_orders_amount_non_negative
+    target: RawOrders.gross_amount
+    expression: "value >= 0"
+    severity: error
+"""
+
+END_TO_END_TRANSFORM = """model:
+  name: commerce_transform
+  spec_version: 2
+  version: 1.0.0
+  domain: sales
+  owners:
+    - analytics-engineering@example.com
+  state: draft
+  layer: transform
+  description: Transform layer business models derived from raw sources.
+  imports:
+    - model: source_sales_raw
+      alias: src
+      path: ../source/source_sales_raw.model.yaml
+
+entities:
+  - name: CustomerDim
+    type: table
+    description: Conformed customer dimension for analytics.
+    tags: [SILVER, DIMENSION, CUSTOMER]
+    schema: analytics
+    subject_area: customer_domain
+    owner: analytics-engineering@example.com
+    grain: [customer_id]
+    sla:
+      freshness: 8h
+      quality_score: 99
+    fields:
+      - name: customer_id
+        type: string
+        primary_key: true
+        nullable: false
+        description: Conformed customer key.
+        tags: [IDENTIFIER]
+      - name: email
+        type: string
+        nullable: false
+        description: Customer email used by lifecycle reporting.
+        tags: [PII, CONTACT]
+        sensitivity: restricted
+      - name: customer_tier
+        type: string
+        nullable: false
+        description: Normalized customer segment derived from source events.
+        tags: [SEGMENT]
+
+  - name: OrderFact
+    type: table
+    description: Atomic order-level fact table for finance and growth analytics.
+    tags: [SILVER, FACT, ORDER]
+    schema: analytics
+    subject_area: order_domain
+    owner: analytics-engineering@example.com
+    grain: [order_id]
+    sla:
+      freshness: 4h
+      quality_score: 99
+    fields:
+      - name: order_id
+        type: string
+        primary_key: true
+        nullable: false
+        description: Unique order key.
+        tags: [IDENTIFIER]
+      - name: customer_id
+        type: string
+        nullable: false
+        foreign_key: true
+        description: Foreign key to customer dimension.
+        tags: [JOIN_KEY]
+      - name: order_date
+        type: date
+        nullable: false
+        description: Business order date used for reporting grain.
+        tags: [REPORTING_DATE]
+      - name: net_revenue
+        type: decimal(12,2)
+        nullable: false
+        description: Revenue after discount normalization.
+        tags: [AMOUNT, FINANCE]
+      - name: order_status
+        type: string
+        nullable: false
+        description: Standardized business order status.
+        tags: [STATUS]
+
+relationships:
+  - name: order_fact_customer_dim
+    from: OrderFact.customer_id
+    to: CustomerDim.customer_id
+    cardinality: many_to_one
+    description: Fact row belongs to one customer.
+
+indexes:
+  - name: idx_order_fact_order_date
+    entity: OrderFact
+    fields: [order_date]
+  - name: idx_order_fact_customer_id
+    entity: OrderFact
+    fields: [customer_id]
+
+governance:
+  classification:
+    CustomerDim.email: PII
+  stewards:
+    customer_domain: analytics-engineering@example.com
+    order_domain: analytics-engineering@example.com
+  retention:
+    period: 5y
+    policy: transformed_contract
+
+glossary:
+  - term: Order Fact
+    definition: One row per order after transformation and standardization.
+    owner: analytics-engineering@example.com
+    related_fields:
+      - OrderFact.order_id
+      - OrderFact.net_revenue
+    tags: [FACT]
+
+rules:
+  - name: order_fact_revenue_non_negative
+    target: OrderFact.net_revenue
+    expression: "value >= 0"
+    severity: error
+"""
+
+END_TO_END_REPORT = """model:
+  name: commerce_reporting
+  spec_version: 2
+  version: 1.0.0
+  domain: sales
+  owners:
+    - bi-team@example.com
+  state: draft
+  layer: report
+  description: Reporting layer metric contracts and dictionary-ready semantic views.
+  imports:
+    - model: commerce_transform
+      alias: tr
+      path: ../transform/commerce_transform.model.yaml
+
+entities:
+  - name: DailyRevenueMetric
+    type: view
+    description: Daily revenue KPI contract used by executive dashboards.
+    tags: [GOLD, METRIC, KPI, REPORTING]
+    schema: reporting
+    subject_area: executive_kpis
+    owner: bi-team@example.com
+    grain: [metric_date]
+    sla:
+      freshness: 24h
+      quality_score: 99
+    fields:
+      - name: metric_date
+        type: date
+        nullable: false
+        description: Daily reporting grain for KPI trend lines.
+        tags: [GRAIN, REPORTING_DATE]
+      - name: gross_revenue
+        type: decimal(12,2)
+        nullable: false
+        computed: true
+        computed_expression: "SUM(OrderFact.net_revenue)"
+        description: Sum of net revenue at daily grain.
+        tags: [METRIC, FINANCE]
+      - name: order_count
+        type: integer
+        nullable: false
+        computed: true
+        computed_expression: "COUNT_DISTINCT(OrderFact.order_id)"
+        description: Distinct order count at daily grain.
+        tags: [METRIC, VOLUME]
+      - name: avg_order_value
+        type: decimal(12,2)
+        nullable: false
+        computed: true
+        computed_expression: "gross_revenue / NULLIF(order_count, 0)"
+        description: Average order value derived from daily metrics.
+        tags: [METRIC, FINANCE]
+
+  - name: CustomerRevenueMetric
+    type: view
+    description: Customer-level revenue KPI contract for retention analysis.
+    tags: [GOLD, METRIC, CUSTOMER]
+    schema: reporting
+    subject_area: customer_kpis
+    owner: bi-team@example.com
+    grain: [customer_id, report_month]
+    sla:
+      freshness: 24h
+      quality_score: 99
+    fields:
+      - name: customer_id
+        type: string
+        nullable: false
+        description: Customer identifier for customer KPI cuts.
+        tags: [DIMENSION, IDENTIFIER]
+      - name: report_month
+        type: date
+        nullable: false
+        description: Monthly reporting period for customer metrics.
+        tags: [GRAIN]
+      - name: customer_revenue
+        type: decimal(12,2)
+        nullable: false
+        computed: true
+        computed_expression: "SUM(OrderFact.net_revenue)"
+        description: Total monthly customer revenue.
+        tags: [METRIC, FINANCE]
+      - name: active_order_count
+        type: integer
+        nullable: false
+        computed: true
+        computed_expression: "COUNT_DISTINCT(OrderFact.order_id)"
+        description: Distinct active orders for the customer period.
+        tags: [METRIC]
+
+indexes:
+  - name: idx_daily_revenue_metric_date
+    entity: DailyRevenueMetric
+    fields: [metric_date]
+  - name: idx_customer_revenue_metric_customer
+    entity: CustomerRevenueMetric
+    fields: [customer_id]
+
+governance:
+  classification:
+    CustomerRevenueMetric.customer_id: INTERNAL
+  stewards:
+    executive_kpis: bi-team@example.com
+    customer_kpis: bi-team@example.com
+  retention:
+    period: 7y
+    policy: reporting_contract
+
+glossary:
+  - term: Gross Revenue
+    abbreviation: GR
+    definition: Sum of net revenue values over the reporting grain.
+    owner: bi-team@example.com
+    related_fields:
+      - DailyRevenueMetric.gross_revenue
+    tags: [KPI, FINANCE]
+  - term: Average Order Value
+    abbreviation: AOV
+    definition: Gross revenue divided by distinct order count for the period.
+    owner: bi-team@example.com
+    related_fields:
+      - DailyRevenueMetric.avg_order_value
+    tags: [KPI, COMMERCE]
+  - term: Customer Revenue
+    definition: Total revenue attributed to a customer within report_month.
+    owner: bi-team@example.com
+    related_fields:
+      - CustomerRevenueMetric.customer_revenue
+    tags: [KPI, CUSTOMER]
+
+rules:
+  - name: gross_revenue_non_negative
+    target: DailyRevenueMetric.gross_revenue
+    expression: "value >= 0"
+    severity: error
+  - name: order_count_non_negative
+    target: DailyRevenueMetric.order_count
+    expression: "value >= 0"
+    severity: error
+  - name: customer_revenue_non_negative
+    target: CustomerRevenueMetric.customer_revenue
+    expression: "value >= 0"
+    severity: error
+
+metrics:
+  - name: daily_gross_revenue
+    entity: DailyRevenueMetric
+    description: Daily gross revenue KPI for executive reporting.
+    expression: gross_revenue
+    aggregation: sum
+    grain: [metric_date]
+    dimensions: [metric_date]
+    time_dimension: metric_date
+    owner: bi-team@example.com
+    tags: [KPI, METRIC, FINANCE]
+  - name: daily_order_count
+    entity: DailyRevenueMetric
+    description: Daily distinct order count.
+    expression: order_count
+    aggregation: count_distinct
+    grain: [metric_date]
+    dimensions: [metric_date]
+    time_dimension: metric_date
+    owner: bi-team@example.com
+    tags: [KPI, METRIC, VOLUME]
+  - name: monthly_customer_revenue
+    entity: CustomerRevenueMetric
+    description: Monthly revenue by customer.
+    expression: customer_revenue
+    aggregation: sum
+    grain: [customer_id, report_month]
+    dimensions: [customer_id]
+    time_dimension: report_month
+    owner: bi-team@example.com
+    tags: [KPI, METRIC, CUSTOMER]
+
+display:
+  sections:
+    - name: Executive KPIs
+      entities: [DailyRevenueMetric]
+    - name: Customer KPIs
+      entities: [CustomerRevenueMetric]
+"""
+
+END_TO_END_POLICY = """pack:
+  name: end_to_end_dictionary
+  version: 1.0.0
+  description: Strict policy profile for end-to-end modeling + dictionary-first projects.
+  extends: strict.policy.yaml
+
+policies:
+  - id: REQUIRE_MODEL_GOVERNANCE
+    type: custom_expression
+    severity: error
+    params:
+      scope: model
+      expression: "has_governance"
+      message: "Model '{name}' must define governance metadata."
+
+  - id: REQUIRE_MODEL_GLOSSARY
+    type: custom_expression
+    severity: error
+    params:
+      scope: model
+      expression: "has_glossary"
+      message: "Model '{name}' must define glossary terms for dictionary coverage."
+
+  - id: REQUIRE_MODEL_RULES
+    type: custom_expression
+    severity: error
+    params:
+      scope: model
+      expression: "has_rules"
+      message: "Model '{name}' must define rules for business logic checks."
+
+  - id: REQUIRE_REPORT_LAYER_METRICS
+    type: custom_expression
+    severity: error
+    params:
+      scope: model
+      expression: "layer != 'report' or has_metrics"
+      message: "Report layer model '{name}' must define metrics."
+
+  - id: REQUIRE_ENTITY_SUBJECT_AREA
+    type: custom_expression
+    severity: error
+    params:
+      scope: entity
+      expression: "subject_area != ''"
+      message: "Entity '{name}' must define subject_area for dictionary organization."
+
+  - id: REQUIRE_ENTITY_DESCRIPTION
+    type: custom_expression
+    severity: error
+    params:
+      scope: entity
+      expression: "has_description"
+      message: "Entity '{name}' must include a description."
+
+  - id: REQUIRE_FIELD_DESCRIPTION
+    type: custom_expression
+    severity: error
+    params:
+      scope: field
+      expression: "primary_key or has_description"
+      message: "Field '{name}' must include a description unless it is a primary key."
+
+  - id: REQUIRE_FIELD_TAGS
+    type: custom_expression
+    severity: error
+    params:
+      scope: field
+      expression: "primary_key or tags != []"
+      message: "Field '{name}' must include at least one tag unless it is a primary key."
+"""
+
+END_TO_END_DICTIONARY_README = """# End-to-End Dictionary Workflow
+
+This project is scaffolded to keep architecture, transformation logic, reporting metrics,
+and business dictionary metadata in one programmable YAML system.
+
+## Layers
+
+1. `models/source/`:
+   - Physical source contracts (warehouse/raw systems).
+2. `models/transform/`:
+   - Business-conformed entities and relationships.
+3. `models/report/`:
+   - Reporting semantic contracts and KPI-focused glossary terms.
+
+## Required Sections Per Model
+
+1. `model` metadata (`name`, `version`, `owners`, `state`, `description`).
+2. `entities` with field-level descriptions and tags.
+3. `grain` in transform/report entities.
+4. `governance` classification/stewardship metadata.
+5. `glossary` terms for dictionary clarity.
+6. `rules` for enforceable business logic.
+7. `metrics` in report models for KPI contracts.
+
+## Mandatory Validation Flow
+
+```bash
+dm validate-all --glob "models/**/*.model.yaml"
+dm policy-check models/source/source_sales_raw.model.yaml --policy policies/end_to_end_dictionary.policy.yaml --inherit
+dm policy-check models/transform/commerce_transform.model.yaml --policy policies/end_to_end_dictionary.policy.yaml --inherit
+dm policy-check models/report/commerce_reporting.model.yaml --policy policies/end_to_end_dictionary.policy.yaml --inherit
+dm resolve-project models
+dm generate docs models/report/commerce_reporting.model.yaml --format html --out docs/dictionary/reporting-dictionary.html
+```
+"""
+
 
 def _default_schema_path() -> str:
     return str(Path.cwd() / "schemas" / "model.schema.json")
@@ -333,7 +866,17 @@ def cmd_init(args: argparse.Namespace) -> int:
     root = Path(args.path).resolve()
     created = _init_schemas_and_policies(root)
 
+    template = args.template
     if args.multi_model:
+        if template not in {"single", "multi-model"}:
+            print(
+                "Init failed: --multi-model cannot be combined with --template end-to-end.",
+                file=sys.stderr,
+            )
+            return 1
+        template = "multi-model"
+
+    if template == "multi-model":
         # Multi-model project structure
         models_dir = root / "models"
         (models_dir / "shared").mkdir(parents=True, exist_ok=True)
@@ -366,6 +909,56 @@ def cmd_init(args: argparse.Namespace) -> int:
         created.append(config_dst)
 
         print(f"Initialized multi-model workspace at {root}")
+    elif template == "end-to-end":
+        models_dir = root / "models"
+        (models_dir / "source").mkdir(parents=True, exist_ok=True)
+        (models_dir / "transform").mkdir(parents=True, exist_ok=True)
+        (models_dir / "report").mkdir(parents=True, exist_ok=True)
+        (root / "docs" / "dictionary").mkdir(parents=True, exist_ok=True)
+
+        source_dst = models_dir / "source" / "source_sales_raw.model.yaml"
+        transform_dst = models_dir / "transform" / "commerce_transform.model.yaml"
+        report_dst = models_dir / "report" / "commerce_reporting.model.yaml"
+        dictionary_readme_dst = root / "docs" / "dictionary" / "README.md"
+        end_to_end_policy_dst = root / "policies" / "end_to_end_dictionary.policy.yaml"
+        config_dst = root / "dm.config.yaml"
+
+        if not source_dst.exists():
+            source_dst.write_text(END_TO_END_SOURCE, encoding="utf-8")
+        created.append(source_dst)
+
+        if not transform_dst.exists():
+            transform_dst.write_text(END_TO_END_TRANSFORM, encoding="utf-8")
+        created.append(transform_dst)
+
+        if not report_dst.exists():
+            report_dst.write_text(END_TO_END_REPORT, encoding="utf-8")
+        created.append(report_dst)
+
+        if not dictionary_readme_dst.exists():
+            dictionary_readme_dst.write_text(END_TO_END_DICTIONARY_README, encoding="utf-8")
+        created.append(dictionary_readme_dst)
+
+        if not end_to_end_policy_dst.exists():
+            end_to_end_policy_dst.write_text(END_TO_END_POLICY, encoding="utf-8")
+        created.append(end_to_end_policy_dst)
+
+        if not config_dst.exists():
+            config_dst.write_text(
+                "schema: schemas/model.schema.json\n"
+                "policy_schema: schemas/policy.schema.json\n"
+                "policy_pack: policies/end_to_end_dictionary.policy.yaml\n"
+                "model_glob: \"models/**/*.model.yaml\"\n"
+                "multi_model: true\n"
+                "search_dirs:\n"
+                "  - models/source\n"
+                "  - models/transform\n"
+                "  - models/report\n",
+                encoding="utf-8",
+            )
+        created.append(config_dst)
+
+        print(f"Initialized end-to-end modeling workspace at {root}")
     else:
         # Single-model project structure
         (root / "model-examples").mkdir(parents=True, exist_ok=True)
@@ -493,6 +1086,7 @@ def cmd_gate(args: argparse.Namespace) -> int:
         print(
             f"  relationships +{summary['added_relationships']} -{summary['removed_relationships']}"
         )
+        print(f"  metrics +{summary['added_metrics']} -{summary['removed_metrics']} changed:{summary['changed_metrics']}")
         print(f"  breaking changes: {summary['breaking_change_count']}")
         if diff["breaking_changes"]:
             print("Breaking changes:")
@@ -1065,6 +1659,7 @@ def cmd_diff_all(args: argparse.Namespace) -> int:
             for name, mdiff in diff["model_diffs"].items():
                 ms = mdiff["summary"]
                 print(f"    [{name}] entities +{ms['added_entities']} -{ms['removed_entities']} changed:{ms['changed_entities']}")
+                print(f"    [{name}] metrics +{ms['added_metrics']} -{ms['removed_metrics']} changed:{ms['changed_metrics']}")
         print(f"  Breaking changes: {s['breaking_change_count']}")
         if diff["breaking_changes"]:
             for bc in diff["breaking_changes"]:
@@ -1670,7 +2265,17 @@ def build_parser() -> argparse.ArgumentParser:
 
     init_parser = sub.add_parser("init", help="Initialize a new workspace")
     init_parser.add_argument("--path", default=".", help="Workspace path")
-    init_parser.add_argument("--multi-model", action="store_true", help="Create a multi-model project structure with domain directories")
+    init_parser.add_argument(
+        "--template",
+        choices=["single", "multi-model", "end-to-end"],
+        default="single",
+        help="Starter template to scaffold (default: single).",
+    )
+    init_parser.add_argument(
+        "--multi-model",
+        action="store_true",
+        help="Deprecated alias for --template multi-model.",
+    )
     init_parser.set_defaults(func=cmd_init)
 
     validate_parser = sub.add_parser("validate", help="Validate model with schema + semantic rules")

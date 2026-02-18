@@ -53,6 +53,15 @@
             "deprecated"
           ]
         },
+        "layer": {
+          "type": "string",
+          "enum": [
+            "source",
+            "transform",
+            "report"
+          ],
+          "description": "Logical modeling layer for end-to-end workflows."
+        },
         "description": {
           "type": "string"
         },
@@ -140,6 +149,14 @@
         "$ref": "#/$defs/rule"
       }
     },
+    "metrics": {
+      "type": "array",
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/metric"
+      },
+      "description": "Reporting metric contracts with explicit grain and dimensions."
+    },
     "display": {
       "type": "object"
     }
@@ -197,6 +214,15 @@
         "owner": {
           "type": "string",
           "description": "Entity-level owner email or team"
+        },
+        "grain": {
+          "type": "array",
+          "minItems": 1,
+          "description": "Declared uniqueness grain for the entity (field names).",
+          "items": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9_]*$"
+          }
         },
         "sla": {
           "type": "object",
@@ -505,6 +531,83 @@
             "warn",
             "error"
           ]
+        }
+      }
+    },
+    "metric": {
+      "type": "object",
+      "required": [
+        "name",
+        "entity",
+        "expression",
+        "aggregation",
+        "grain"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_]*$"
+        },
+        "entity": {
+          "type": "string",
+          "pattern": "^[A-Z][A-Za-z0-9]*$"
+        },
+        "description": {
+          "type": "string"
+        },
+        "expression": {
+          "type": "string",
+          "minLength": 1
+        },
+        "aggregation": {
+          "type": "string",
+          "enum": [
+            "sum",
+            "count",
+            "count_distinct",
+            "avg",
+            "min",
+            "max",
+            "custom"
+          ]
+        },
+        "grain": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9_]*$"
+          }
+        },
+        "dimensions": {
+          "type": "array",
+          "default": [],
+          "items": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9_]*$"
+          }
+        },
+        "time_dimension": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_]*$"
+        },
+        "owner": {
+          "type": "string"
+        },
+        "tags": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "deprecated": {
+          "type": "boolean",
+          "description": "Whether this metric is deprecated."
+        },
+        "deprecated_message": {
+          "type": "string",
+          "description": "Migration guidance for deprecated metrics."
         }
       }
     }

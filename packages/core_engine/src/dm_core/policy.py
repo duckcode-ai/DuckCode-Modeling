@@ -653,12 +653,15 @@ def _custom_expression(
             "version": str(model_meta.get("version", "")),
             "domain": str(model_meta.get("domain", "")),
             "state": str(model_meta.get("state", "")),
+            "layer": str(model_meta.get("layer", "")),
             "entity_count": len(model.get("entities", [])),
             "relationship_count": len(model.get("relationships", [])),
             "index_count": len(model.get("indexes", [])),
+            "metric_count": len(model.get("metrics", [])),
             "has_governance": bool(model.get("governance")),
             "has_glossary": bool(model.get("glossary")),
             "has_rules": bool(model.get("rules")),
+            "has_metrics": bool(model.get("metrics")),
         }
         try:
             result = eval(expression, {"__builtins__": {}}, ctx)  # noqa: S307
