@@ -27,6 +27,7 @@ import {
   Columns3,
   ShieldCheck,
   GitCompare,
+  Activity,
   Network,
   Clock,
   X,
@@ -38,13 +39,16 @@ import {
   Database,
   BookOpen,
   Import,
+  GitBranch,
+  RefreshCw,
 } from "lucide-react";
+import { fetchGitBranches, fetchGitRemote } from "./lib/api";
 
 const BOTTOM_TABS = [
   { id: "properties", label: "Properties", icon: Columns3 },
   { id: "validation", label: "Validation", icon: ShieldCheck },
   { id: "diff", label: "Diff & Gate", icon: GitCompare },
-  { id: "impact", label: "Impact", icon: Network },
+  { id: "impact", label: "Impact", icon: Activity },
   { id: "model-graph", label: "Model Graph", icon: Network },
   { id: "dictionary", label: "Dictionary", icon: BookOpen },
   { id: "history", label: "History", icon: Clock },
@@ -257,6 +261,10 @@ function EditProjectModal() {
   const [scaffoldRepo, setScaffoldRepo] = useState(false);
   const [initializeGit, setInitializeGit] = useState(false);
   const [createSubfolder, setCreateSubfolder] = useState(false);
+  const [githubRepo, setGithubRepo] = useState(project?.githubRepo || "");
+  const [defaultBranch, setDefaultBranch] = useState(project?.defaultBranch || "");
+  const [branches, setBranches] = useState([]);
+  const [detectingRemote, setDetectingRemote] = useState(false);
   const [error, setError] = useState("");
 
   const sanitizeFolderName = (value) => {
@@ -284,7 +292,12 @@ function EditProjectModal() {
     setScaffoldRepo(false);
     setInitializeGit(false);
     setCreateSubfolder(false);
+    setGithubRepo(project?.githubRepo || "");
+    setDefaultBranch(project?.defaultBranch || "");
     setError("");
+    if (project?.id) {
+      fetchGitBranches(project.id).then(setBranches).catch(() => setBranches([]));
+    }
   }, [project?.id]);
 
   if (!project) return null;
@@ -300,10 +313,25 @@ function EditProjectModal() {
         scaffoldRepo,
         initializeGit,
         createSubfolder,
+        githubRepo: githubRepo.trim() || null,
+        defaultBranch: defaultBranch.trim() || null,
       });
       closeModal();
     } catch (err) {
       setError(err.message);
+    }
+  };
+
+  const handleDetectRemote = async () => {
+    if (!project?.id) return;
+    setDetectingRemote(true);
+    try {
+      const result = await fetchGitRemote(project.id);
+      if (result.githubRepo) setGithubRepo(result.githubRepo);
+    } catch (_err) {
+      // silently ignore — project may not have a remote
+    } finally {
+      setDetectingRemote(false);
     }
   };
 
@@ -381,6 +409,63 @@ function EditProjectModal() {
             />
             Initialize git repository if missing
           </label>
+
+          {/* GitHub Integration */}
+          <div className="border-t border-border-primary/60 pt-3 space-y-2">
+            <div className="flex items-center gap-1.5 text-[11px] text-text-muted uppercase tracking-wider font-semibold">
+              <svg viewBox="0 0 16 16" width="11" height="11" fill="currentColor" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
+              GitHub Integration
+            </div>
+            <div>
+              <label className="text-xs text-text-muted font-medium block mb-1">
+                Repo URL <span className="font-normal">(optional)</span>
+              </label>
+              <div className="flex gap-1.5">
+                <input
+                  value={githubRepo}
+                  onChange={(e) => setGithubRepo(e.target.value)}
+                  placeholder="https://github.com/org/repo"
+                  className="flex-1 bg-bg-primary border border-border-primary rounded-md px-3 py-1.5 text-xs text-text-primary placeholder:text-text-muted outline-none focus:border-accent-blue font-mono"
+                />
+                <button
+                  type="button"
+                  onClick={handleDetectRemote}
+                  disabled={detectingRemote}
+                  title="Auto-detect from git remote origin"
+                  className="flex items-center gap-1 px-2.5 py-1.5 rounded-md text-xs border border-border-primary bg-bg-hover text-text-secondary hover:text-text-primary transition-colors shrink-0 disabled:opacity-50"
+                >
+                  <RefreshCw size={11} className={detectingRemote ? "animate-spin" : ""} />
+                  Detect
+                </button>
+              </div>
+            </div>
+            <div>
+              <label className="text-xs text-text-muted font-medium block mb-1">Main Branch</label>
+              {branches.length > 0 ? (
+                <select
+                  value={defaultBranch}
+                  onChange={(e) => setDefaultBranch(e.target.value)}
+                  className="w-full bg-bg-primary border border-border-primary rounded-md px-3 py-1.5 text-xs text-text-primary outline-none focus:border-accent-blue"
+                >
+                  <option value="">-- select branch --</option>
+                  {branches.map((b) => (
+                    <option key={b} value={b}>{b}</option>
+                  ))}
+                </select>
+              ) : (
+                <input
+                  value={defaultBranch}
+                  onChange={(e) => setDefaultBranch(e.target.value)}
+                  placeholder="main"
+                  className="w-full bg-bg-primary border border-border-primary rounded-md px-3 py-1.5 text-xs text-text-primary placeholder:text-text-muted outline-none focus:border-accent-blue font-mono"
+                />
+              )}
+              {branches.length === 0 && (
+                <p className="text-[10px] text-text-muted mt-0.5">No local git branches found — type a branch name directly.</p>
+              )}
+            </div>
+          </div>
+
           {error && (
             <div className="flex items-center gap-2 text-xs text-status-error">
               <AlertCircle size={12} />
@@ -453,7 +538,7 @@ function ToastContainer() {
 function ConnectView() {
   return (
     <div className="h-full flex flex-col bg-bg-surface">
-      <div className="flex items-center px-5 py-3 border-b border-border-primary bg-white/70 backdrop-blur-md shrink-0">
+      <div className="flex items-center px-5 py-3 border-b border-border-primary bg-bg-secondary shrink-0">
         <span className="inline-flex items-center justify-center w-7 h-7 rounded-lg bg-slate-900 text-white shadow-sm mr-2">
           <Database size={14} />
         </span>
@@ -624,7 +709,7 @@ export default function App() {
       // ⌘+1..5 — Switch activities
       if (meta && e.key >= "1" && e.key <= "5") {
         e.preventDefault();
-        const activities = ["model", "connect", "explore", "search", "import"];
+        const activities = ["model", "connect", "settings", "search", "import"];
         const idx = parseInt(e.key) - 1;
         if (idx < activities.length) {
           useUiStore.getState().setActiveActivity(activities[idx]);
@@ -662,7 +747,7 @@ export default function App() {
   }, [error, clearError]);
 
   // Determine which primary view to show
-  const showModelView = activeActivity === "model" || activeActivity === "explore" || activeActivity === "settings";
+  const showModelView = activeActivity === "model" || activeActivity === "settings";
   const showConnectView = activeActivity === "connect";
   const showImportView = activeActivity === "import";
   const showSearchView = activeActivity === "search";

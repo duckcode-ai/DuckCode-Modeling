@@ -227,7 +227,7 @@ export default function DiagramToolbar() {
         {/* Filters */}
         <Filter size={10} className="text-slate-400 shrink-0" />
         <ToolbarSelect value={vizSettings.entityTypeFilter} onChange={(v) => updateVizSetting("entityTypeFilter", v)} label="Entity type"
-          options={[{ value: "all", label: "All Models" }, { value: "table", label: "Relational" }, { value: "view", label: "Views" }]} />
+          options={[{ value: "all", label: "All Models" }, { value: "table", label: "Relational" }, { value: "view", label: "Views" }, { value: "dimension_table", label: "Dimensional" }]} />
         {tagOptions.length > 0 && (
           <ToolbarSelect value={vizSettings.tagFilter} onChange={(v) => updateVizSetting("tagFilter", v)} label="Tag filter"
             options={[{ value: "all", label: "All Tags" }, ...tagOptions.map((t) => ({ value: t, label: t }))]} />
@@ -237,7 +237,7 @@ export default function DiagramToolbar() {
 
         {/* Layout */}
         <ToolbarSelect value={vizSettings.layoutMode} onChange={(v) => updateVizSetting("layoutMode", v)} label="Layout"
-          options={[{ value: "elk", label: "Auto (ELK)" }, { value: "grid", label: "Grid" }]} />
+          options={[{ value: "elk", label: "Auto (ELK)" }, { value: "grid", label: "Grid" }, { value: "star_schema", label: "Star Schema" }]} />
         <ToolbarSelect value={vizSettings.layoutDensity} onChange={(v) => updateVizSetting("layoutDensity", v)} label="Density"
           options={[{ value: "compact", label: "Compact" }, { value: "normal", label: "Normal" }, { value: "wide", label: "Wide" }]} />
         <ToolbarSelect value={vizSettings.fieldView} onChange={(v) => updateVizSetting("fieldView", v)} label="Fields"

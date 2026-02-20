@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import {
   Database,
   FolderOpen,
@@ -8,23 +8,17 @@ import {
   Plus,
   Trash2,
   LayoutDashboard,
-  ShieldCheck,
-  GitCompare,
-  Network,
   Settings,
   PanelLeftClose,
-  PanelLeftOpen,
   FolderPlus,
   FileCode2,
   Pencil,
-  AlertCircle,
-  CheckCircle2,
-  List,
   Plug,
-  BookOpen,
-  Compass,
   Import,
-  Boxes,
+  Moon,
+  Sun,
+  Keyboard,
+  GitBranch,
 } from "lucide-react";
 import useWorkspaceStore from "../../stores/workspaceStore";
 import useDiagramStore from "../../stores/diagramStore";
@@ -36,7 +30,6 @@ import { fetchConnections } from "../../lib/api";
 const ACTIVITIES = [
   { id: "model",    label: "Model",    icon: LayoutDashboard, group: "top" },
   { id: "connect",  label: "Connect",  icon: Plug,            group: "top" },
-  { id: "explore",  label: "Explore",  icon: Compass,         group: "top" },
   { id: "settings", label: "Settings", icon: Settings,        group: "bottom" },
 ];
 
@@ -175,7 +168,7 @@ function ProjectSection() {
 
   if (offlineMode) {
     return (
-      <div className="mx-2 my-2 px-3 py-2 rounded-lg border border-border-primary bg-white/80">
+      <div className="mx-2 my-2 px-3 py-2 rounded-lg border border-border-primary bg-bg-surface">
         <div className="flex items-center gap-2 text-xs text-text-muted mb-2">
           <Database size={12} />
           <span className="uppercase tracking-wider font-semibold">Offline Mode</span>
@@ -224,7 +217,7 @@ function ProjectSection() {
 
 
   return (
-    <div className="mx-2 my-1 px-2 py-1 rounded-lg border border-border-primary/80 bg-white/80">
+    <div className="mx-2 my-1 px-2 py-1 rounded-lg border border-border-primary/80 bg-bg-surface">
       <div className="flex items-center gap-1.5 w-full px-1 py-1.5 text-xs text-text-muted uppercase tracking-wider font-semibold">
         <button
           onClick={() => setExpanded(!expanded)}
@@ -249,14 +242,18 @@ function ProjectSection() {
             const connectorMeta = projectConnectors[project.id] || null;
             const connectorType = connectorMeta?.connector || "";
 
+            const ghShort = project.githubRepo
+              ? project.githubRepo.replace(/^https?:\/\/github\.com\//, "")
+              : null;
+
             return (
               <div
                 key={project.id}
-                className={`group flex items-center gap-2 px-2 py-1.5 rounded-md text-xs cursor-pointer transition-colors ${
+                className={`group flex flex-col gap-0.5 px-2 py-1.5 rounded-md text-xs cursor-pointer transition-colors ${
                   dropProjectId === project.id
-                    ? "bg-blue-50 text-blue-700 ring-1 ring-blue-200"
+                    ? "bg-accent-blue/10 text-accent-blue ring-1 ring-accent-blue/30"
                     : activeProjectId === project.id
-                    ? "bg-blue-50 text-blue-700 border border-blue-200"
+                    ? "bg-accent-blue/10 text-accent-blue border border-accent-blue/30"
                     : "text-text-secondary hover:bg-bg-hover hover:text-text-primary"
                 }`}
                 onClick={() => selectProject(project.id)}
@@ -264,38 +261,54 @@ function ProjectSection() {
                 onDragLeave={() => setDropProjectId((curr) => (curr === project.id ? null : curr))}
                 onDrop={(e) => handleProjectDrop(project.id, e)}
               >
-                {connectorType ? (
-                  <ConnectorLogo
-                    type={connectorType}
-                    size={14}
-                    className="shrink-0 rounded-md"
-                  />
-                ) : (
-                  <Database size={13} className="shrink-0" />
+                {/* Name row */}
+                <div className="flex items-center gap-2">
+                  {connectorType ? (
+                    <ConnectorLogo type={connectorType} size={14} className="shrink-0 rounded-md" />
+                  ) : (
+                    <Database size={13} className="shrink-0" />
+                  )}
+                  <span className="truncate flex-1">{project.name}</span>
+                  {dropProjectId === project.id && (
+                    <span className="text-[9px] px-1 py-0 rounded bg-accent-blue/10 text-accent-blue shrink-0">
+                      Drop YAML
+                    </span>
+                  )}
+                  <button
+                    onClick={(e) => { e.stopPropagation(); openModal("editProject", { project }); }}
+                    className="opacity-0 group-hover:opacity-100 p-0.5 rounded hover:bg-bg-hover text-text-muted hover:text-text-accent transition-all"
+                    title="Edit project"
+                  >
+                    <Pencil size={11} />
+                  </button>
+                  <button
+                    onClick={(e) => { e.stopPropagation(); removeProjectFolder(project.id); }}
+                    className="opacity-0 group-hover:opacity-100 p-0.5 rounded hover:bg-bg-hover text-text-muted hover:text-status-error transition-all"
+                    title="Remove project"
+                  >
+                    <Trash2 size={11} />
+                  </button>
+                </div>
+                {/* GitHub / branch chips */}
+                {(ghShort || project.defaultBranch) && (
+                  <div className="flex items-center gap-1 ml-5 flex-wrap">
+                    {ghShort && (
+                      <span
+                        className="flex items-center gap-0.5 text-[9px] px-1 py-0 rounded border font-medium bg-slate-50 border-slate-200 text-slate-500 truncate max-w-[120px]"
+                        title={project.githubRepo}
+                      >
+                        <svg viewBox="0 0 16 16" width="8" height="8" fill="currentColor" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
+                        {ghShort}
+                      </span>
+                    )}
+                    {project.defaultBranch && (
+                      <span className="flex items-center gap-0.5 text-[9px] px-1 py-0 rounded border font-mono bg-emerald-50 border-emerald-200 text-emerald-700">
+                        <GitBranch size={8} />
+                        {project.defaultBranch}
+                      </span>
+                    )}
+                  </div>
                 )}
-                <span className="truncate flex-1">{project.name}</span>
-                {dropProjectId === project.id && (
-                  <span className="text-[9px] px-1 py-0 rounded bg-blue-100 text-blue-700 shrink-0">
-                    Drop YAML
-                  </span>
-                )}
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    openModal("editProject", { project });
-                  }}
-                  className="opacity-0 group-hover:opacity-100 p-0.5 rounded hover:bg-bg-hover text-text-muted hover:text-text-accent transition-all"
-                  title="Edit project"
-                >
-                  <Pencil size={11} />
-                </button>
-                <button
-                  onClick={(e) => { e.stopPropagation(); removeProjectFolder(project.id); }}
-                  className="opacity-0 group-hover:opacity-100 p-0.5 rounded hover:bg-bg-hover text-text-muted hover:text-status-error transition-all"
-                  title="Remove project"
-                >
-                  <Trash2 size={11} />
-                </button>
               </div>
             );
           })}
@@ -346,7 +359,7 @@ function FileSection() {
 
   return (
     <div
-      className={`mx-2 my-1 px-2 py-1 rounded-lg border bg-white/80 ${dropActive ? "bg-blue-50/40 ring-1 ring-blue-200 border-blue-200" : "border-border-primary/80"}`}
+      className={`mx-2 my-1 px-2 py-1 rounded-lg border bg-bg-surface ${dropActive ? "ring-1 ring-accent-blue/30 border-accent-blue/30" : "border-border-primary/80"}`}
       onDragOver={(e) => {
         if (offlineMode || !activeProjectId) return;
         e.preventDefault();
@@ -386,7 +399,7 @@ function FileSection() {
                 key={key}
                 className={`flex items-center gap-2 px-2 py-1.5 rounded-md text-xs cursor-pointer transition-colors ${
                   isActive
-                    ? "bg-blue-50 text-blue-700 border border-blue-200"
+                    ? "bg-accent-blue/10 text-accent-blue border border-accent-blue/30"
                     : "text-text-secondary hover:bg-bg-hover hover:text-text-primary"
                 }`}
                 onClick={() => offlineMode ? switchTab(file) : openFile(file)}
@@ -421,71 +434,12 @@ function FileSection() {
             </div>
           )}
           {dropActive && !offlineMode && activeProjectId && (
-            <p className="text-[10px] text-blue-600 px-2 py-1 font-medium">
+            <p className="text-[10px] text-accent-blue px-2 py-1 font-medium">
               Drop `.yaml` / `.yml` files to import into this project
             </p>
           )}
         </div>
       )}
-    </div>
-  );
-}
-
-// ── Explore side panel: model stats + all tools (merged Validate + Explore) ──
-function ExploreSection() {
-  const { setBottomPanelTab } = useUiStore();
-  const { model } = useDiagramStore();
-  const entityCount = model?.entities?.length || 0;
-  const relCount = model?.relationships?.length || 0;
-
-  const tools = [
-    { id: "validation",  label: "Validation",       icon: ShieldCheck, tab: "validation" },
-    { id: "diff",        label: "Diff & Gate",      icon: GitCompare,  tab: "diff" },
-    { id: "impact",      label: "Impact Analysis",  icon: Network,     tab: "impact" },
-    { id: "model-graph", label: "Model Graph",      icon: Boxes,       tab: "model-graph" },
-    { id: "dictionary",  label: "Data Dictionary",  icon: BookOpen,    tab: "dictionary" },
-    { id: "history",     label: "History",           icon: FileText,    tab: "history" },
-  ];
-
-  return (
-    <div className="mx-2 my-1 px-2 py-2 space-y-3 rounded-lg border border-border-primary/80 bg-white/80">
-      {/* Model stats */}
-      <div>
-        <div className="px-1 py-1.5 text-[10px] text-text-muted uppercase tracking-wider font-semibold">
-          Model Overview
-        </div>
-        <div className="grid grid-cols-2 gap-2 px-1">
-          <div className="text-center p-2 rounded-lg bg-white border border-border-primary">
-            <div className="text-lg font-bold text-text-primary">{entityCount}</div>
-            <div className="text-[9px] text-text-muted">Entities</div>
-          </div>
-          <div className="text-center p-2 rounded-lg bg-white border border-border-primary">
-            <div className="text-lg font-bold text-text-primary">{relCount}</div>
-            <div className="text-[9px] text-text-muted">Relationships</div>
-          </div>
-        </div>
-      </div>
-
-      <div className="mx-1 border-t border-border-primary" />
-
-      {/* Tools */}
-      <div>
-        <div className="px-1 py-1 text-[10px] text-text-muted uppercase tracking-wider font-semibold">
-          Tools
-        </div>
-        <div className="space-y-0.5">
-          {tools.map(({ id, label, icon: Icon, tab }) => (
-            <button
-              key={id}
-              onClick={() => setBottomPanelTab(tab)}
-              className="flex items-center gap-2 w-full px-2 py-1.5 rounded-md text-xs text-text-secondary hover:bg-bg-hover hover:text-text-primary transition-colors"
-            >
-              <Icon size={13} />
-              {label}
-            </button>
-          ))}
-        </div>
-      </div>
     </div>
   );
 }
@@ -497,7 +451,7 @@ function EntitySection() {
   const [expanded, setExpanded] = useState(true);
 
   return (
-    <div className="mx-2 my-1 px-2 py-1 rounded-lg border border-border-primary/80 bg-white/80">
+    <div className="mx-2 my-1 px-2 py-1 rounded-lg border border-border-primary/80 bg-bg-surface">
       <button
         onClick={() => setExpanded(!expanded)}
         className="flex items-center gap-1.5 w-full px-1 py-1.5 text-[10px] text-text-muted uppercase tracking-wider font-semibold hover:text-text-secondary transition-colors"
@@ -516,6 +470,21 @@ function EntitySection() {
 }
 
 
+// ── Settings theme toggle (used inside Settings panel) ──
+function SettingsThemeToggle() {
+  const { theme, toggleTheme } = useUiStore();
+  return (
+    <button
+      onClick={toggleTheme}
+      className="flex items-center gap-2 w-full px-2 py-1.5 rounded-md text-xs text-text-secondary hover:bg-bg-hover hover:text-text-primary transition-colors"
+    >
+      {theme === "light" ? <Moon size={12} /> : <Sun size={12} />}
+      {theme === "light" ? "Switch to Dark mode" : "Switch to Light mode"}
+      <code className="ml-auto px-1 py-0 rounded bg-bg-tertiary border border-border-primary/50 font-mono text-[9px]">⌘D</code>
+    </button>
+  );
+}
+
 // ── Activity Bar (thin icon rail on the far left) ──
 function ActivityBar({ activeActivity, onSelect, onHome }) {
   const topItems = ACTIVITIES.filter((a) => a.group === "top");
@@ -523,15 +492,15 @@ function ActivityBar({ activeActivity, onSelect, onHome }) {
   const homeActive = activeActivity === "search";
 
   return (
-    <div className="w-14 min-w-[56px] bg-gradient-to-b from-slate-50 to-white border-r border-border-primary flex flex-col items-center py-2 shrink-0 shadow-[inset_-1px_0_0_rgba(148,163,184,0.2)]">
+    <div className="w-14 min-w-[56px] bg-bg-secondary border-r border-border-primary flex flex-col items-center py-2 shrink-0">
       {/* Home / Logo */}
       <button
         onClick={onHome}
         title="Home"
         className={`relative w-11 h-11 flex items-center justify-center rounded-xl mb-3 shrink-0 transition-all ${
           homeActive
-            ? "bg-blue-50 ring-1 ring-blue-200 shadow-sm"
-            : "bg-white border border-border-primary hover:bg-bg-hover"
+            ? "bg-accent-blue/10 ring-1 ring-accent-blue/30 shadow-sm"
+            : "bg-bg-surface border border-border-primary hover:bg-bg-hover"
         }`}
       >
         {homeActive && (
@@ -551,7 +520,7 @@ function ActivityBar({ activeActivity, onSelect, onHome }) {
               title={label}
               className={`relative w-11 h-11 flex flex-col items-center justify-center rounded-xl transition-all ${
                 isActive
-                  ? "bg-blue-50 text-blue-700 shadow-sm"
+                  ? "bg-accent-blue/10 text-accent-blue shadow-sm"
                   : "text-text-muted hover:bg-bg-hover hover:text-text-primary"
               }`}
             >
@@ -576,7 +545,7 @@ function ActivityBar({ activeActivity, onSelect, onHome }) {
               title={label}
               className={`relative w-11 h-11 flex flex-col items-center justify-center rounded-xl transition-all ${
                 isActive
-                  ? "bg-blue-50 text-blue-700 shadow-sm"
+                  ? "bg-accent-blue/10 text-accent-blue shadow-sm"
                   : "text-text-muted hover:bg-bg-hover hover:text-text-primary"
               }`}
             >
@@ -596,9 +565,9 @@ function SidePanel({ activity }) {
   const { setSidePanelOpen } = useUiStore();
 
   return (
-    <div className="w-[260px] min-w-[260px] bg-gradient-to-b from-white to-slate-50/70 border-r border-border-primary flex flex-col overflow-hidden shadow-[6px_0_20px_rgba(15,23,42,0.05)]">
+    <div className="w-[260px] min-w-[260px] bg-bg-surface border-r border-border-primary flex flex-col overflow-hidden">
       {/* Panel header */}
-      <div className="flex items-center justify-between px-3 py-3 border-b border-border-primary shrink-0 bg-white/90 backdrop-blur-sm">
+      <div className="flex items-center justify-between px-3 py-3 border-b border-border-primary shrink-0 bg-bg-secondary">
         <span className="text-xs font-semibold text-text-primary uppercase tracking-wider">{panelTitle}</span>
         <button
           onClick={() => setSidePanelOpen(false)}
@@ -614,15 +583,13 @@ function SidePanel({ activity }) {
         {activity === "model" && (
           <>
             <ProjectSection />
-            <div className="mx-3 border-t border-border-primary" />
             <FileSection />
-            <div className="mx-3 border-t border-border-primary" />
             <EntitySection />
           </>
         )}
         {activity === "connect" && (
-          <div className="mx-2 my-1 px-2 py-2 space-y-3 rounded-lg border border-border-primary/80 bg-white/80">
-            <div className="px-1 py-1.5 text-[10px] text-text-muted uppercase tracking-wider font-semibold">
+          <div className="mx-2 my-1 px-2 py-2 space-y-2 rounded-lg border border-border-primary/80 bg-bg-surface">
+            <div className="px-1 py-1 text-[10px] text-text-muted uppercase tracking-wider font-semibold">
               Data Sources
             </div>
             <div className="space-y-0.5">
@@ -630,45 +597,57 @@ function SidePanel({ activity }) {
                 onClick={() => useUiStore.getState().setActiveActivity("connect")}
                 className="flex items-center gap-2 w-full px-2 py-1.5 rounded-md text-xs text-text-secondary hover:bg-bg-hover hover:text-text-primary transition-colors"
               >
-                <Plug size={13} />
+                <Plug size={12} />
                 Database Connector
               </button>
               <button
                 onClick={() => useUiStore.getState().setActiveActivity("import")}
                 className="flex items-center gap-2 w-full px-2 py-1.5 rounded-md text-xs text-text-secondary hover:bg-bg-hover hover:text-text-primary transition-colors"
               >
-                <Import size={13} />
+                <Import size={12} />
                 Import YAML / File
               </button>
             </div>
-            <div className="mx-1 border-t border-border-primary" />
+            <div className="mx-1 border-t border-border-primary/60" />
             <div className="px-1">
               <p className="text-[10px] text-text-muted leading-relaxed">
-                Use the <strong>Database Connector</strong> wizard in the main area to connect, browse schemas, and pull tables as model files.
-              </p>
-              <p className="text-[10px] text-text-muted leading-relaxed mt-1">
-                Or <strong>Import</strong> an existing YAML model file directly.
+                Connect to a warehouse to pull physical schemas as versioned model files, or import an existing YAML, DDL, or DBML file.
               </p>
             </div>
           </div>
         )}
-        {activity === "explore" && <ExploreSection />}
         {activity === "import" && (
-          <div className="mx-2 my-1 px-3 py-2 rounded-lg border border-border-primary/80 bg-white/80">
+          <div className="mx-2 my-1 px-3 py-2 rounded-lg border border-border-primary/80 bg-bg-surface">
             <p className="text-[10px] text-text-muted leading-relaxed">
-              Drag & drop or browse files to import SQL DDL, DBML, or Spark Schema JSON into a DuckCodeModeling model.
+              Drag & drop or browse files to import SQL DDL, DBML, or Spark Schema JSON into a model.
             </p>
           </div>
         )}
         {activity === "settings" && (
-          <div className="mx-2 my-1 px-3 py-2 space-y-2 rounded-lg border border-border-primary/80 bg-white/80">
-            <p className="text-[10px] text-text-muted">Application settings</p>
-            <button
-              onClick={() => useUiStore.getState().toggleTheme()}
-              className="flex items-center gap-2 w-full px-2 py-1.5 rounded-md text-xs text-text-secondary hover:bg-bg-hover hover:text-text-primary transition-colors"
-            >
-              <Settings size={13} /> Toggle Theme
-            </button>
+          <div className="mx-2 my-1 space-y-2">
+            {/* Appearance */}
+            <div className="px-2 py-1 rounded-lg border border-border-primary/80 bg-bg-surface">
+              <div className="px-1 py-1.5 text-[10px] text-text-muted uppercase tracking-wider font-semibold">Appearance</div>
+              <SettingsThemeToggle />
+            </div>
+            {/* Keyboard shortcuts reference */}
+            <div className="px-2 py-1 rounded-lg border border-border-primary/80 bg-bg-surface">
+              <div className="px-1 py-1.5 text-[10px] text-text-muted uppercase tracking-wider font-semibold flex items-center gap-1.5">
+                <Keyboard size={10} /> Shortcuts
+              </div>
+              <div className="space-y-1 px-1 pb-1.5">
+                {[
+                  ["Save", "⌘S"], ["Global search", "⌘K"], ["Sidebar", "⌘\\"],
+                  ["Bottom panel", "⌘J"], ["Dark mode", "⌘D"], ["Help", "?"],
+                  ["Model", "⌘1"], ["Connect", "⌘2"], ["Settings", "⌘3"],
+                ].map(([label, key]) => (
+                  <div key={label} className="flex items-center justify-between text-[10px] text-text-muted">
+                    <span>{label}</span>
+                    <code className="px-1.5 py-0 rounded bg-bg-tertiary border border-border-primary/50 font-mono text-[9px]">{key}</code>
+                  </div>
+                ))}
+              </div>
+            </div>
           </div>
         )}
       </div>

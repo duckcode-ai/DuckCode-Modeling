@@ -14,6 +14,8 @@ import yaml
 
 from dm_core import (
     compile_model,
+    completeness_as_dict,
+    completeness_report,
     diagnostics_as_json,
     format_diagnostics,
     generate_bash_completion,
@@ -30,6 +32,7 @@ from dm_core import (
     import_dbml,
     import_spark_schema,
     import_sql_ddl,
+    sync_dbt_schema_yml,
     list_connectors,
     lint_issues,
     load_policy_pack,
@@ -1308,6 +1311,46 @@ def cmd_import_dbt(args: argparse.Namespace) -> int:
     return 1 if has_errors(issues) else 0
 
 
+def cmd_dbt_sync(args: argparse.Namespace) -> int:
+    """Merge DuckCode model metadata into an existing dbt schema.yml (non-destructive)."""
+    model = load_yaml_model(args.model)
+    dbt_schema_path = Path(args.dbt_schema)
+    if not dbt_schema_path.exists():
+        print(f"ERROR: dbt schema file not found: {dbt_schema_path}", file=sys.stderr)
+        return 1
+    existing_yml = dbt_schema_path.read_text(encoding="utf-8")
+    updated_yml = sync_dbt_schema_yml(model, existing_yml)
+    out_path = Path(args.out) if getattr(args, "out", None) else dbt_schema_path
+    out_path.write_text(updated_yml, encoding="utf-8")
+    print(f"dbt schema synced: {out_path}")
+    return 0
+
+
+def cmd_dbt_push(args: argparse.Namespace) -> int:
+    """Push DuckCode metadata into all schema.yml files found in a dbt project directory."""
+    model = load_yaml_model(args.model)
+    dbt_project_root = Path(args.dbt_project)
+    if not dbt_project_root.is_dir():
+        print(f"ERROR: dbt project directory not found: {dbt_project_root}", file=sys.stderr)
+        return 1
+    yaml_files = list(dbt_project_root.rglob("schema.yml")) + list(dbt_project_root.rglob("schema.yaml"))
+    if not yaml_files:
+        print("No dbt schema.yml files found in project directory.", file=sys.stderr)
+        return 1
+    updated_count = 0
+    for yml_path in sorted(yaml_files):
+        try:
+            existing_yml = yml_path.read_text(encoding="utf-8")
+            updated_yml = sync_dbt_schema_yml(model, existing_yml)
+            yml_path.write_text(updated_yml, encoding="utf-8")
+            print(f"  synced: {yml_path}")
+            updated_count += 1
+        except Exception as exc:
+            print(f"  WARN: skipping {yml_path}: {exc}", file=sys.stderr)
+    print(f"dbt push complete. Updated {updated_count} schema.yml file(s).")
+    return 0
+
+
 def _build_connector_extra(args: argparse.Namespace) -> Dict[str, Any]:
     extra: Dict[str, Any] = {}
     if getattr(args, "odbc_driver", ""):
@@ -1606,6 +1649,71 @@ def cmd_stats(args: argparse.Namespace) -> int:
             print(f"Subject areas: {', '.join(sorted(subject_areas))}")
         if tags:
             print(f"Tags: {', '.join(sorted(tags))}")
+
+    return 0
+
+
+def cmd_completeness(args: argparse.Namespace) -> int:
+    """Score every entity in a model against the single-source-of-truth dimensions."""
+    model = load_yaml_model(args.model)
+    report = completeness_report(model)
+    data = completeness_as_dict(report)
+
+    if args.output_json:
+        print(json.dumps(data, indent=2))
+        return 0
+
+    # ── Human-readable report ─────────────────────────────────────────────────
+    BAR_WIDTH = 20
+    SCORE_PASS = 80
+    SCORE_WARN = 60
+
+    def _bar(score: int) -> str:
+        filled = round(score / 100 * BAR_WIDTH)
+        if score >= SCORE_PASS:
+            fill_char, empty_char = "█", "░"
+        elif score >= SCORE_WARN:
+            fill_char, empty_char = "▓", "░"
+        else:
+            fill_char, empty_char = "▒", "░"
+        return fill_char * filled + empty_char * (BAR_WIDTH - filled)
+
+    def _score_label(score: int) -> str:
+        if score == 100:
+            return "COMPLETE"
+        if score >= SCORE_PASS:
+            return "GOOD    "
+        if score >= SCORE_WARN:
+            return "PARTIAL "
+        return "GAPS    "
+
+    print(f"\nCompleteness report — {report.model_name}")
+    print(f"Model score: {report.model_score}%  "
+          f"({report.fully_complete}/{report.total_entities} fully complete)\n")
+    print(f"  {'Entity':<30} {'Score':>5}  {'':^{BAR_WIDTH}}  Status")
+    print(f"  {'-'*30} {'-----':>5}  {'-'*BAR_WIDTH}  --------")
+
+    for e in report.entities:
+        bar = _bar(e.score)
+        label = _score_label(e.score)
+        print(f"  {e.entity_name:<30} {e.score:>4}%  {bar}  {label}")
+        if e.missing and not args.summary:
+            for m in e.missing:
+                print(f"    {'':30}   ↳ missing: {m}")
+
+    if report.needs_attention:
+        print(f"\n  Needs attention (<60%): {', '.join(report.needs_attention)}")
+
+    # Surface completeness as lint-style warnings when --min-score is set
+    if args.min_score is not None:
+        failed = [e for e in report.entities if e.score < args.min_score]
+        if failed:
+            print(
+                f"\n  {len(failed)} entity/entities below minimum score of {args.min_score}%:"
+            )
+            for e in failed:
+                print(f"    [{e.score}%] {e.entity_name}")
+            return 1
 
     return 0
 
@@ -2438,6 +2546,21 @@ def build_parser() -> argparse.ArgumentParser:
     import_dbt_parser.add_argument("--schema", default=_default_schema_path(), help="Path to model schema JSON")
     import_dbt_parser.set_defaults(func=cmd_import_dbt)
 
+    # dbt round-trip subcommand group
+    dbt_parser = sub.add_parser("dbt", help="dbt round-trip: sync DuckCode metadata into dbt schema.yml files")
+    dbt_sub = dbt_parser.add_subparsers(dest="dbt_command", required=True)
+
+    dbt_sync_parser = dbt_sub.add_parser("sync", help="Merge DuckCode metadata into a single dbt schema.yml (non-destructive)")
+    dbt_sync_parser.add_argument("model", help="Path to the DuckCode .model.yaml file")
+    dbt_sync_parser.add_argument("--dbt-schema", required=True, help="Path to the existing dbt schema.yml to update")
+    dbt_sync_parser.add_argument("--out", default=None, help="Output path (default: overwrites --dbt-schema in-place)")
+    dbt_sync_parser.set_defaults(func=cmd_dbt_sync)
+
+    dbt_push_parser = dbt_sub.add_parser("push", help="Push DuckCode metadata into all schema.yml files found in a dbt project")
+    dbt_push_parser.add_argument("model", help="Path to the DuckCode .model.yaml file")
+    dbt_push_parser.add_argument("--dbt-project", required=True, help="Root path of the dbt project to scan for schema.yml files")
+    dbt_push_parser.set_defaults(func=cmd_dbt_push)
+
     pull_parser = sub.add_parser("pull", help="Pull schema from a live database into a DuckCodeModeling model")
     pull_parser.add_argument("connector", help="Connector type (postgres, mysql, snowflake, bigquery, databricks, sqlserver, azure_sql, azure_fabric, redshift)")
     pull_parser.add_argument("--host", help="Database host (or Snowflake account, Databricks server hostname)")
@@ -2547,6 +2670,26 @@ def build_parser() -> argparse.ArgumentParser:
     stats_parser.add_argument("model", help="Path to model YAML")
     stats_parser.add_argument("--output-json", action="store_true", help="Print stats as JSON")
     stats_parser.set_defaults(func=cmd_stats)
+
+    completeness_parser = sub.add_parser(
+        "completeness",
+        help="Score each entity against single-source-of-truth completeness dimensions",
+    )
+    completeness_parser.add_argument("model", help="Path to model YAML")
+    completeness_parser.add_argument(
+        "--output-json", action="store_true", help="Emit full report as JSON (for API/CI integration)"
+    )
+    completeness_parser.add_argument(
+        "--summary", action="store_true", help="Show scores only, suppress per-entity missing detail"
+    )
+    completeness_parser.add_argument(
+        "--min-score",
+        type=int,
+        default=None,
+        metavar="N",
+        help="Exit with code 1 if any entity scores below N%% (useful in CI gates)",
+    )
+    completeness_parser.set_defaults(func=cmd_completeness)
 
     schema_parser = sub.add_parser("print-schema", help="Print active model schema JSON")
     schema_parser.add_argument("--schema", default=_default_schema_path(), help="Path to JSON schema")

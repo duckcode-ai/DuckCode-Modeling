@@ -148,6 +148,12 @@ export function modelToFlow(doc) {
       schema: toDisplayText(entity?.schema, ""),
       database: toDisplayText(entity?.database, ""),
       sla: toNormalizedSla(entity?.sla),
+      scd_type: entity?.scd_type ?? null,
+      natural_key: toDisplayText(entity?.natural_key, ""),
+      surrogate_key: toDisplayText(entity?.surrogate_key, ""),
+      conformed: Boolean(entity?.conformed),
+      dimension_refs: Array.isArray(entity?.dimension_refs) ? entity.dimension_refs.map((r) => toDisplayText(r, "").trim()).filter(Boolean) : [],
+      grain: Array.isArray(entity?.grain) ? entity.grain : [],
     };
     normalizedEntities.push(normalizedEntity);
     entityByName.set(normalizedEntity.name, normalizedEntity);
@@ -177,7 +183,13 @@ export function modelToFlow(doc) {
         schema: entity.schema,
         database: entity.database,
         sla: entity.sla,
-        indexes: entityIndexes
+        indexes: entityIndexes,
+        scd_type: entity.scd_type,
+        natural_key: entity.natural_key,
+        surrogate_key: entity.surrogate_key,
+        conformed: entity.conformed,
+        dimension_refs: entity.dimension_refs,
+        grain: entity.grain,
       }
     };
   });
@@ -281,6 +293,35 @@ export function modelToFlow(doc) {
       labelStyle: { fill: "#475569", fontSize: 10, fontWeight: 600 },
       animated: cardinality === "many_to_many" || isSelf
     });
+  }
+
+  // Generate visual dimension_refs edges (fact → dimension, dashed orange)
+  for (const entity of normalizedEntities) {
+    if (entity.type !== "fact_table" || entity.dimension_refs.length === 0) continue;
+    for (const dimName of entity.dimension_refs) {
+      if (!entityByName.has(dimName)) continue;
+      const edgeId = `dimref-${entity.name}-${dimName}`;
+      // Skip if a formal relationship edge already connects these two entities
+      const alreadyLinked = edges.some(
+        (e) => (e.source === entity.name && e.target === dimName) ||
+                (e.source === dimName && e.target === entity.name)
+      );
+      if (alreadyLinked) continue;
+      edges.push({
+        id: edgeId,
+        source: entity.name,
+        target: dimName,
+        label: "dim ref",
+        data: { isDimRef: true },
+        style: {
+          stroke: "#f97316",
+          strokeWidth: 1.5,
+          strokeDasharray: "4 3",
+        },
+        labelStyle: { fill: "#f97316", fontSize: 9, fontWeight: 500 },
+        animated: false,
+      });
+    }
   }
 
   return {

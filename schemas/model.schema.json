@@ -182,7 +182,10 @@
             "view",
             "materialized_view",
             "external_table",
-            "snapshot"
+            "snapshot",
+            "fact_table",
+            "dimension_table",
+            "bridge_table"
           ]
         },
         "description": {
@@ -239,6 +242,33 @@
               "description": "Target quality score percentage"
             }
           }
+        },
+        "scd_type": {
+          "type": "integer",
+          "enum": [1, 2, 3],
+          "description": "Slowly Changing Dimension type (1=overwrite, 2=history rows, 3=add column). Only valid on dimension_table entities."
+        },
+        "natural_key": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_]*$",
+          "description": "The business key field name for dimension_table entities (used for SCD matching)."
+        },
+        "surrogate_key": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_]*$",
+          "description": "The auto-generated surrogate primary key field name for SCD2 dimensions."
+        },
+        "conformed": {
+          "type": "boolean",
+          "description": "True if this dimension is shared (conformed) across multiple fact tables."
+        },
+        "dimension_refs": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[A-Z][A-Za-z0-9]*$"
+          },
+          "description": "List of dimension entity names this fact table references (PascalCase). Drives star schema layout and validation."
         },
         "fields": {
           "type": "array",

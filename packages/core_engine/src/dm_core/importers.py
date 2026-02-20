@@ -1032,3 +1032,143 @@ def import_dbt_schema_yml(
     model["entities"] = model_entities
     model["relationships"] = sorted(deduped.values(), key=lambda r: str(r.get("name", "")))
     return model
+
+
+# ── dbt round-trip sync ───────────────────────────────────────────────────────
+
+def _re_snake(name: str) -> str:
+    """Convert PascalCase entity name to snake_case for dbt model name matching."""
+    out: List[str] = []
+    for idx, char in enumerate(name):
+        if char.isupper() and idx > 0 and not name[idx - 1].isupper():
+            out.append("_")
+        out.append(char.lower())
+    return "".join(out)
+
+
+def sync_dbt_schema_yml(
+    model: Dict[str, Any],
+    existing_dbt_schema_yml: str,
+) -> str:
+    """Merge DuckCode model metadata INTO an existing dbt schema.yml (non-destructive).
+
+    DuckCode-sourced metadata (descriptions, tags, owner, sensitivity, dimensional
+    properties) is written into dbt models/columns that have empty counterparts.
+    Existing dbt content (tests, ref() expressions, non-empty descriptions) is NEVER
+    overwritten.
+
+    Returns the updated dbt schema YAML as a string.
+    """
+    loaded: Dict[str, Any] = yaml.safe_load(existing_dbt_schema_yml) or {}
+    if not isinstance(loaded, dict):
+        loaded = {}
+
+    # Build entity lookup by snake_case name (and stg_/fct_/dim_ prefixed variants)
+    entity_by_snake: Dict[str, Dict[str, Any]] = {}
+    for entity in model.get("entities", []):
+        entity_name = str(entity.get("name", ""))
+        snake = _re_snake(entity_name)
+        entity_type = str(entity.get("type", "table"))
+        entity_by_snake[snake] = entity
+        # Also index under common dbt naming prefixes so lookups work both ways
+        entity_by_snake[f"stg_{snake}"] = entity
+        if entity_type == "fact_table":
+            entity_by_snake[f"fct_{snake}"] = entity
+        elif entity_type == "dimension_table":
+            entity_by_snake[f"dim_{snake}"] = entity
+        elif entity_type == "bridge_table":
+            entity_by_snake[f"brd_{snake}"] = entity
+
+    dbt_models = loaded.get("models", [])
+    if not isinstance(dbt_models, list):
+        dbt_models = []
+
+    for dbt_model in dbt_models:
+        if not isinstance(dbt_model, dict):
+            continue
+        raw_name = str(dbt_model.get("name", "")).strip()
+        # Try exact match, then strip common prefixes
+        entity = (
+            entity_by_snake.get(raw_name)
+            or entity_by_snake.get(raw_name.removeprefix("stg_"))
+            or entity_by_snake.get(raw_name.removeprefix("fct_"))
+            or entity_by_snake.get(raw_name.removeprefix("dim_"))
+            or entity_by_snake.get(raw_name.removeprefix("brd_"))
+        )
+        if not entity:
+            continue
+
+        # Fill description only if dbt model's is empty
+        if not dbt_model.get("description") and entity.get("description"):
+            dbt_model["description"] = entity["description"]
+
+        # Merge tags (union, no duplicates)
+        existing_tags: set = set(dbt_model.get("tags", []) if isinstance(dbt_model.get("tags"), list) else [])
+        new_tags: set = {str(t) for t in (entity.get("tags") or []) if t}
+        merged = sorted(existing_tags | new_tags)
+        if merged:
+            dbt_model["tags"] = merged
+
+        # Fill meta fields
+        dbt_meta = dbt_model.setdefault("meta", {})
+        if not isinstance(dbt_meta, dict):
+            dbt_meta = {}
+            dbt_model["meta"] = dbt_meta
+
+        if not dbt_meta.get("owner") and entity.get("owner"):
+            dbt_meta["owner"] = entity["owner"]
+        if not dbt_meta.get("subject_area") and entity.get("subject_area"):
+            dbt_meta["subject_area"] = entity["subject_area"]
+
+        # Dimensional metadata
+        entity_type = str(entity.get("type", "table"))
+        if entity_type in {"fact_table", "dimension_table", "bridge_table"}:
+            if not dbt_meta.get("entity_type"):
+                dbt_meta["entity_type"] = entity_type
+            if entity.get("scd_type") and not dbt_meta.get("scd_type"):
+                dbt_meta["scd_type"] = entity["scd_type"]
+            if entity.get("natural_key") and not dbt_meta.get("natural_key"):
+                dbt_meta["natural_key"] = entity["natural_key"]
+            if entity.get("conformed") and not dbt_meta.get("conformed"):
+                dbt_meta["conformed"] = True
+            if entity.get("dimension_refs") and not dbt_meta.get("dimension_refs"):
+                dbt_meta["dimension_refs"] = entity["dimension_refs"]
+
+        # Build field lookup from DuckCode entity
+        field_map: Dict[str, Dict[str, Any]] = {
+            str(f.get("name", "")): f for f in entity.get("fields", [])
+        }
+
+        dbt_columns = dbt_model.get("columns", [])
+        if not isinstance(dbt_columns, list):
+            continue
+
+        for col in dbt_columns:
+            if not isinstance(col, dict):
+                continue
+            col_name = str(col.get("name", "")).strip()
+            dc_field = field_map.get(col_name)
+            if not dc_field:
+                continue
+
+            # Fill column description if empty
+            if not col.get("description") and dc_field.get("description"):
+                col["description"] = dc_field["description"]
+
+            # Merge column tags
+            existing_col_tags: set = set(col.get("tags", []) if isinstance(col.get("tags"), list) else [])
+            new_col_tags: set = {str(t) for t in (dc_field.get("tags") or []) if t}
+            merged_col = sorted(existing_col_tags | new_col_tags)
+            if merged_col:
+                col["tags"] = merged_col
+
+            # Fill column meta sensitivity if empty
+            col_meta = col.setdefault("meta", {})
+            if not isinstance(col_meta, dict):
+                col_meta = {}
+                col["meta"] = col_meta
+            if not col_meta.get("sensitivity") and dc_field.get("sensitivity"):
+                col_meta["sensitivity"] = dc_field["sensitivity"]
+
+    return yaml.dump(loaded, default_flow_style=False, sort_keys=False, allow_unicode=True)
+    return model

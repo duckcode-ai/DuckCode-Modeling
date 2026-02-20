@@ -20,7 +20,7 @@ import useDiagramStore from "../../stores/diagramStore";
 import useUiStore from "../../stores/uiStore";
 import useWorkspaceStore from "../../stores/workspaceStore";
 import { modelToFlow, CARDINALITY_COLOR } from "../../modelToFlow";
-import { runModelChecks } from "../../modelQuality";
+import { runModelChecks, computeModelCompleteness } from "../../modelQuality";
 import { layoutWithElk, fallbackGridLayout } from "../../lib/elkLayout";
 import { buildSchemaColorMap, SCHEMA_COLORS } from "../../lib/schemaColors";
 
@@ -47,7 +47,98 @@ function adjacencyFromEdges(edges) {
 const TYPE_FILTER_GROUPS = {
   table: new Set(["table", "external_table", "snapshot"]),
   view: new Set(["view", "materialized_view"]),
+  dimension_table: new Set(["dimension_table", "fact_table", "bridge_table"]),
 };
+
+// Star schema layout: fact tables centered, dimensions radiating outward
+function buildStarSchemaLayout(nodes, edges) {
+  const factNodes = nodes.filter((n) => n.data?.type === "fact_table");
+  if (factNodes.length === 0) return null;
+
+  const dimNodes = nodes.filter((n) => n.data?.type === "dimension_table");
+  const bridgeNodes = nodes.filter((n) => n.data?.type === "bridge_table");
+  const otherNodes = nodes.filter(
+    (n) => !["fact_table", "dimension_table", "bridge_table"].includes(n.data?.type)
+  );
+
+  const NODE_W = 300;
+  const NODE_H = 220;
+  const FACT_GAP = 420;
+  const DIM_RADIUS = 380;
+  const CENTER_Y = 500;
+
+  // Place fact tables in a horizontal row at center y
+  const factStartX = -(factNodes.length - 1) * (FACT_GAP / 2);
+  const positionedFacts = factNodes.map((n, i) => ({
+    ...n,
+    position: { x: factStartX + i * FACT_GAP, y: CENTER_Y },
+  }));
+
+  // Build a map of dimName → fact center positions it's referenced from
+  const dimToFactCenters = new Map();
+  for (const factNode of positionedFacts) {
+    const dimRefs = factNode.data?.dimension_refs || [];
+    for (const dimName of dimRefs) {
+      if (!dimToFactCenters.has(dimName)) dimToFactCenters.set(dimName, []);
+      dimToFactCenters.get(dimName).push(factNode.position);
+    }
+  }
+
+  // Also collect dimension connections from formal edges
+  for (const edge of edges) {
+    const sourceNode = positionedFacts.find((n) => n.id === edge.source);
+    const targetNode = nodes.find((n) => n.id === edge.target && n.data?.type === "dimension_table");
+    if (sourceNode && targetNode) {
+      if (!dimToFactCenters.has(targetNode.id)) dimToFactCenters.set(targetNode.id, []);
+      dimToFactCenters.get(targetNode.id).push(sourceNode.position);
+    }
+  }
+
+  // Place each dimension node radially from its fact center
+  const placedDimIds = new Set();
+  const positionedDims = [];
+  const angleStep = (2 * Math.PI) / Math.max(dimNodes.length, 1);
+
+  dimNodes.forEach((dimNode, i) => {
+    const factCenters = dimToFactCenters.get(dimNode.id) || dimToFactCenters.get(dimNode.data?.name) || [];
+    let cx = 0, cy = CENTER_Y;
+    if (factCenters.length > 0) {
+      cx = factCenters.reduce((sum, p) => sum + p.x, 0) / factCenters.length;
+      cy = factCenters.reduce((sum, p) => sum + p.y, 0) / factCenters.length;
+    }
+    const angle = angleStep * i - Math.PI / 2; // start top
+    positionedDims.push({
+      ...dimNode,
+      position: {
+        x: cx + DIM_RADIUS * Math.cos(angle) - NODE_W / 2,
+        y: cy + DIM_RADIUS * Math.sin(angle) - NODE_H / 2,
+      },
+    });
+    placedDimIds.add(dimNode.id);
+  });
+
+  // Bridge tables: below the fact row
+  const positionedBridges = bridgeNodes.map((n, i) => ({
+    ...n,
+    position: { x: factStartX + i * FACT_GAP, y: CENTER_Y + DIM_RADIUS + 60 },
+  }));
+
+  // Other nodes: stacked below everything
+  const otherStartY = CENTER_Y + DIM_RADIUS + 340;
+  const otherCols = Math.max(1, Math.ceil(Math.sqrt(otherNodes.length)));
+  const positionedOther = otherNodes.map((n, i) => ({
+    ...n,
+    position: {
+      x: (i % otherCols) * (NODE_W + 80) - ((otherCols - 1) * (NODE_W + 80)) / 2,
+      y: otherStartY + Math.floor(i / otherCols) * (NODE_H + 40),
+    },
+  }));
+
+  return {
+    nodes: [...positionedFacts, ...positionedDims, ...positionedBridges, ...positionedOther],
+    edges,
+  };
+}
 
 // Apply type/tag filters
 function applyFilters(nodes, edges, vizSettings) {
@@ -293,7 +384,14 @@ function FlowCanvas() {
 
     const doLayout = async () => {
       let layoutResult;
-      if (vizSettings.layoutMode === "elk") {
+      if (vizSettings.layoutMode === "star_schema") {
+        const starResult = buildStarSchemaLayout(filtered, filteredEdges);
+        layoutResult = starResult || await layoutWithElk(filtered, filteredEdges, {
+          density: vizSettings.layoutDensity,
+          groupBySubjectArea: vizSettings.groupBySubjectArea,
+          fieldView: vizSettings.fieldView,
+        });
+      } else if (vizSettings.layoutMode === "elk") {
         layoutResult = await layoutWithElk(filtered, filteredEdges, {
           density: vizSettings.layoutDensity,
           groupBySubjectArea: vizSettings.groupBySubjectArea,
@@ -453,11 +551,22 @@ export default function DiagramCanvas() {
       });
       // Build schema→color map from entities
       const schemaColorMap = buildSchemaColorMap(check.model.entities || []);
+      // Build per-entity completeness score map
+      const completenessReport = computeModelCompleteness(check.model);
+      const entityScoreMap = {};
+      (completenessReport?.entities || []).forEach((e) => {
+        entityScoreMap[e.entityName] = e.score;
+      });
       const nodesWithRelCount = (graph.nodes || []).map((n) => {
         const schema = n.data?.subject_area || n.data?.schema || "(default)";
         return {
           ...n,
-          data: { ...n.data, relationshipCount: relCounts[n.id] || 0, schemaColorIndex: schemaColorMap[schema] ?? 0 },
+          data: {
+            ...n.data,
+            relationshipCount: relCounts[n.id] || 0,
+            schemaColorIndex: schemaColorMap[schema] ?? 0,
+            completenessScore: entityScoreMap[n.data?.name] ?? null,
+          },
         };
       });
       setGraph({

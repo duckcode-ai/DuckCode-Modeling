@@ -17,6 +17,7 @@ from dm_core.importers import (
     import_dbml,
     import_spark_schema,
     import_sql_ddl,
+    sync_dbt_schema_yml,
 )
 from dm_core.connectors.base import ConnectorConfig, ConnectorResult, get_connector, list_connectors
 from dm_core.loader import load_yaml_model
@@ -28,14 +29,23 @@ from dm_core.policy import (
 )
 from dm_core.resolver import resolve_model, resolve_project
 from dm_core.schema import load_schema, schema_issues
-from dm_core.semantic import lint_issues
+from dm_core.semantic import (
+    completeness_as_dict,
+    completeness_report,
+    lint_issues,
+    EntityCompleteness,
+    ModelCompleteness,
+)
 
 __all__ = [
     "compile_model",
+    "completeness_as_dict",
+    "completeness_report",
     "ConnectorConfig",
     "ConnectorResult",
     "dbt_scaffold_files",
     "diagnostics_as_json",
+    "EntityCompleteness",
     "format_diagnostics",
     "generate_bash_completion",
     "generate_fish_completion",
@@ -55,6 +65,7 @@ __all__ = [
     "merge_policy_packs",
     "load_schema",
     "load_yaml_model",
+    "ModelCompleteness",
     "policy_issues",
     "project_diff",
     "resolve_model",
@@ -67,4 +78,5 @@ __all__ = [
     "write_migration",
     "write_html_docs",
     "write_markdown_docs",
+    "sync_dbt_schema_yml",
 ]

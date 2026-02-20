@@ -94,6 +94,11 @@
 }
 
 /* Dark theme overrides */
+[data-theme="dark"] body {
+  /* Remove the decorative light gradient in dark mode */
+  background: var(--color-bg-primary);
+}
+
 [data-theme="dark"] {
   --color-bg-primary: #0f172a;
   --color-bg-secondary: #1e293b;

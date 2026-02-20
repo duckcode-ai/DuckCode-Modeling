@@ -1,5 +1,353 @@
 import yaml from "js-yaml";
 
+// ── Completeness scoring ───────────────────────────────────────────────────────
+
+export const COMPLETENESS_WEIGHTS = {
+  description: 15,        // Entity has a non-empty description
+  owner: 10,              // Entity has an owner assigned
+  grain: 15,              // Entity has at least one grain field
+  field_descriptions: 20, // ≥80% of fields have descriptions
+  classification: 10,     // Sensitive fields have governance classification
+  glossary_linked: 10,    // At least one glossary term cross-references this entity
+  tags: 5,                // Entity has at least one tag
+  layer: 5,               // Parent model declares a layer
+  sla: 10,                // Entity has SLA defined
+};
+
+const PII_TAGS = new Set(["PII", "PHI", "PCI", "pii", "phi", "pci"]);
+const SENSITIVE_VALUES = new Set(["restricted", "confidential"]);
+const FINANCIAL_PATTERN = /(amount|revenue|cost|price|fee|salary|balance|total|gross|net)/i;
+const AUDIT_CREATED = /^created_(at|on|date|time)$/;
+const AUDIT_UPDATED = /^(updated|modified)_(at|on|date|time)$/;
+
+function glossaryEntityRefs(model) {
+  const refs = new Set();
+  (Array.isArray(model.glossary) ? model.glossary : []).forEach((term) => {
+    (Array.isArray(term?.related_fields) ? term.related_fields : []).forEach((ref) => {
+      if (typeof ref === "string" && ref.includes(".")) {
+        refs.add(ref.split(".")[0]);
+      }
+    });
+  });
+  return refs;
+}
+
+export function computeEntityCompleteness(entity, model, glossaryRefs) {
+  const name = entity?.name || "";
+  const entityType = entity?.type || "table";
+  const fields = Array.isArray(entity?.fields) ? entity.fields : [];
+  const modelLayer = String(model?.model?.layer || "").toLowerCase().trim();
+  const govClassification = (model?.governance?.classification) || {};
+
+  // description
+  const hasDescription = typeof entity?.description === "string" && entity.description.trim().length > 0;
+
+  // owner
+  const hasOwner = typeof entity?.owner === "string" && entity.owner.trim().length > 0;
+
+  // grain — views/external_table/dimension_table exempt (dimension uses surrogate key, not declared grain)
+  const grain = Array.isArray(entity?.grain) ? entity.grain : [];
+  const hasGrain = entityType === "view" || entityType === "external_table" || entityType === "dimension_table"
+    ? true
+    : grain.length > 0;
+
+  // field descriptions: ≥80% threshold
+  const fieldCount = fields.length;
+  const describedCount = fields.filter((f) => typeof f?.description === "string" && f.description.trim().length > 0).length;
+  const fieldDescPct = fieldCount === 0 ? 100 : Math.round((describedCount / fieldCount) * 100);
+  const hasFieldDescriptions = fieldDescPct >= 80;
+
+  // classification: only required if entity has PII-tagged or sensitive fields
+  const needsClassification = fields.some(
+    (f) =>
+      SENSITIVE_VALUES.has(String(f?.sensitivity || "").toLowerCase()) ||
+      (Array.isArray(f?.tags) ? f.tags : []).some((t) => PII_TAGS.has(String(t)))
+  );
+  const entityGovRefs = Object.keys(govClassification).filter((k) => k.startsWith(`${name}.`));
+  const hasClassification = !needsClassification || entityGovRefs.length > 0 ||
+    fields.some((f) => f?.sensitivity);
+
+  // glossary linked
+  const hasGlossaryLinked = (glossaryRefs instanceof Set ? glossaryRefs : glossaryEntityRefs(model)).has(name);
+
+  // tags
+  const hasTags = Array.isArray(entity?.tags) && entity.tags.length > 0;
+
+  // layer
+  const hasLayer = modelLayer.length > 0;
+
+  // sla
+  const sla = entity?.sla || {};
+  const hasSla = !!(sla.freshness || sla.quality_score);
+
+  const dimensions = {
+    description: hasDescription,
+    owner: hasOwner,
+    grain: hasGrain,
+    field_descriptions: hasFieldDescriptions,
+    classification: hasClassification,
+    glossary_linked: hasGlossaryLinked,
+    tags: hasTags,
+    layer: hasLayer,
+    sla: hasSla,
+  };
+
+  const score = Object.entries(dimensions).reduce(
+    (sum, [dim, passed]) => sum + (passed ? (COMPLETENESS_WEIGHTS[dim] || 0) : 0),
+    0
+  );
+
+  const missingLabels = {
+    description: "entity description",
+    owner: "owner",
+    grain: "grain definition",
+    field_descriptions: `field descriptions (${fieldDescPct}% covered, need ≥80%)`,
+    classification: "sensitivity classification on sensitive fields",
+    glossary_linked: "glossary term cross-reference",
+    tags: "tags",
+    layer: "model layer (source/transform/report)",
+    sla: "SLA (freshness or quality_score)",
+  };
+
+  const missing = Object.entries(dimensions)
+    .filter(([, passed]) => !passed)
+    .map(([dim]) => missingLabels[dim]);
+
+  return { entityName: name, score, dimensions, missing, fieldDescPct };
+}
+
+export function computeModelCompleteness(model) {
+  if (!model) return null;
+  const entities = Array.isArray(model.entities) ? model.entities : [];
+  const gRefs = glossaryEntityRefs(model);
+  const entityScores = entities.map((e) => computeEntityCompleteness(e, model, gRefs));
+  const modelScore = entityScores.length
+    ? Math.round(entityScores.reduce((s, e) => s + e.score, 0) / entityScores.length)
+    : 0;
+  return {
+    modelName: model?.model?.name || "unknown",
+    modelScore,
+    entities: entityScores,
+    totalEntities: entityScores.length,
+    fullyComplete: entityScores.filter((e) => e.score === 100).length,
+    needsAttention: entityScores.filter((e) => e.score < 60).map((e) => e.entityName),
+  };
+}
+
+// ── Smart nudge rules ──────────────────────────────────────────────────────────
+
+function nudgeIssues(model) {
+  const issues = [];
+  const entities = Array.isArray(model.entities) ? model.entities : [];
+  const modelLayer = String(model?.model?.layer || "").toLowerCase().trim();
+  const govClassification = (model?.governance?.classification) || {};
+  const glossaryTerms = Array.isArray(model.glossary) ? model.glossary : [];
+  const relationships = Array.isArray(model.relationships) ? model.relationships : [];
+  const imports = Array.isArray(model.model?.imports) ? model.model.imports : [];
+
+  // Collect entity names used in relationships
+  const relEntityNames = new Set();
+  relationships.forEach((rel) => {
+    ["from", "to"].forEach((side) => {
+      const ref = rel?.[side] || "";
+      if (ref.includes(".")) relEntityNames.add(ref.split(".")[0]);
+    });
+  });
+
+  // Collect all imported entity names
+  const importedEntityNames = new Set();
+  imports.forEach((imp) => {
+    (Array.isArray(imp?.entities) ? imp.entities : []).forEach((e) => importedEntityNames.add(String(e)));
+  });
+
+  // All local field refs
+  const allFieldRefs = new Set();
+  entities.forEach((e) => {
+    (Array.isArray(e?.fields) ? e.fields : []).forEach((f) => {
+      if (e?.name && f?.name) allFieldRefs.add(`${e.name}.${f.name}`);
+    });
+  });
+
+  const localEntityNames = new Set(entities.map((e) => e?.name).filter(Boolean));
+
+  entities.forEach((entity) => {
+    const entityName = entity?.name || "";
+    const entityType = entity?.type || "table";
+    const fields = Array.isArray(entity?.fields) ? entity.fields : [];
+    const fieldCount = fields.length;
+    const path = `/entities/${entityName}`;
+
+    // Nudge 1: Missing entity description
+    if (!entity?.description?.trim()) {
+      issues.push(issue("warn", "MISSING_ENTITY_DESCRIPTION",
+        `Entity '${entityName}' has no description. Add a business-facing description so consumers know what this entity represents.`,
+        path));
+    }
+
+    // Nudge 2: Missing entity owner
+    if (!entity?.owner?.trim()) {
+      issues.push(issue("warn", "MISSING_ENTITY_OWNER",
+        `Entity '${entityName}' has no owner. Assign an owner (email or team alias) for accountability.`,
+        path));
+    }
+
+    // Nudge 3: Source-layer table with no grain
+    if (modelLayer === "source" && (entityType === "table" || entityType === "materialized_view") && !Array.isArray(entity?.grain)?.length) {
+      const grain = Array.isArray(entity?.grain) ? entity.grain : [];
+      if (grain.length === 0) {
+        issues.push(issue("warn", "MISSING_GRAIN_SOURCE_LAYER",
+          `Entity '${entityName}' in a source-layer model has no grain. Declaring grain prevents downstream metric errors.`,
+          path));
+      }
+    }
+
+    // Nudge 4: PII/PHI/PCI tag without governance.classification
+    fields.forEach((f) => {
+      const fname = f?.name || "";
+      const fTags = Array.isArray(f?.tags) ? f.tags : [];
+      const fieldRef = `${entityName}.${fname}`;
+      const hasPiiTag = fTags.some((t) => PII_TAGS.has(String(t)));
+      if (hasPiiTag && !(fieldRef in govClassification)) {
+        issues.push(issue("warn", "PII_TAG_WITHOUT_CLASSIFICATION",
+          `Field '${fieldRef}' has a PII/PHI/PCI tag but no governance.classification entry. Add a classification so data contracts can enforce access controls.`,
+          `${path}/fields/${fname}`));
+      }
+    });
+
+    // Nudge 5: sensitivity=restricted/confidential without classification
+    fields.forEach((f) => {
+      const fname = f?.name || "";
+      const sensitivity = String(f?.sensitivity || "").toLowerCase();
+      const fieldRef = `${entityName}.${fname}`;
+      if (SENSITIVE_VALUES.has(sensitivity) && !(fieldRef in govClassification)) {
+        issues.push(issue("warn", "SENSITIVITY_WITHOUT_CLASSIFICATION",
+          `Field '${fieldRef}' has sensitivity='${sensitivity}' but no governance.classification. Pair sensitivity labels with PII/PCI/PHI/CONFIDENTIAL classification.`,
+          `${path}/fields/${fname}`));
+      }
+    });
+
+    // Nudge 6: Financial field name with no examples
+    fields.forEach((f) => {
+      const fname = f?.name || "";
+      if (FINANCIAL_PATTERN.test(fname) && !f?.examples) {
+        issues.push(issue("warn", "FINANCIAL_FIELD_NO_EXAMPLES",
+          `Field '${entityName}.${fname}' looks like a financial value but has no examples. Add examples (unit, currency, scale) so consumers interpret it correctly.`,
+          `${path}/fields/${fname}`));
+      }
+    });
+
+    // Nudge 7: created_at without updated_at (tables only)
+    if (entityType === "table") {
+      const fieldNames = fields.map((f) => f?.name || "");
+      const hasCreated = fieldNames.some((n) => AUDIT_CREATED.test(n));
+      const hasUpdated = fieldNames.some((n) => AUDIT_UPDATED.test(n));
+      if (hasCreated && !hasUpdated) {
+        issues.push(issue("warn", "CREATED_WITHOUT_UPDATED",
+          `Entity '${entityName}' has a created_at timestamp but no updated_at. If records are mutable, add updated_at to support incremental loads.`,
+          path));
+      }
+    }
+
+    // Nudge 8: Low field description coverage (<50%)
+    if (fieldCount > 0) {
+      const described = fields.filter((f) => f?.description?.trim()).length;
+      const pct = Math.round((described / fieldCount) * 100);
+      if (pct < 50) {
+        issues.push(issue("warn", "LOW_FIELD_DESCRIPTION_COVERAGE",
+          `Entity '${entityName}' has only ${pct}% of fields described (${described}/${fieldCount}). Add descriptions to support single source of truth.`,
+          path));
+      }
+    }
+
+    // Nudge 9: Large entity (>10 fields) with no indexes
+    if (fieldCount > 10 && entityType === "table") {
+      const entityIndexes = (Array.isArray(model.indexes) ? model.indexes : []).filter((idx) => idx?.entity === entityName);
+      if (entityIndexes.length === 0) {
+        issues.push(issue("warn", "LARGE_ENTITY_NO_INDEXES",
+          `Entity '${entityName}' has ${fieldCount} fields but no indexes defined. Consider adding indexes on frequently queried or join columns.`,
+          path));
+      }
+    }
+
+    // Nudge 10: Report-layer entity not covered by any metric
+    if (modelLayer === "report" && (entityType === "table" || entityType === "materialized_view")) {
+      const entityMetrics = (Array.isArray(model.metrics) ? model.metrics : []).filter((m) => m?.entity === entityName);
+      if (entityMetrics.length === 0) {
+        issues.push(issue("warn", "REPORT_ENTITY_NO_METRICS",
+          `Entity '${entityName}' is in a report-layer model but has no metrics defined for it. Report entities should expose at least one metric.`,
+          path));
+      }
+    }
+
+    // Nudge 13: fact_table without dimension_refs
+    if (entityType === "fact_table") {
+      const dimRefs = Array.isArray(entity?.dimension_refs) ? entity.dimension_refs : [];
+      if (dimRefs.length === 0) {
+        issues.push(issue("warn", "FACT_WITHOUT_DIMENSION_REFS",
+          `Fact table '${entityName}' has no dimension_refs defined. Declare which dimensions this fact references for star schema clarity and auto-layout.`,
+          path));
+      }
+    }
+
+    // Nudge 14: dimension_table without natural_key
+    if (entityType === "dimension_table" && !entity?.natural_key?.trim()) {
+      issues.push(issue("warn", "DIM_WITHOUT_NATURAL_KEY",
+        `Dimension table '${entityName}' has no natural_key defined. Declare the business key so SCD tracking and deduplication work correctly.`,
+        path));
+    }
+
+    // Nudge 15: SCD Type 2 dimension missing system fields
+    if (entityType === "dimension_table" && entity?.scd_type === 2) {
+      const fieldNames = new Set(fields.map((f) => f?.name || ""));
+      const missing = [];
+      if (!fieldNames.has("effective_from")) missing.push("effective_from (DATE)");
+      if (!fieldNames.has("effective_to")) missing.push("effective_to (DATE)");
+      if (!fieldNames.has("is_current")) missing.push("is_current (BOOLEAN)");
+      if (missing.length > 0) {
+        issues.push(issue("warn", "SCD2_MISSING_SYSTEM_FIELDS",
+          `SCD Type 2 dimension '${entityName}' is missing required system fields: ${missing.join(", ")}. Add these to track historical record validity.`,
+          path));
+      }
+    }
+
+    // Nudge 16: fact_table in report layer with no metrics
+    if (entityType === "fact_table" && modelLayer === "report") {
+      const entityMetrics = (Array.isArray(model.metrics) ? model.metrics : []).filter((m) => m?.entity === entityName);
+      if (entityMetrics.length === 0) {
+        issues.push(issue("warn", "FACT_TABLE_NO_METRICS",
+          `Fact table '${entityName}' is in a report-layer model but has no metrics defined. Define at least one metric (measure/KPI) on this fact table.`,
+          path));
+      }
+    }
+  });
+
+  // Nudge 11: Glossary terms defined but no related_fields cross-references
+  if (glossaryTerms.length > 0) {
+    const anyRefs = glossaryTerms.some((t) => Array.isArray(t?.related_fields) && t.related_fields.length > 0);
+    if (!anyRefs) {
+      issues.push(issue("warn", "GLOSSARY_NO_FIELD_REFS",
+        "Glossary terms are defined but none have related_fields cross-references. Link terms to physical fields to connect the business dictionary to the data model.",
+        "/glossary"));
+    }
+  }
+
+  // Nudge 12: Imported entities unused in relationships or FK refs
+  if (importedEntityNames.size > 0) {
+    importedEntityNames.forEach((entName) => {
+      if (localEntityNames.has(entName)) return;
+      const usedInRel = relEntityNames.has(entName);
+      const usedAsFk = [...allFieldRefs].some((ref) => ref.startsWith(`${entName}.`));
+      if (!usedInRel && !usedAsFk) {
+        issues.push(issue("warn", "ORPHAN_IMPORT_ENTITY",
+          `Imported entity '${entName}' is never referenced in relationships or foreign keys. Use it in a relationship or remove the import.`,
+          "/model/imports"));
+      }
+    });
+  }
+
+  return issues;
+}
+
 const MODEL_NAME = /^[a-z][a-z0-9_]*$/;
 const SEMVER = /^[0-9]+\.[0-9]+\.[0-9]+$/;
 const EMAIL = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
@@ -9,9 +357,9 @@ const REF_NAME = /^[A-Z][A-Za-z0-9]*\.[a-z][a-z0-9_]*$/;
 
 const ALLOWED_STATES = new Set(["draft", "approved", "deprecated"]);
 const ALLOWED_LAYERS = new Set(["source", "transform", "report"]);
-const ALLOWED_ENTITY_TYPES = new Set(["table", "view", "materialized_view", "external_table", "snapshot"]);
-const PK_REQUIRED_TYPES = new Set(["table"]);
-const GRAIN_REQUIRED_TYPES = new Set(["table", "view", "materialized_view"]);
+const ALLOWED_ENTITY_TYPES = new Set(["table", "view", "materialized_view", "external_table", "snapshot", "fact_table", "dimension_table", "bridge_table"]);
+const PK_REQUIRED_TYPES = new Set(["table", "fact_table", "dimension_table"]);
+const GRAIN_REQUIRED_TYPES = new Set(["table", "view", "materialized_view", "fact_table"]);
 const ALLOWED_CARDINALITY = new Set([
   "one_to_one",
   "one_to_many",
@@ -155,7 +503,7 @@ function structuralIssues(model) {
           issue(
             "error",
             "INVALID_ENTITY_TYPE",
-            "Entity type must be table, view, materialized_view, external_table, or snapshot.",
+            "Entity type must be one of: table, view, materialized_view, external_table, snapshot, fact_table, dimension_table, bridge_table.",
             `/entities/${entityIdx}/type`
           )
         );
@@ -668,6 +1016,21 @@ function semanticIssues(model) {
         );
       }
     });
+
+    // dimension_refs: warn if referenced dimension entity is not in this model
+    const dimRefs = Array.isArray(entity?.dimension_refs) ? entity.dimension_refs : [];
+    dimRefs.forEach((refName) => {
+      if (refName && !entityFieldMap.has(refName)) {
+        issues.push(
+          issue(
+            "warn",
+            "DIMENSION_REF_NOT_FOUND",
+            `Fact table '${entityName}' references dimension '${refName}' which is not defined in this model.${hasImports ? " (may be in an imported model)" : ""}`,
+            `/entities/${entityIdx}/dimension_refs`
+          )
+        );
+      }
+    });
   });
 
   const indexes = Array.isArray(model.indexes) ? model.indexes : [];
@@ -1162,17 +1525,23 @@ export function runModelChecks(yamlText) {
     };
   }
 
-  const issues = [...structuralIssues(parsed.model), ...semanticIssues(parsed.model)];
-  const errors = issues.filter((item) => item.severity === "error");
-  const warnings = issues.filter((item) => item.severity !== "error");
+  const allIssues = [
+    ...structuralIssues(parsed.model),
+    ...semanticIssues(parsed.model),
+    ...nudgeIssues(parsed.model),
+  ];
+  const errors = allIssues.filter((item) => item.severity === "error");
+  const warnings = allIssues.filter((item) => item.severity !== "error");
+  const completeness = computeModelCompleteness(parsed.model);
 
   return {
     model: parsed.model,
     parseError: "",
-    issues,
+    issues: allIssues,
     errors,
     warnings,
-    hasErrors: errors.length > 0
+    hasErrors: errors.length > 0,
+    completeness,
   };
 }
 

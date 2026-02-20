@@ -43,7 +43,13 @@ export async function removeProject(id) {
 }
 
 export async function updateProject(id, name, path, createIfMissing = false, options = {}) {
-  const { scaffoldRepo = false, initializeGit = false, createSubfolder = false } = options || {};
+  const {
+    scaffoldRepo = false,
+    initializeGit = false,
+    createSubfolder = false,
+    githubRepo,
+    defaultBranch,
+  } = options || {};
   const data = await request(`/projects/${id}`, {
     method: "PUT",
     body: JSON.stringify({
@@ -53,9 +59,20 @@ export async function updateProject(id, name, path, createIfMissing = false, opt
       scaffold_repo: scaffoldRepo,
       initialize_git: initializeGit,
       create_subfolder: createSubfolder,
+      github_repo: githubRepo,
+      default_branch: defaultBranch,
     }),
   });
   return data.project;
+}
+
+export async function fetchGitBranches(projectId) {
+  const data = await request(`/git/branches?projectId=${encodeURIComponent(projectId)}`);
+  return data.branches || [];
+}
+
+export async function fetchGitRemote(projectId) {
+  return request(`/git/remote?projectId=${encodeURIComponent(projectId)}`);
 }
 
 export async function fetchProjectFiles(projectId) {

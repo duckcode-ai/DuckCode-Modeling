@@ -161,6 +161,32 @@ def generate_sql_ddl(model: Dict[str, Any], dialect: str = "postgres") -> str:
         if entity_type == "snapshot":
             continue
 
+        # Build dimensional comment header for fact/dim/bridge tables
+        dim_header: Optional[str] = None
+        if entity_type == "fact_table":
+            grain = entity.get("grain", [])
+            grain_str = ", ".join(grain) if grain else "not declared"
+            dim_refs = entity.get("dimension_refs", [])
+            dims_str = ", ".join(dim_refs) if dim_refs else "none declared"
+            dim_header = (
+                f"-- Fact table: {entity_name}\n"
+                f"-- Grain: {grain_str}\n"
+                f"-- Dimension references: {dims_str}"
+            )
+        elif entity_type == "dimension_table":
+            scd_type = entity.get("scd_type")
+            natural_key = entity.get("natural_key") or "not declared"
+            conformed = entity.get("conformed", False)
+            scd_str = f"SCD Type {scd_type}" if scd_type else "SCD Type 1 (default)"
+            dim_header = (
+                f"-- Dimension table: {entity_name}\n"
+                f"-- Natural key: {natural_key}\n"
+                f"-- {scd_str}"
+                + ("\n-- CONFORMED: shared across multiple fact tables" if conformed else "")
+            )
+        elif entity_type == "bridge_table":
+            dim_header = f"-- Bridge table: {entity_name} (many-to-many resolution)"
+
         column_lines: List[str] = []
         pk_fields: List[str] = []
         check_constraints: List[str] = []
@@ -206,6 +232,8 @@ def generate_sql_ddl(model: Dict[str, Any], dialect: str = "postgres") -> str:
         column_lines.extend(check_constraints)
 
         create_sql = f"CREATE TABLE {qualified} (\n" + ",\n".join(column_lines) + "\n);"
+        if dim_header:
+            create_sql = dim_header + "\n" + create_sql
         create_blocks.append(create_sql)
 
     for rel in relationships:
@@ -296,8 +324,17 @@ def dbt_scaffold_files(
 
     for entity in entities:
         entity_name = str(entity.get("name", ""))
+        entity_type = str(entity.get("type", "table"))
         table_name = _dbt_source_table_name(entity_name)
-        model_name = f"stg_{table_name}"
+        # Use dimensional naming conventions for fact/dim/bridge tables
+        if entity_type == "fact_table":
+            model_name = f"fct_{table_name}"
+        elif entity_type == "dimension_table":
+            model_name = f"dim_{table_name}"
+        elif entity_type == "bridge_table":
+            model_name = f"brd_{table_name}"
+        else:
+            model_name = f"stg_{table_name}"
         fields = entity.get("fields", [])
 
         sql = (
@@ -317,6 +354,17 @@ def dbt_scaffold_files(
             entity_meta.append(f"      owner: \"{entity['owner']}\"")
         if entity.get("subject_area"):
             entity_meta.append(f"      subject_area: \"{entity['subject_area']}\"")
+        # Dimensional modeling metadata in dbt meta block
+        if entity_type in {"fact_table", "dimension_table", "bridge_table"}:
+            entity_meta.append(f"      entity_type: \"{entity_type}\"")
+            if entity.get("scd_type"):
+                entity_meta.append(f"      scd_type: {entity['scd_type']}")
+            if entity.get("natural_key"):
+                entity_meta.append(f"      natural_key: \"{entity['natural_key']}\"")
+            if entity.get("conformed"):
+                entity_meta.append("      conformed: true")
+            if entity.get("dimension_refs"):
+                entity_meta.append(f"      dimension_refs: {entity['dimension_refs']}")
         if entity_meta:
             schema_lines.append("    meta:")
             schema_lines.extend(entity_meta)

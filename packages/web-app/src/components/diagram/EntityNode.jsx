@@ -3,12 +3,33 @@ import { Handle, Position } from "@xyflow/react";
 import { Key, Fingerprint, Diamond, ChevronDown, ChevronUp, ArrowRightLeft, Tag, Shield, Database, AlertTriangle } from "lucide-react";
 import { SCHEMA_COLORS, getSchemaColor } from "../../lib/schemaColors";
 
+function CompletenessIndicator({ score }) {
+  if (score === null || score === undefined) return null;
+  let dotCls, title;
+  if (score === 100) { dotCls = "bg-green-400"; title = `Complete (${score}%)`; }
+  else if (score >= 80) { dotCls = "bg-green-400"; title = `Good (${score}%)`; }
+  else if (score >= 60) { dotCls = "bg-yellow-400"; title = `Partial (${score}%)`; }
+  else { dotCls = "bg-red-400"; title = `Needs work (${score}%)`; }
+  return (
+    <span
+      className="flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-semibold text-text-muted hover:text-text-primary transition-colors cursor-default"
+      title={title}
+    >
+      <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${dotCls}`} />
+      {score}%
+    </span>
+  );
+}
+
 const TYPE_COLORS = {
   table: { bg: "from-blue-50 to-blue-100/60", border: "border-blue-200", badge: "bg-blue-100 text-blue-700" },
   view: { bg: "from-purple-50 to-purple-100/60", border: "border-purple-200", badge: "bg-purple-100 text-purple-700" },
   materialized_view: { bg: "from-indigo-50 to-indigo-100/60", border: "border-indigo-200", badge: "bg-indigo-100 text-indigo-700" },
   external_table: { bg: "from-teal-50 to-teal-100/60", border: "border-teal-200", badge: "bg-teal-100 text-teal-700" },
   snapshot: { bg: "from-amber-50 to-amber-100/60", border: "border-amber-200", badge: "bg-amber-100 text-amber-700" },
+  fact_table: { bg: "from-orange-50 to-amber-100/60", border: "border-orange-300", badge: "bg-orange-100 text-orange-700" },
+  dimension_table: { bg: "from-sky-50 to-cyan-100/60", border: "border-sky-300", badge: "bg-sky-100 text-sky-700" },
+  bridge_table: { bg: "from-rose-50 to-pink-100/60", border: "border-rose-300", badge: "bg-rose-100 text-rose-700" },
 };
 
 const SENSITIVITY_COLORS = {
@@ -103,6 +124,32 @@ function FieldBadges({ field, entityName, classifications, indexedFields }) {
   return badges.length > 0 ? <>{badges}</> : null;
 }
 
+function DimBadges({ entityType, scdType, conformed, dimensionRefs }) {
+  const badges = [];
+  if (entityType === "dimension_table" && scdType === 2) {
+    badges.push(
+      <span key="scd2" className="px-1.5 py-0 rounded text-[9px] font-bold bg-cyan-100 text-cyan-700 border border-cyan-300">
+        SCD2
+      </span>
+    );
+  }
+  if (entityType === "dimension_table" && conformed) {
+    badges.push(
+      <span key="conf" className="px-1.5 py-0 rounded text-[9px] font-bold bg-emerald-100 text-emerald-700 border border-emerald-300">
+        CONFORMED
+      </span>
+    );
+  }
+  if (entityType === "fact_table" && Array.isArray(dimensionRefs) && dimensionRefs.length > 0) {
+    badges.push(
+      <span key="dims" className="px-1.5 py-0 rounded text-[9px] font-bold bg-orange-100 text-orange-700 border border-orange-300" title={dimensionRefs.join(", ")}>
+        {dimensionRefs.length}D
+      </span>
+    );
+  }
+  return badges.length > 0 ? <>{badges}</> : null;
+}
+
 export default function EntityNode({ data }) {
   const [collapsed, setCollapsed] = useState(false);
   const fieldView = data.fieldView || "all";
@@ -120,6 +167,10 @@ export default function EntityNode({ data }) {
     });
     return set;
   }, [entityIndexes]);
+
+  const scdType = data.scd_type ?? null;
+  const conformed = data.conformed ?? false;
+  const dimensionRefs = Array.isArray(data.dimension_refs) ? data.dimension_refs : [];
 
   const schemaColor = getSchemaColor(data.schemaColorIndex);
   const schemaName = data.subject_area || data.schema || null;
@@ -190,6 +241,7 @@ export default function EntityNode({ data }) {
                   {schemaName}
                 </span>
               )}
+              <DimBadges entityType={entityType} scdType={scdType} conformed={conformed} dimensionRefs={dimensionRefs} />
               {relCount > 0 && (
                 <span className="flex items-center gap-0.5 text-[10px] text-text-muted">
                   <ArrowRightLeft size={9} />
@@ -198,12 +250,15 @@ export default function EntityNode({ data }) {
               )}
             </div>
           </div>
-          <button
-            onClick={(e) => { e.stopPropagation(); setCollapsed(!collapsed); }}
-            className="p-0.5 rounded hover:bg-slate-200/60 text-slate-400 hover:text-slate-700 transition-colors"
-          >
-            {collapsed ? <ChevronDown size={14} /> : <ChevronUp size={14} />}
-          </button>
+          <div className="flex items-center gap-1 shrink-0">
+            <CompletenessIndicator score={data.completenessScore} />
+            <button
+              onClick={(e) => { e.stopPropagation(); setCollapsed(!collapsed); }}
+              className="p-0.5 rounded hover:bg-slate-200/60 text-slate-400 hover:text-slate-700 transition-colors"
+            >
+              {collapsed ? <ChevronDown size={14} /> : <ChevronUp size={14} />}
+            </button>
+          </div>
         </div>
 
         {/* Tags */}

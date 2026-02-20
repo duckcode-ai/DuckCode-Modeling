@@ -2,8 +2,9 @@ import express from "express";
 import cors from "cors";
 import { readdir, readFile, writeFile, mkdir, stat, rename, copyFile, unlink as unlinkFile } from "fs/promises";
 import { join, relative, extname, basename, resolve, isAbsolute, dirname } from "path";
-import { existsSync, mkdirSync, writeFileSync, unlinkSync, rmdirSync } from "fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync, unlinkSync, rmdirSync } from "fs";
 import { execFileSync } from "child_process";
+import { tmpdir } from "os";
 import { createRequire } from "module";
 const require = createRequire(import.meta.url);
 const yaml = require("js-yaml");
@@ -657,6 +658,8 @@ app.put("/api/projects/:id", async (req, res) => {
       scaffold_repo,
       initialize_git,
       create_subfolder,
+      github_repo,
+      default_branch,
     } = req.body || {};
     if (!name || !folderPath) {
       return res.status(400).json({ error: "name and path are required" });
@@ -691,6 +694,8 @@ app.put("/api/projects/:id", async (req, res) => {
       ...projects[idx],
       name,
       path: absoluteFolderPath,
+      ...(github_repo !== undefined ? { githubRepo: String(github_repo || "").trim() || null } : {}),
+      ...(default_branch !== undefined ? { defaultBranch: String(default_branch || "").trim() || null } : {}),
     };
     projects[idx] = updated;
     await saveProjects(projects);
@@ -959,6 +964,44 @@ app.get("/api/git/log", async (req, res) => {
   }
 });
 
+
+// Git: list local branches for a project
+app.get("/api/git/branches", async (req, res) => {
+  try {
+    const { projectId } = req.query;
+    const projectPath = await resolveProjectPath(String(projectId || "").trim());
+    if (!projectPath) return res.status(404).json({ error: "Project not found" });
+    if (!existsSync(projectPath)) return res.status(400).json({ error: "Project path does not exist" });
+    try {
+      const output = runGit(["branch", "--list", "--format=%(refname:short)"], projectPath);
+      const branches = output.split("\n").map((b) => b.trim()).filter(Boolean);
+      res.json({ branches });
+    } catch (_err) {
+      res.json({ branches: [] });
+    }
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Git: get remote origin URL and detect GitHub repo
+app.get("/api/git/remote", async (req, res) => {
+  try {
+    const { projectId } = req.query;
+    const projectPath = await resolveProjectPath(String(projectId || "").trim());
+    if (!projectPath) return res.status(404).json({ error: "Project not found" });
+    try {
+      const remoteUrl = runGit(["remote", "get-url", "origin"], projectPath).trim();
+      const parsed = parseGitHubRemote(remoteUrl);
+      const githubRepo = parsed ? `https://github.com/${parsed.owner}/${parsed.repo}` : null;
+      res.json({ remoteUrl, githubRepo });
+    } catch (_err) {
+      res.json({ remoteUrl: null, githubRepo: null });
+    }
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
 
 // Git: create or checkout branch
 app.post("/api/git/branch/create", express.json(), async (req, res) => {
@@ -1699,6 +1742,42 @@ app.post("/api/forward/generate-sql", express.json(), async (req, res) => {
   }
 });
 
+// Completeness scoring: score each entity against single-source-of-truth dimensions
+app.post("/api/forward/completeness", express.json(), async (req, res) => {
+  try {
+    const { model_path } = req.body || {};
+    if (!model_path) {
+      return res.status(400).json({ error: "model_path is required" });
+    }
+
+    const args = [
+      join(REPO_ROOT, "dm"),
+      "completeness",
+      String(model_path),
+      "--output-json",
+    ];
+
+    const output = execFileSync(PYTHON, args, {
+      encoding: "utf-8",
+      timeout: 30000,
+      cwd: REPO_ROOT,
+    });
+
+    const report = JSON.parse(output);
+    res.json({ success: true, report });
+  } catch (err) {
+    const stderr = err.stderr || err.message;
+    // If the process exited with code 1 (min-score breach) stdout is still valid JSON
+    if (err.stdout) {
+      try {
+        const report = JSON.parse(err.stdout);
+        return res.status(422).json({ success: false, report, error: "One or more entities below minimum score" });
+      } catch (_) {}
+    }
+    res.status(500).json({ error: String(stderr).trim() });
+  }
+});
+
 // Forward engineering: generate migration SQL from old/new model YAML
 app.post("/api/forward/migrate", express.json(), async (req, res) => {
   try {
@@ -1723,6 +1802,75 @@ app.post("/api/forward/migrate", express.json(), async (req, res) => {
   } catch (err) {
     const stderr = err.stderr || err.message;
     res.status(500).json({ error: String(stderr).trim() });
+  }
+});
+
+// dbt round-trip sync: merge DuckCode metadata into an existing dbt schema.yml
+app.post("/api/forward/dbt-sync", express.json({ limit: "5mb" }), async (req, res) => {
+  try {
+    const { model_content, dbt_schema_content, model_path, dbt_schema_path, write_back } = req.body || {};
+
+    let modelYaml = model_content;
+    let dbtYaml = dbt_schema_content;
+
+    if (!modelYaml && model_path) {
+      if (!existsSync(String(model_path))) {
+        return res.status(400).json({ error: `model_path not found: ${model_path}` });
+      }
+      modelYaml = readFileSync(String(model_path), "utf-8");
+    }
+    if (!dbtYaml && dbt_schema_path) {
+      if (!existsSync(String(dbt_schema_path))) {
+        return res.status(400).json({ error: `dbt_schema_path not found: ${dbt_schema_path}` });
+      }
+      dbtYaml = readFileSync(String(dbt_schema_path), "utf-8");
+    }
+
+    if (!modelYaml || !dbtYaml) {
+      return res.status(400).json({
+        error: "Provide (model_content + dbt_schema_content) or (model_path + dbt_schema_path)",
+      });
+    }
+
+    const tmpDir = join(tmpdir(), `dbt-sync-${Date.now()}`);
+    mkdirSync(tmpDir, { recursive: true });
+    const tmpModel = join(tmpDir, "model.yaml");
+    const tmpDbt   = join(tmpDir, "schema.yml");
+    const tmpOut   = join(tmpDir, "out.yml");
+
+    writeFileSync(tmpModel, modelYaml, "utf-8");
+    writeFileSync(tmpDbt, dbtYaml, "utf-8");
+
+    let updatedYaml = "";
+    let hadError = false;
+    let errorMsg = "";
+
+    try {
+      execFileSync(PYTHON, [join(REPO_ROOT, "dm"), "dbt", "sync", tmpModel, "--dbt-schema", tmpDbt, "--out", tmpOut], {
+        encoding: "utf-8",
+        timeout: 30000,
+        cwd: REPO_ROOT,
+      });
+      updatedYaml = readFileSync(tmpOut, "utf-8");
+    } catch (err) {
+      hadError = true;
+      errorMsg = String(err?.stderr || err?.message || "dbt sync failed").trim();
+    } finally {
+      try { unlinkSync(tmpModel); } catch (_) {}
+      try { unlinkSync(tmpDbt); } catch (_) {}
+      try { unlinkSync(tmpOut); } catch (_) {}
+      try { rmdirSync(tmpDir); } catch (_) {}
+    }
+
+    if (hadError) return res.status(500).json({ error: errorMsg });
+
+    if (dbt_schema_path && write_back === true) {
+      writeFileSync(String(dbt_schema_path), updatedYaml, "utf-8");
+    }
+
+    res.json({ success: true, updatedYaml, wroteBack: Boolean(dbt_schema_path && write_back) });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
   }
 });
 

@@ -8,8 +8,6 @@ import {
   Sun,
   LayoutDashboard,
   Plug,
-  ShieldCheck,
-  Compass,
   Search,
   Settings,
   ChevronRight,
@@ -21,12 +19,11 @@ import useDiagramStore from "../../stores/diagramStore";
 import useUiStore from "../../stores/uiStore";
 
 const ACTIVITY_LABELS = {
-  model: { label: "Model", icon: LayoutDashboard, color: "text-accent-blue" },
-  connect: { label: "Connect", icon: Plug, color: "text-cyan-500" },
-  import: { label: "Import", icon: FileCode2, color: "text-green-500" },
-  explore: { label: "Explore", icon: Compass, color: "text-purple-500" },
-  search: { label: "Search", icon: Search, color: "text-amber-500" },
-  settings: { label: "Settings", icon: Settings, color: "text-text-muted" },
+  model:    { label: "Model",    icon: LayoutDashboard, color: "text-accent-blue" },
+  connect:  { label: "Connect",  icon: Plug,            color: "text-cyan-500" },
+  import:   { label: "Import",   icon: FileCode2,       color: "text-green-500" },
+  search:   { label: "Search",   icon: Search,          color: "text-amber-500" },
+  settings: { label: "Settings", icon: Settings,        color: "text-slate-500" },
 };
 
 export default function TopBar() {
@@ -48,11 +45,11 @@ export default function TopBar() {
   const ActivityIcon = activityInfo.icon;
 
   return (
-    <div className="h-auto bg-white/75 backdrop-blur-md border-b border-border-primary/80 flex flex-col shadow-[0_4px_14px_rgba(15,23,42,0.04)]">
+    <div className="h-auto bg-bg-surface border-b border-border-primary/80 flex flex-col">
       {/* Breadcrumb + tabs row */}
       <div className="flex items-center gap-1 px-2 py-1 overflow-x-auto">
         {/* Activity breadcrumb */}
-        <div className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-semibold shrink-0 border border-border-primary bg-white ${activityInfo.color}`}>
+        <div className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-semibold shrink-0 border border-border-primary bg-bg-secondary ${activityInfo.color}`}>
           <ActivityIcon size={12} />
           {activityInfo.label}
         </div>
@@ -74,7 +71,7 @@ export default function TopBar() {
               key={key}
               className={`group flex items-center gap-1.5 px-2.5 py-1.5 text-[11px] cursor-pointer rounded-lg border transition-all shrink-0 ${
                 isActive
-                  ? "border-blue-200 text-text-primary bg-blue-50 shadow-sm"
+                  ? "border-accent-blue/30 text-text-primary bg-accent-blue/10 shadow-sm"
                   : "border-transparent text-text-muted hover:text-text-secondary hover:bg-bg-hover"
               }`}
               onClick={() => switchTab(tab)}
@@ -94,8 +91,8 @@ export default function TopBar() {
 
         {/* Right-side actions */}
         <div className="flex items-center gap-1.5 ml-auto shrink-0 pr-2">
-          {/* Model meta chips */}
-          {modelMeta.name && activeActivity === "model" && (
+          {/* Model meta chips — show whenever a model is loaded */}
+          {modelMeta.name && (activeActivity === "model" || activeActivity === "settings") && (
             <div className="flex items-center gap-1.5">
               <span className="px-1.5 py-0.5 rounded-full bg-accent-blue/10 text-accent-blue text-[10px] font-medium">
                 {modelMeta.name}
@@ -137,14 +134,14 @@ export default function TopBar() {
             href="https://discord.gg/Dnm6bUvk"
             target="_blank"
             rel="noopener noreferrer"
-            className="p-1.5 rounded-md text-text-muted border border-border-primary bg-white hover:bg-bg-hover hover:text-text-primary transition-colors"
+            className="p-1.5 rounded-md text-text-muted border border-border-primary bg-bg-surface hover:bg-bg-hover hover:text-text-primary transition-colors"
             title="Support community (Discord)"
           >
             <LifeBuoy size={13} />
           </a>
           <button
             onClick={toggleTheme}
-            className="p-1.5 rounded-md text-text-muted border border-border-primary bg-white hover:bg-bg-hover hover:text-text-primary transition-colors"
+            className="p-1.5 rounded-md text-text-muted border border-border-primary bg-bg-surface hover:bg-bg-hover hover:text-text-primary transition-colors"
             title={`Switch to ${theme === "light" ? "dark" : "light"} mode (⌘D)`}
           >
             {theme === "light" ? <Moon size={13} /> : <Sun size={13} />}
