@@ -1,9 +1,10 @@
-import React, { useCallback, useRef } from "react";
+import React, { useCallback, useRef, useState } from "react";
 import CodeMirror from "@uiw/react-codemirror";
 import { yaml } from "@codemirror/lang-yaml";
 import { EditorView } from "@codemirror/view";
 import { autocompletion } from "@codemirror/autocomplete";
 import { linter, lintGutter } from "@codemirror/lint";
+import { Eye, Copy, Check } from "lucide-react";
 import useWorkspaceStore from "../../stores/workspaceStore";
 import { runModelChecks } from "../../modelQuality";
 
@@ -174,13 +175,21 @@ const editorExtensions = [
   validationLinter,
 ];
 
-export default function YamlEditor() {
+export default function YamlEditor({ readOnly = false }) {
   const { activeFileContent, updateContent, activeFile } = useWorkspaceStore();
   const editorRef = useRef(null);
+  const [copied, setCopied] = useState(false);
 
   const onChange = useCallback((value) => {
-    updateContent(value);
-  }, [updateContent]);
+    if (!readOnly) updateContent(value);
+  }, [updateContent, readOnly]);
+
+  const handleCopy = useCallback(() => {
+    navigator.clipboard.writeText(activeFileContent || "").then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    });
+  }, [activeFileContent]);
 
   if (!activeFile) {
     return (
@@ -194,27 +203,44 @@ export default function YamlEditor() {
   }
 
   return (
-    <div className="flex-1 overflow-hidden">
-      <CodeMirror
-        ref={editorRef}
-        value={activeFileContent}
-        onChange={onChange}
-        extensions={editorExtensions}
-        theme="light"
-        height="100%"
-        style={{ height: "100%" }}
-        basicSetup={{
-          lineNumbers: true,
-          highlightActiveLineGutter: true,
-          highlightActiveLine: true,
-          foldGutter: true,
-          bracketMatching: true,
-          indentOnInput: true,
-          autocompletion: true,
-          closeBrackets: true,
-          tabSize: 2,
-        }}
-      />
+    <div className="flex flex-col h-full overflow-hidden">
+      {readOnly && (
+        <div className="flex items-center gap-2 px-3 py-1 bg-amber-50 border-b border-amber-200 text-[11px] text-amber-700 shrink-0">
+          <Eye size={11} className="shrink-0" />
+          <span>View Only — editing disabled</span>
+          <button
+            onClick={handleCopy}
+            className="ml-auto flex items-center gap-1 px-2 py-0.5 rounded border border-amber-300 hover:bg-amber-100 transition-colors text-[10px] font-medium"
+            title="Copy YAML to clipboard"
+          >
+            {copied ? <Check size={10} /> : <Copy size={10} />}
+            {copied ? "Copied!" : "Copy"}
+          </button>
+        </div>
+      )}
+      <div className="flex-1 overflow-hidden">
+        <CodeMirror
+          ref={editorRef}
+          value={activeFileContent}
+          onChange={onChange}
+          readOnly={readOnly}
+          extensions={editorExtensions}
+          theme="light"
+          height="100%"
+          style={{ height: "100%" }}
+          basicSetup={{
+            lineNumbers: true,
+            highlightActiveLineGutter: !readOnly,
+            highlightActiveLine: !readOnly,
+            foldGutter: true,
+            bracketMatching: true,
+            indentOnInput: !readOnly,
+            autocompletion: !readOnly,
+            closeBrackets: !readOnly,
+            tabSize: 2,
+          }}
+        />
+      </div>
     </div>
   );
 }

@@ -17,6 +17,7 @@ import {
 import useDiagramStore from "../../stores/diagramStore";
 import useWorkspaceStore from "../../stores/workspaceStore";
 import useUiStore from "../../stores/uiStore";
+import useAuthStore from "../../stores/authStore";
 import {
   updateEntityMeta,
   updateEntityTags,
@@ -32,6 +33,8 @@ export default function EntityPanel() {
   const { selectedEntity, selectedEntityId, clearSelection, model } = useDiagramStore();
   const { activeFileContent, updateContent } = useWorkspaceStore();
   const { addToast } = useUiStore();
+  const { canEdit: canEditFn } = useAuthStore();
+  const canEdit = canEditFn();
 
   if (!selectedEntity) {
     return (
@@ -134,20 +137,24 @@ export default function EntityPanel() {
           </span>
         </div>
         <div className="flex items-center gap-1">
-          <button
-            onClick={handleRenameEntity}
-            className="p-1 rounded-md hover:bg-bg-hover text-text-muted hover:text-text-primary transition-colors"
-            title="Rename table"
-          >
-            <Pencil size={14} />
-          </button>
-          <button
-            onClick={handleDeleteEntity}
-            className="p-1 rounded-md hover:bg-red-50 text-text-muted hover:text-red-600 transition-colors"
-            title="Delete table"
-          >
-            <Trash2 size={14} />
-          </button>
+          {canEdit && (
+            <button
+              onClick={handleRenameEntity}
+              className="p-1 rounded-md hover:bg-bg-hover text-text-muted hover:text-text-primary transition-colors"
+              title="Rename table"
+            >
+              <Pencil size={14} />
+            </button>
+          )}
+          {canEdit && (
+            <button
+              onClick={handleDeleteEntity}
+              className="p-1 rounded-md hover:bg-red-50 text-text-muted hover:text-red-600 transition-colors"
+              title="Delete table"
+            >
+              <Trash2 size={14} />
+            </button>
+          )}
           <button
             onClick={clearSelection}
             className="p-1 rounded-md hover:bg-bg-hover text-text-muted hover:text-text-primary transition-colors"
@@ -166,13 +173,19 @@ export default function EntityPanel() {
             <FileText size={10} />
             Table Summary
           </label>
-          <textarea
-            value={selectedEntity.description || ""}
-            onChange={(e) => applyMutation(updateEntityMeta, selectedEntityId, "description", e.target.value)}
-            className="w-full bg-bg-primary border border-border-primary rounded-md px-2 py-1.5 text-xs text-text-primary placeholder:text-text-muted outline-none focus:border-accent-blue resize-none"
-            rows={2}
-            placeholder="Business summary of this table..."
-          />
+          {canEdit ? (
+            <textarea
+              value={selectedEntity.description || ""}
+              onChange={(e) => applyMutation(updateEntityMeta, selectedEntityId, "description", e.target.value)}
+              className="w-full bg-bg-primary border border-border-primary rounded-md px-2 py-1.5 text-xs text-text-primary placeholder:text-text-muted outline-none focus:border-accent-blue resize-none"
+              rows={2}
+              placeholder="Business summary of this table..."
+            />
+          ) : (
+            <p className="text-xs text-text-secondary px-2 py-1.5 bg-bg-primary border border-border-primary rounded-md min-h-[40px]">
+              {selectedEntity.description || <span className="text-text-muted italic">No description</span>}
+            </p>
+          )}
         </div>
 
         {/* Business Context */}
@@ -181,13 +194,19 @@ export default function EntityPanel() {
             <Database size={10} />
             Business Context
           </label>
-          <textarea
-            value={selectedEntity.subject_area || ""}
-            onChange={(e) => applyMutation(updateEntityMeta, selectedEntityId, "subject_area", e.target.value)}
-            className="w-full bg-bg-primary border border-border-primary rounded-md px-2 py-1.5 text-xs text-text-primary placeholder:text-text-muted outline-none focus:border-accent-blue resize-none"
-            rows={2}
-            placeholder="What business domain/use-case this table serves..."
-          />
+          {canEdit ? (
+            <textarea
+              value={selectedEntity.subject_area || ""}
+              onChange={(e) => applyMutation(updateEntityMeta, selectedEntityId, "subject_area", e.target.value)}
+              className="w-full bg-bg-primary border border-border-primary rounded-md px-2 py-1.5 text-xs text-text-primary placeholder:text-text-muted outline-none focus:border-accent-blue resize-none"
+              rows={2}
+              placeholder="What business domain/use-case this table serves..."
+            />
+          ) : (
+            <p className="text-xs text-text-secondary px-2 py-1.5 bg-bg-primary border border-border-primary rounded-md min-h-[40px]">
+              {selectedEntity.subject_area || <span className="text-text-muted italic">No context</span>}
+            </p>
+          )}
         </div>
 
         {/* Owner */}
@@ -196,12 +215,18 @@ export default function EntityPanel() {
             <User size={10} />
             Owner
           </label>
-          <input
-            value={selectedEntity.owner || ""}
-            onChange={(e) => applyMutation(updateEntityMeta, selectedEntityId, "owner", e.target.value)}
-            className="w-full bg-bg-primary border border-border-primary rounded-md px-2 py-1.5 text-xs text-text-primary placeholder:text-text-muted outline-none focus:border-accent-blue"
-            placeholder={fallbackOwner || "team@company.com"}
-          />
+          {canEdit ? (
+            <input
+              value={selectedEntity.owner || ""}
+              onChange={(e) => applyMutation(updateEntityMeta, selectedEntityId, "owner", e.target.value)}
+              className="w-full bg-bg-primary border border-border-primary rounded-md px-2 py-1.5 text-xs text-text-primary placeholder:text-text-muted outline-none focus:border-accent-blue"
+              placeholder={fallbackOwner || "team@company.com"}
+            />
+          ) : (
+            <p className="text-xs text-text-secondary px-2 py-1.5 bg-bg-primary border border-border-primary rounded-md">
+              {selectedEntity.owner || fallbackOwner || <span className="text-text-muted italic">No owner</span>}
+            </p>
+          )}
           {fallbackOwner && !selectedEntity.owner && (
             <div className="text-[10px] text-text-muted mt-1">
               Using model owner fallback: <strong>{fallbackOwner}</strong>
@@ -215,12 +240,22 @@ export default function EntityPanel() {
             <Tag size={10} />
             Tags (comma separated)
           </label>
-          <input
-            value={(selectedEntity.tags || []).join(", ")}
-            onChange={(e) => applyMutation(updateEntityTags, selectedEntityId, e.target.value)}
-            className="w-full bg-bg-primary border border-border-primary rounded-md px-2 py-1.5 text-xs text-text-primary placeholder:text-text-muted outline-none focus:border-accent-blue"
-            placeholder="PII, GOLD, ..."
-          />
+          {canEdit ? (
+            <input
+              value={(selectedEntity.tags || []).join(", ")}
+              onChange={(e) => applyMutation(updateEntityTags, selectedEntityId, e.target.value)}
+              className="w-full bg-bg-primary border border-border-primary rounded-md px-2 py-1.5 text-xs text-text-primary placeholder:text-text-muted outline-none focus:border-accent-blue"
+              placeholder="PII, GOLD, ..."
+            />
+          ) : (
+            <div className="flex flex-wrap gap-1">
+              {(selectedEntity.tags || []).length > 0
+                ? (selectedEntity.tags || []).map((t) => (
+                    <span key={t} className="px-1.5 py-0.5 rounded bg-bg-secondary border border-border-primary text-[10px] text-text-secondary">{t}</span>
+                  ))
+                : <span className="text-xs text-text-muted italic">No tags</span>}
+            </div>
+          )}
         </div>
 
         {/* v2 Entity Properties */}
@@ -265,13 +300,15 @@ export default function EntityPanel() {
               <Key size={10} />
               Fields ({(selectedEntity.fields || []).length})
             </label>
-            <button
-              onClick={() => applyMutation(addField, selectedEntityId)}
-              className="flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] text-accent-blue hover:bg-accent-blue/10 transition-colors"
-            >
-              <Plus size={10} />
-              Add Column
-            </button>
+            {canEdit && (
+              <button
+                onClick={() => applyMutation(addField, selectedEntityId)}
+                className="flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] text-accent-blue hover:bg-accent-blue/10 transition-colors"
+              >
+                <Plus size={10} />
+                Add Column
+              </button>
+            )}
           </div>
 
           <div className="border border-border-primary rounded-md overflow-hidden">
@@ -293,35 +330,40 @@ export default function EntityPanel() {
                     <td className="px-2 py-1">
                       <div className="flex items-center gap-1">
                         <code className="text-text-primary font-mono">{field.name}</code>
-                        <button
-                          onClick={() => handleRenameField(field.name)}
-                          className="p-0.5 rounded hover:bg-bg-hover text-text-muted hover:text-text-primary transition-colors"
-                          title="Rename column"
-                        >
-                          <Pencil size={10} />
-                        </button>
+                        {canEdit && (
+                          <button
+                            onClick={() => handleRenameField(field.name)}
+                            className="p-0.5 rounded hover:bg-bg-hover text-text-muted hover:text-text-primary transition-colors"
+                            title="Rename column"
+                          >
+                            <Pencil size={10} />
+                          </button>
+                        )}
                       </div>
                     </td>
                     <td className="px-2 py-1">
                       <input
                         value={field.type || ""}
-                        onChange={(e) => applyMutation(updateFieldProperty, selectedEntityId, field.name, "type", e.target.value)}
-                        className="w-full bg-transparent border-b border-transparent hover:border-border-primary focus:border-accent-blue text-text-secondary font-mono outline-none text-[11px] py-0.5"
+                        onChange={canEdit ? (e) => applyMutation(updateFieldProperty, selectedEntityId, field.name, "type", e.target.value) : undefined}
+                        readOnly={!canEdit}
+                        className="w-full bg-transparent border-b border-transparent hover:border-border-primary focus:border-accent-blue text-text-secondary font-mono outline-none text-[11px] py-0.5 disabled:cursor-default"
                       />
                     </td>
                     <td className="px-2 py-1">
                       <input
                         value={field.description || ""}
-                        onChange={(e) => applyMutation(updateFieldProperty, selectedEntityId, field.name, "description", e.target.value)}
+                        onChange={canEdit ? (e) => applyMutation(updateFieldProperty, selectedEntityId, field.name, "description", e.target.value) : undefined}
+                        readOnly={!canEdit}
                         className="w-full bg-transparent border-b border-transparent hover:border-border-primary focus:border-accent-blue text-text-secondary outline-none text-[11px] py-0.5"
-                        placeholder="Column business logic..."
+                        placeholder={canEdit ? "Column business logic..." : ""}
                       />
                     </td>
                     <td className="text-center px-1 py-1">
                       <input
                         type="checkbox"
                         checked={Boolean(field.primary_key)}
-                        onChange={(e) => applyMutation(updateFieldProperty, selectedEntityId, field.name, "primary_key", e.target.checked)}
+                        onChange={canEdit ? (e) => applyMutation(updateFieldProperty, selectedEntityId, field.name, "primary_key", e.target.checked) : undefined}
+                        readOnly={!canEdit}
                         className="w-3 h-3 rounded accent-yellow-500"
                       />
                     </td>
@@ -329,7 +371,8 @@ export default function EntityPanel() {
                       <input
                         type="checkbox"
                         checked={Boolean(field.unique)}
-                        onChange={(e) => applyMutation(updateFieldProperty, selectedEntityId, field.name, "unique", e.target.checked)}
+                        onChange={canEdit ? (e) => applyMutation(updateFieldProperty, selectedEntityId, field.name, "unique", e.target.checked) : undefined}
+                        readOnly={!canEdit}
                         className="w-3 h-3 rounded accent-cyan-500"
                       />
                     </td>
@@ -337,17 +380,20 @@ export default function EntityPanel() {
                       <input
                         type="checkbox"
                         checked={field.nullable === false}
-                        onChange={(e) => applyMutation(updateFieldProperty, selectedEntityId, field.name, "nullable", !e.target.checked)}
+                        onChange={canEdit ? (e) => applyMutation(updateFieldProperty, selectedEntityId, field.name, "nullable", !e.target.checked) : undefined}
+                        readOnly={!canEdit}
                         className="w-3 h-3 rounded accent-red-500"
                       />
                     </td>
                     <td className="px-1 py-1">
-                      <button
-                        onClick={() => applyMutation(removeField, selectedEntityId, field.name)}
-                        className="p-0.5 rounded hover:bg-red-50 text-text-muted hover:text-red-500 transition-colors"
-                      >
-                        <Trash2 size={10} />
-                      </button>
+                      {canEdit && (
+                        <button
+                          onClick={() => applyMutation(removeField, selectedEntityId, field.name)}
+                          className="p-0.5 rounded hover:bg-red-50 text-text-muted hover:text-red-500 transition-colors"
+                        >
+                          <Trash2 size={10} />
+                        </button>
+                      )}
                     </td>
                   </tr>
                 ))}

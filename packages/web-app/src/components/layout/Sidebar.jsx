@@ -27,13 +27,15 @@ import {
 import useWorkspaceStore from "../../stores/workspaceStore";
 import useDiagramStore from "../../stores/diagramStore";
 import useUiStore from "../../stores/uiStore";
+import useAuthStore from "../../stores/authStore";
 import EntityListPanel from "../panels/EntityListPanel";
 import ConnectorLogo from "../icons/ConnectorLogo";
+import BookmarksPanel from "../viewer/BookmarksPanel";
 import { fetchConnections, cloneGitRepo } from "../../lib/api";
 
-const ACTIVITIES = [
+const ALL_ACTIVITIES = [
   { id: "model",    label: "Model",    icon: LayoutDashboard, group: "top" },
-  { id: "connect",  label: "Connect",  icon: Plug,            group: "top" },
+  { id: "connect",  label: "Connect",  icon: Plug,            group: "top",    adminOnly: true },
   { id: "settings", label: "Settings", icon: Settings,        group: "bottom" },
 ];
 
@@ -143,6 +145,8 @@ function ProjectSection() {
     offlineMode,
   } = useWorkspaceStore();
   const { openModal, addToast } = useUiStore();
+  const { canEdit: canEditFn } = useAuthStore();
+  const canEdit = canEditFn();
   const [expanded, setExpanded] = useState(true);
   const [dropProjectId, setDropProjectId] = useState(null);
   const [projectConnectors, setProjectConnectors] = useState({});
@@ -232,13 +236,15 @@ function ProjectSection() {
           <FolderOpen size={12} />
           Projects
         </button>
-        <button
-          onClick={(e) => { e.stopPropagation(); openModal("addProject"); }}
-          className="ml-auto p-0.5 rounded hover:bg-bg-hover text-text-muted hover:text-text-accent transition-colors"
-          title="Add project folder"
-        >
-          <FolderPlus size={12} />
-        </button>
+        {canEdit && (
+          <button
+            onClick={(e) => { e.stopPropagation(); openModal("addProject"); }}
+            className="ml-auto p-0.5 rounded hover:bg-bg-hover text-text-muted hover:text-text-accent transition-colors"
+            title="Add project folder"
+          >
+            <FolderPlus size={12} />
+          </button>
+        )}
       </div>
 
       {expanded && (
@@ -279,20 +285,24 @@ function ProjectSection() {
                       Drop YAML
                     </span>
                   )}
-                  <button
-                    onClick={(e) => { e.stopPropagation(); openModal("editProject", { project }); }}
-                    className="opacity-0 group-hover:opacity-100 p-0.5 rounded hover:bg-bg-hover text-text-muted hover:text-text-accent transition-all"
-                    title="Edit project"
-                  >
-                    <Pencil size={11} />
-                  </button>
-                  <button
-                    onClick={(e) => { e.stopPropagation(); removeProjectFolder(project.id); }}
-                    className="opacity-0 group-hover:opacity-100 p-0.5 rounded hover:bg-bg-hover text-text-muted hover:text-status-error transition-all"
-                    title="Remove project"
-                  >
-                    <Trash2 size={11} />
-                  </button>
+                  {canEdit && (
+                    <button
+                      onClick={(e) => { e.stopPropagation(); openModal("editProject", { project }); }}
+                      className="opacity-0 group-hover:opacity-100 p-0.5 rounded hover:bg-bg-hover text-text-muted hover:text-text-accent transition-all"
+                      title="Edit project"
+                    >
+                      <Pencil size={11} />
+                    </button>
+                  )}
+                  {canEdit && (
+                    <button
+                      onClick={(e) => { e.stopPropagation(); removeProjectFolder(project.id); }}
+                      className="opacity-0 group-hover:opacity-100 p-0.5 rounded hover:bg-bg-hover text-text-muted hover:text-status-error transition-all"
+                      title="Remove project"
+                    >
+                      <Trash2 size={11} />
+                    </button>
+                  )}
                 </div>
                 {/* GitHub / branch chips — always visible */}
                 <div className="flex items-center gap-1 ml-5 flex-wrap">
@@ -304,7 +314,7 @@ function ProjectSection() {
                       <svg viewBox="0 0 16 16" width="8" height="8" fill="currentColor" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
                       {ghShort}
                     </span>
-                  ) : (
+                  ) : canEdit ? (
                     <button
                       onClick={(e) => { e.stopPropagation(); openModal("editProject", { project }); }}
                       className="flex items-center gap-0.5 text-[9px] px-1 py-0 rounded border border-dashed border-border-secondary text-text-muted hover:text-accent-blue hover:border-accent-blue/50 transition-colors"
@@ -313,7 +323,7 @@ function ProjectSection() {
                       <svg viewBox="0 0 16 16" width="8" height="8" fill="currentColor" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
                       Link GitHub
                     </button>
-                  )}
+                  ) : null}
                   {project.defaultBranch && (
                     <span className="flex items-center gap-0.5 text-[9px] px-1 py-0 rounded border font-mono bg-bg-tertiary border-border-primary text-accent-green">
                       <GitBranch size={8} />
@@ -436,6 +446,8 @@ function FileSection() {
     importModelFilesToProject,
   } = useWorkspaceStore();
   const { addToast } = useUiStore();
+  const { canEdit: canEditFn } = useAuthStore();
+  const canEdit = canEditFn();
   const [expanded, setExpanded] = useState(true);
   const [dropActive, setDropActive] = useState(false);
 
@@ -480,13 +492,15 @@ function FileSection() {
           Models
           <span className="ml-1 text-[9px] font-normal normal-case">{files.length}</span>
         </button>
-        <button
-          onClick={(e) => { e.stopPropagation(); createNewFile("new.model.yaml"); }}
-          className="ml-auto p-0.5 rounded hover:bg-bg-hover text-text-muted hover:text-text-accent transition-colors"
-          title="New model file"
-        >
-          <Plus size={12} />
-        </button>
+        {canEdit && (
+          <button
+            onClick={(e) => { e.stopPropagation(); createNewFile("new.model.yaml"); }}
+            className="ml-auto p-0.5 rounded hover:bg-bg-hover text-text-muted hover:text-text-accent transition-colors"
+            title="New model file"
+          >
+            <Plus size={12} />
+          </button>
+        )}
       </div>
 
       {expanded && (
@@ -862,9 +876,12 @@ function SettingsThemeToggle() {
 
 // ── Activity Bar (thin icon rail on the far left) ──
 function ActivityBar({ activeActivity, onSelect, onHome }) {
+  const { canEdit: canEditFn } = useAuthStore();
+  const canEdit = canEditFn();
+  const ACTIVITIES = ALL_ACTIVITIES.filter((a) => !a.adminOnly || canEdit);
   const topItems = ACTIVITIES.filter((a) => a.group === "top");
   const bottomItems = ACTIVITIES.filter((a) => a.group === "bottom");
-  const homeActive = activeActivity === "search";
+  const homeActive = activeActivity === "search" || activeActivity === "home";
 
   return (
     <div className="w-14 min-w-[56px] bg-bg-secondary border-r border-border-primary flex flex-col items-center py-2 shrink-0">
@@ -936,6 +953,9 @@ function ActivityBar({ activeActivity, onSelect, onHome }) {
 
 // ── Side Panel (contextual content based on active activity) ──
 function SidePanel({ activity }) {
+  const { canEdit: canEditFn } = useAuthStore();
+  const canEdit = canEditFn();
+  const ACTIVITIES = ALL_ACTIVITIES.filter((a) => !a.adminOnly || canEdit);
   const panelTitle = ACTIVITIES.find((a) => a.id === activity)?.label || "Panel";
   const { setSidePanelOpen } = useUiStore();
 
@@ -960,6 +980,7 @@ function SidePanel({ activity }) {
             <ProjectSection />
             <FileSection />
             <EntitySection />
+            {!canEdit && <BookmarksPanel />}
           </>
         )}
         {activity === "connect" && (
@@ -1023,8 +1044,10 @@ export default function Sidebar() {
     }
   };
 
+  const { canEdit: canEditFn } = useAuthStore();
   const handleHomeSelect = () => {
-    setActiveActivity("search");
+    // Viewers get the welcome/landing page; admins go straight to global search
+    setActiveActivity(canEditFn() ? "search" : "home");
     setSidePanelOpen(false);
   };
 

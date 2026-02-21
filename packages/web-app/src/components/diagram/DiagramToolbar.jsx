@@ -22,6 +22,7 @@ import {
 } from "lucide-react";
 import useDiagramStore from "../../stores/diagramStore";
 import useUiStore from "../../stores/uiStore";
+import useAuthStore from "../../stores/authStore";
 import { SCHEMA_COLORS } from "../../lib/schemaColors";
 
 const CARDINALITY_LEGEND = [
@@ -99,6 +100,7 @@ export default function DiagramToolbar() {
   } = useDiagramStore();
 
   const { diagramFullscreen, toggleDiagramFullscreen } = useUiStore();
+  const { canEdit } = useAuthStore();
   const [showLegend, setShowLegend] = useState(false);
   const [showSchemaLegend, setShowSchemaLegend] = useState(false);
 
@@ -265,10 +267,12 @@ export default function DiagramToolbar() {
         {/* Spacer */}
         <div className="flex-1" />
 
-        {/* Note */}
-        <ToolbarButton onClick={() => { if (window.__dlAddAnnotation) window.__dlAddAnnotation({ x: Math.random() * 400 + 50, y: Math.random() * 200 + 50 }); }} title="Add note">
-          <StickyNote size={10} />
-        </ToolbarButton>
+        {/* Note — admin only */}
+        {canEdit() && (
+          <ToolbarButton onClick={() => { if (window.__dlAddAnnotation) window.__dlAddAnnotation({ x: Math.random() * 400 + 50, y: Math.random() * 200 + 50 }); }} title="Add note">
+            <StickyNote size={10} />
+          </ToolbarButton>
+        )}
 
         {/* Export */}
         <ToolbarButton

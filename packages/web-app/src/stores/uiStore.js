@@ -39,9 +39,13 @@ const useUiStore = create((set, get) => ({
   // ── Connector deep-link (sidebar → ConnectorsPanel pre-selection) ──
   pendingConnectorType: null,
 
+  // ── Pending search query (ViewerWelcome → GlobalSearchPanel handoff) ──
+  pendingSearchQuery: "",
+
   // ── Actions ──
   setActiveActivity: (activity) => set({ activeActivity: activity }),
   setPendingConnectorType: (type) => set({ pendingConnectorType: type }),
+  setPendingSearchQuery: (q) => set({ pendingSearchQuery: q }),
 
   toggleTheme: () => set((s) => {
     const next = s.theme === "light" ? "dark" : "light";

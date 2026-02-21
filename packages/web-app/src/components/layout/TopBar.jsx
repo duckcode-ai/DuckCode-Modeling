@@ -13,10 +13,13 @@ import {
   ChevronRight,
   FileCode2,
   LifeBuoy,
+  Download,
 } from "lucide-react";
 import useWorkspaceStore from "../../stores/workspaceStore";
 import useDiagramStore from "../../stores/diagramStore";
 import useUiStore from "../../stores/uiStore";
+import useAuthStore from "../../stores/authStore";
+import UserMenu from "../auth/UserMenu";
 
 const ACTIVITY_LABELS = {
   model:    { label: "Model",    icon: LayoutDashboard, color: "text-accent-blue" },
@@ -40,6 +43,20 @@ export default function TopBar() {
 
   const { model } = useDiagramStore();
   const { theme, toggleTheme, activeActivity } = useUiStore();
+  const { canEdit } = useAuthStore();
+
+  const handleQuickExport = () => {
+    const el = document.querySelector(".react-flow");
+    if (!el) return;
+    import("html-to-image").then(({ toPng }) => {
+      toPng(el, { backgroundColor: "#ffffff", pixelRatio: 2 }).then((dataUrl) => {
+        const a = document.createElement("a");
+        a.href = dataUrl;
+        a.download = "duckcodemodeling-diagram.png";
+        a.click();
+      });
+    });
+  };
   const modelMeta = model?.model || {};
   const activityInfo = ACTIVITY_LABELS[activeActivity] || ACTIVITY_LABELS.model;
   const ActivityIcon = activityInfo.icon;
@@ -121,7 +138,7 @@ export default function TopBar() {
             </div>
           )}
 
-          {isDirty && (
+          {canEdit() && isDirty && (
             <span className="text-[10px] text-accent-yellow flex items-center gap-0.5">
               <AlertTriangle size={10} />
               Unsaved
@@ -146,14 +163,26 @@ export default function TopBar() {
           >
             {theme === "light" ? <Moon size={13} /> : <Sun size={13} />}
           </button>
-          <button
-            onClick={saveCurrentFile}
-            disabled={!isDirty || !activeFile}
-            className="flex items-center gap-1 px-2 py-1 rounded-md text-[11px] font-medium bg-accent-blue text-white hover:bg-accent-blue/80 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
-          >
-            <Save size={11} />
-            Save
-          </button>
+          {canEdit() ? (
+            <button
+              onClick={saveCurrentFile}
+              disabled={!isDirty || !activeFile}
+              className="flex items-center gap-1 px-2 py-1 rounded-md text-[11px] font-medium bg-accent-blue text-white hover:bg-accent-blue/80 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+            >
+              <Save size={11} />
+              Save
+            </button>
+          ) : (
+            <button
+              onClick={handleQuickExport}
+              className="flex items-center gap-1 px-2 py-1 rounded-md text-[11px] font-medium border border-border-primary text-text-secondary hover:bg-bg-hover transition-colors"
+              title="Export diagram as PNG"
+            >
+              <Download size={11} />
+              Export
+            </button>
+          )}
+          <UserMenu />
         </div>
       </div>
     </div>

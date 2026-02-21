@@ -1,4 +1,4 @@
-import React, { useCallback, useDeferredValue, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Search,
   Sparkles,
@@ -15,7 +15,9 @@ import {
   Command,
 } from "lucide-react";
 import useDiagramStore from "../../stores/diagramStore";
+import useWorkspaceStore from "../../stores/workspaceStore";
 import useUiStore from "../../stores/uiStore";
+import { runModelChecks } from "../../modelQuality";
 import {
   buildSearchIndex,
   rankSearchResults,
@@ -54,20 +56,54 @@ function highlight(text, query) {
 
 export default function GlobalSearchPanel() {
   const {
-    model,
-    edges,
+    model: diagramModel,
+    edges: diagramEdges,
     selectEntity,
     setCenterEntityId,
   } = useDiagramStore();
+  const { activeFileContent, activeFile, projectFiles, openFile, offlineMode, localDocuments } = useWorkspaceStore();
+
+  // Parse model from activeFileContent if diagramStore.model is not yet populated
+  // (happens when viewer navigates to search without opening the model view first)
+  const parsedModel = useMemo(() => {
+    if (diagramModel) return diagramModel;
+    if (!activeFileContent) return null;
+    const check = runModelChecks(activeFileContent);
+    return check.model || null;
+  }, [diagramModel, activeFileContent]);
+
+  const model = parsedModel;
+  const edges = diagramEdges;
   const {
     setActiveActivity,
     setBottomPanelTab,
     addToast,
+    pendingSearchQuery,
+    setPendingSearchQuery,
   } = useUiStore();
 
   const [query, setQuery] = useState("");
+  const inputRef = useRef(null);
+
+  // If no file is open yet, auto-open the first available file so the search index is populated
+  useEffect(() => {
+    if (!activeFile) {
+      const files = offlineMode ? localDocuments : projectFiles;
+      if (files.length > 0) {
+        openFile(files[0]);
+      }
+    }
+  }, []);
+
+  // Consume any pending query passed from ViewerWelcome
+  useEffect(() => {
+    if (pendingSearchQuery) {
+      setQuery(pendingSearchQuery);
+      setPendingSearchQuery("");
+    }
+    inputRef.current?.focus();
+  }, []);
   const [categoryFilter, setCategoryFilter] = useState("all");
-  const deferredQuery = useDeferredValue(query);
 
   const relCounts = useMemo(() => {
     const map = {};
@@ -84,8 +120,8 @@ export default function GlobalSearchPanel() {
   );
 
   const ranked = useMemo(
-    () => rankSearchResults(searchIndex, deferredQuery),
-    [searchIndex, deferredQuery]
+    () => rankSearchResults(searchIndex, query),
+    [searchIndex, query]
   );
 
   const categoryCounts = useMemo(() => {
@@ -102,12 +138,12 @@ export default function GlobalSearchPanel() {
   }, [ranked.results, categoryFilter]);
 
   const recommendations = useMemo(
-    () => buildSearchRecommendations(model, filteredResults, deferredQuery),
-    [model, filteredResults, deferredQuery]
+    () => buildSearchRecommendations(model, filteredResults, query),
+    [model, filteredResults, query]
   );
 
   const resultCount = filteredResults.length;
-  const hasQuery = deferredQuery.trim().length > 0;
+  const hasQuery = query.trim().length > 0;
 
   const openInModel = useCallback((item) => {
     if (item.entityName) {
@@ -167,6 +203,7 @@ export default function GlobalSearchPanel() {
             <div className="flex items-center gap-3 rounded-full border border-slate-200 bg-white px-5 py-3.5 shadow-[0_14px_40px_rgba(15,23,42,0.08)]">
               <Search size={18} className="text-slate-400 shrink-0" />
               <input
+                ref={inputRef}
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
                 placeholder="Search entities, columns, tags, descriptions, glossary..."

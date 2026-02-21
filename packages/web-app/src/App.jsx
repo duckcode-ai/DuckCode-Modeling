@@ -22,6 +22,9 @@ import KeyboardShortcutsPanel from "./components/panels/KeyboardShortcutsPanel";
 import useUiStore from "./stores/uiStore";
 import useWorkspaceStore from "./stores/workspaceStore";
 import useDiagramStore from "./stores/diagramStore";
+import useAuthStore from "./stores/authStore";
+import LoginPage from "./components/auth/LoginPage";
+import ViewerWelcome from "./components/viewer/ViewerWelcome";
 
 import {
   Columns3,
@@ -44,14 +47,14 @@ import {
 } from "lucide-react";
 import { fetchGitBranches, fetchGitRemote } from "./lib/api";
 
-const BOTTOM_TABS = [
-  { id: "properties", label: "Properties", icon: Columns3 },
-  { id: "validation", label: "Validation", icon: ShieldCheck },
-  { id: "diff", label: "Diff & Gate", icon: GitCompare },
-  { id: "impact", label: "Impact", icon: Activity },
+const ALL_BOTTOM_TABS = [
+  { id: "properties",  label: "Properties",  icon: Columns3 },
+  { id: "validation",  label: "Validation",  icon: ShieldCheck, adminOnly: true },
+  { id: "diff",        label: "Diff & Gate", icon: GitCompare,  adminOnly: true },
+  { id: "impact",      label: "Impact",      icon: Activity,    adminOnly: true },
   { id: "model-graph", label: "Model Graph", icon: Network },
-  { id: "dictionary", label: "Dictionary", icon: BookOpen },
-  { id: "history", label: "History", icon: Clock },
+  { id: "dictionary",  label: "Dictionary",  icon: BookOpen },
+  { id: "history",     label: "History",     icon: Clock },
 ];
 
 function AddProjectModal() {
@@ -577,19 +580,19 @@ function SearchView() {
 }
 
 // ── Primary content area for "model" activity (editor + diagram) ──
-function ModelView({ bottomPanelOpen, bottomPanelTab, setBottomPanelTab, toggleBottomPanel }) {
+function ModelView({ bottomPanelOpen, bottomPanelTab, setBottomPanelTab, toggleBottomPanel, bottomTabs, readOnly }) {
   return (
     <Allotment vertical style={{ height: "100%" }}>
       {/* Top: Editor + Diagram split */}
       <Allotment.Pane>
         <Allotment style={{ height: "100%" }}>
           {/* YAML Editor */}
-          <Allotment.Pane minSize={250} preferredSize={500}>
+          <Allotment.Pane minSize={readOnly ? 0 : 250} preferredSize={readOnly ? 180 : 500}>
             <div className="h-full flex flex-col bg-bg-surface">
               <div className="flex items-center px-3 py-1 border-b border-border-primary bg-bg-secondary/50">
                 <span className="text-[10px] text-text-muted uppercase tracking-wider font-semibold">YAML Editor</span>
               </div>
-              <YamlEditor />
+              <YamlEditor readOnly={readOnly} />
             </div>
           </Allotment.Pane>
 
@@ -608,7 +611,7 @@ function ModelView({ bottomPanelOpen, bottomPanelTab, setBottomPanelTab, toggleB
           <div className="h-full flex flex-col bg-bg-surface border-t border-border-primary">
             {/* Bottom panel tabs */}
             <div className="flex items-center border-b border-border-primary bg-bg-secondary/30 shrink-0 overflow-x-auto">
-              {BOTTOM_TABS.map(({ id, label, icon: Icon }) => (
+              {(bottomTabs || []).map(({ id, label, icon: Icon }) => (
                 <button
                   key={id}
                   onClick={() => setBottomPanelTab(id)}
@@ -643,9 +646,20 @@ function ModelView({ bottomPanelOpen, bottomPanelTab, setBottomPanelTab, toggleB
 
 export default function App() {
   const { activeModal, activeActivity, bottomPanelOpen, bottomPanelTab, setBottomPanelTab, toggleBottomPanel } = useUiStore();
-  const { error, clearError } = useWorkspaceStore();
+  const { error, clearError, loadProjects } = useWorkspaceStore();
   const { selectedEntityId } = useDiagramStore();
+  const { isAuthenticated, isLoading, restoreSession, canEdit, isViewer } = useAuthStore();
   const [showShortcuts, setShowShortcuts] = useState(false);
+
+  // Restore auth session on mount
+  useEffect(() => { restoreSession(); }, []);
+
+  // Load workspace whenever user becomes authenticated
+  useEffect(() => {
+    if (isAuthenticated) {
+      loadProjects();
+    }
+  }, [isAuthenticated]);
 
   // Initialize theme on mount
   useEffect(() => {
@@ -746,11 +760,32 @@ export default function App() {
     }
   }, [error, clearError]);
 
+  // Auth loading screen
+  if (isLoading) {
+    return (
+      <div className="h-screen flex items-center justify-center bg-slate-50">
+        <div className="flex flex-col items-center gap-3">
+          <div className="w-10 h-10 rounded-xl bg-blue-600 flex items-center justify-center">
+            <RefreshCw size={18} className="text-white animate-spin" />
+          </div>
+          <p className="text-sm text-slate-500">Loading…</p>
+        </div>
+      </div>
+    );
+  }
+
+  // Login gate
+  if (!isAuthenticated) return <LoginPage />;
+
+  // Role-based bottom tabs
+  const BOTTOM_TABS = ALL_BOTTOM_TABS.filter((t) => !t.adminOnly || canEdit());
+
   // Determine which primary view to show
   const showModelView = activeActivity === "model" || activeActivity === "settings";
   const showConnectView = activeActivity === "connect";
   const showImportView = activeActivity === "import";
   const showSearchView = activeActivity === "search";
+  const showViewerWelcome = activeActivity === "home";  // viewer landing page via logo click
 
   return (
     <div className="h-screen flex flex-col overflow-hidden bg-[linear-gradient(180deg,#f8fbff_0%,#ffffff_45%)]">
@@ -767,6 +802,7 @@ export default function App() {
           <div className="flex-1 min-h-0">
             {showConnectView && <ConnectView />}
             {showImportView && <ImportView />}
+            {showViewerWelcome && <ViewerWelcome />}
             {showSearchView && <SearchView />}
             {showModelView && (
               <ModelView
@@ -774,6 +810,8 @@ export default function App() {
                 bottomPanelTab={bottomPanelTab}
                 setBottomPanelTab={setBottomPanelTab}
                 toggleBottomPanel={toggleBottomPanel}
+                bottomTabs={BOTTOM_TABS}
+                readOnly={!canEdit()}
               />
             )}
           </div>

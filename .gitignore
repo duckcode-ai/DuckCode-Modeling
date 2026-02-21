@@ -24,6 +24,10 @@ packages/web-app/dist/
 # OS
 .DS_Store
 
+# Embedded workspace repos
+workspaces/
+
 # local secrets
 .secrets/
 .dm-credentials.json
+.dm-users.json

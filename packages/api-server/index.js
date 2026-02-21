@@ -6,6 +6,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync, unlinkSync, rmdirSy
 import { execFileSync } from "child_process";
 import { tmpdir } from "os";
 import { createRequire } from "module";
+import { createHash, randomBytes } from "crypto";
 const require = createRequire(import.meta.url);
 const yaml = require("js-yaml");
 
@@ -26,6 +27,56 @@ const REPO_ROOT = process.env.REPO_ROOT || join(process.cwd(), "../..");
 const PROJECTS_FILE = join(REPO_ROOT, ".dm-projects.json");
 const CONNECTIONS_FILE = join(REPO_ROOT, ".dm-connections.json");
 const CREDENTIALS_FILE = join(REPO_ROOT, ".dm-credentials.json");
+const USERS_FILE = join(REPO_ROOT, ".dm-users.json");
+
+// In-memory session store: token -> { userId, username, name, role, exp }
+const SESSIONS = new Map();
+
+function hashPassword(password, salt) {
+  return createHash("sha256").update(salt + password).digest("hex");
+}
+function generateToken() {
+  return randomBytes(32).toString("hex");
+}
+async function loadUsers() {
+  try {
+    if (existsSync(USERS_FILE)) {
+      const raw = await readFile(USERS_FILE, "utf-8");
+      return JSON.parse(raw).users || [];
+    }
+  } catch (_) {}
+  return [];
+}
+async function saveUsers(users) {
+  await writeFile(USERS_FILE, JSON.stringify({ users }, null, 2), "utf-8");
+}
+async function ensureDefaultUsers() {
+  if (existsSync(USERS_FILE)) return;
+  const s1 = randomBytes(16).toString("hex");
+  const s2 = randomBytes(16).toString("hex");
+  await saveUsers([
+    { id: "u1", username: "admin",  salt: s1, passwordHash: hashPassword("admin123",  s1), role: "admin",  name: "Admin"  },
+    { id: "u2", username: "viewer", salt: s2, passwordHash: hashPassword("viewer123", s2), role: "viewer", name: "Viewer" },
+  ]);
+  console.log("[duckcodemodeling] Default users created — admin/admin123 and viewer/viewer123");
+}
+function requireAuth(req, res, next) {
+  const token = req.headers["x-dm-token"];
+  const session = token && SESSIONS.get(token);
+  if (!session || session.exp < Date.now()) {
+    return res.status(401).json({ error: "Unauthorized — please log in" });
+  }
+  req.user = session;
+  next();
+}
+function requireAdmin(req, res, next) {
+  requireAuth(req, res, () => {
+    if (req.user.role !== "admin") {
+      return res.status(403).json({ error: "Admin access required" });
+    }
+    next();
+  });
+}
 const WEB_DIST = process.env.WEB_DIST || join(REPO_ROOT, "packages", "web-app", "dist");
 
 // Use venv Python if available, otherwise fall back to system python3
@@ -646,7 +697,7 @@ app.get("/api/projects", async (_req, res) => {
 });
 
 // Add a project folder
-app.post("/api/projects", async (req, res) => {
+app.post("/api/projects", requireAdmin, async (req, res) => {
   try {
     const {
       name,
@@ -691,7 +742,7 @@ app.post("/api/projects", async (req, res) => {
 });
 
 // Update an existing project folder
-app.put("/api/projects/:id", async (req, res) => {
+app.put("/api/projects/:id", requireAdmin, async (req, res) => {
   try {
     const {
       name,
@@ -748,7 +799,7 @@ app.put("/api/projects/:id", async (req, res) => {
 });
 
 // Remove a project
-app.delete("/api/projects/:id", async (req, res) => {
+app.delete("/api/projects/:id", requireAdmin, async (req, res) => {
   try {
     let projects = await loadProjects();
     projects = projects.filter((p) => p.id !== req.params.id);
@@ -863,7 +914,7 @@ app.get("/api/git/diff", async (req, res) => {
 });
 
 // Git: commit changes (optionally only selected paths)
-app.post("/api/git/commit", express.json(), async (req, res) => {
+app.post("/api/git/commit", requireAdmin, express.json(), async (req, res) => {
   try {
     const { projectId, message, paths } = req.body || {};
     const normalizedProjectId = String(projectId || "").trim();
@@ -911,7 +962,7 @@ app.post("/api/git/commit", express.json(), async (req, res) => {
 });
 
 // Git: stage files
-app.post("/api/git/stage", express.json(), async (req, res) => {
+app.post("/api/git/stage", requireAdmin, express.json(), async (req, res) => {
   try {
     const { projectId, paths } = req.body || {};
     const normalizedProjectId = String(projectId || "").trim();
@@ -940,7 +991,7 @@ app.post("/api/git/stage", express.json(), async (req, res) => {
 });
 
 // Git: unstage files
-app.post("/api/git/unstage", express.json(), async (req, res) => {
+app.post("/api/git/unstage", requireAdmin, express.json(), async (req, res) => {
   try {
     const { projectId, paths } = req.body || {};
     const normalizedProjectId = String(projectId || "").trim();
@@ -1046,7 +1097,7 @@ app.get("/api/git/remote", async (req, res) => {
 });
 
 // Git: clone or pull a GitHub/GitLab repo and register as a project
-app.post("/api/git/clone", async (req, res) => {
+app.post("/api/git/clone", requireAdmin, async (req, res) => {
   try {
     const { repoUrl, branch = "main", projectName, token = "" } = req.body || {};
     if (!repoUrl || !String(repoUrl).trim()) {
@@ -1127,7 +1178,7 @@ app.post("/api/git/clone", async (req, res) => {
 });
 
 // Git: create or checkout branch
-app.post("/api/git/branch/create", express.json(), async (req, res) => {
+app.post("/api/git/branch/create", requireAdmin, express.json(), async (req, res) => {
   try {
     const { projectId, branch, from } = req.body || {};
     const normalizedProjectId = String(projectId || "").trim();
@@ -1179,7 +1230,7 @@ app.post("/api/git/branch/create", express.json(), async (req, res) => {
 });
 
 // Git: push current branch (or provided branch)
-app.post("/api/git/push", express.json(), async (req, res) => {
+app.post("/api/git/push", requireAdmin, express.json(), async (req, res) => {
   try {
     const { projectId, remote = "origin", branch, set_upstream = true } = req.body || {};
     const normalizedProjectId = String(projectId || "").trim();
@@ -1228,7 +1279,7 @@ app.post("/api/git/push", express.json(), async (req, res) => {
 });
 
 // Git: pull (fast-forward only by default)
-app.post("/api/git/pull", express.json(), async (req, res) => {
+app.post("/api/git/pull", requireAdmin, express.json(), async (req, res) => {
   try {
     const { projectId, remote = "origin", branch, ff_only = true } = req.body || {};
     const normalizedProjectId = String(projectId || "").trim();
@@ -1282,7 +1333,7 @@ app.post("/api/git/pull", express.json(), async (req, res) => {
 });
 
 // GitHub: create pull request for current branch
-app.post("/api/git/github/pr", express.json({ limit: "1mb" }), async (req, res) => {
+app.post("/api/git/github/pr", requireAdmin, express.json({ limit: "1mb" }), async (req, res) => {
   try {
     const {
       projectId,
@@ -1441,7 +1492,7 @@ app.get("/api/files", async (req, res) => {
 });
 
 // Write/update a file
-app.put("/api/files", async (req, res) => {
+app.put("/api/files", requireAdmin, async (req, res) => {
   try {
     const { path: filePath, content } = req.body;
     if (!filePath || typeof content !== "string") {
@@ -1466,7 +1517,7 @@ app.put("/api/files", async (req, res) => {
 });
 
 // Create a new file in a project
-app.post("/api/projects/:id/files", async (req, res) => {
+app.post("/api/projects/:id/files", requireAdmin, async (req, res) => {
   try {
     const projects = await loadProjects();
     const project = projects.find((p) => p.id === req.params.id);
@@ -1510,7 +1561,7 @@ app.post("/api/projects/:id/files", async (req, res) => {
 });
 
 // Move or copy an existing model/policy file into another project
-app.post("/api/projects/:id/move-file", async (req, res) => {
+app.post("/api/projects/:id/move-file", requireAdmin, async (req, res) => {
   try {
     const targetProjectId = req.params.id;
     const { sourcePath, mode = "move" } = req.body || {};
@@ -1609,7 +1660,7 @@ app.get("/api/connections", async (_req, res) => {
 });
 
 // Manually save/update a connector profile
-app.post("/api/connections", async (req, res) => {
+app.post("/api/connections", requireAdmin, async (req, res) => {
   try {
     const { connector, connection_name, ...params } = req.body || {};
     if (!connector) {
@@ -1747,7 +1798,7 @@ app.get("/api/projects/:id/model-graph", async (req, res) => {
 });
 
 // Import schema files (SQL, DBML, Spark Schema)
-app.post("/api/import", express.json({ limit: "10mb" }), async (req, res) => {
+app.post("/api/import", requireAdmin, express.json({ limit: "10mb" }), async (req, res) => {
   try {
     const { format, content, filename, modelName } = req.body;
     if (!format || !content) {
@@ -1840,7 +1891,7 @@ app.post("/api/import", express.json({ limit: "10mb" }), async (req, res) => {
 });
 
 // Forward engineering: generate SQL from model YAML
-app.post("/api/forward/generate-sql", express.json(), async (req, res) => {
+app.post("/api/forward/generate-sql", requireAdmin, express.json(), async (req, res) => {
   try {
     const { model_path, dialect = "postgres", out } = req.body || {};
     if (!model_path) {
@@ -1902,7 +1953,7 @@ app.post("/api/forward/completeness", express.json(), async (req, res) => {
 });
 
 // Forward engineering: generate migration SQL from old/new model YAML
-app.post("/api/forward/migrate", express.json(), async (req, res) => {
+app.post("/api/forward/migrate", requireAdmin, express.json(), async (req, res) => {
   try {
     const { old_model, new_model, dialect = "postgres", out } = req.body || {};
     if (!old_model || !new_model) {
@@ -1929,7 +1980,7 @@ app.post("/api/forward/migrate", express.json(), async (req, res) => {
 });
 
 // dbt round-trip sync: merge DuckCode metadata into an existing dbt schema.yml
-app.post("/api/forward/dbt-sync", express.json({ limit: "5mb" }), async (req, res) => {
+app.post("/api/forward/dbt-sync", requireAdmin, express.json({ limit: "5mb" }), async (req, res) => {
   try {
     const { model_content, dbt_schema_content, model_path, dbt_schema_path, write_back } = req.body || {};
 
@@ -2179,7 +2230,7 @@ app.get("/api/connectors", (req, res) => {
 });
 
 // Scan a local dbt repo path and return dbt YAML file candidates for import
-app.post("/api/connectors/dbt-repo/scan", express.json(), async (req, res) => {
+app.post("/api/connectors/dbt-repo/scan", requireAdmin, express.json(), async (req, res) => {
   try {
     const repoPath = String(req.body?.repo_path || "").trim();
     if (!repoPath) {
@@ -2519,6 +2570,98 @@ if (existsSync(WEB_DIST)) {
     res.sendFile(join(WEB_DIST, "index.html"));
   });
 }
+
+// ── Auth routes ──────────────────────────────────────────────────────────────
+
+app.post("/api/auth/login", async (req, res) => {
+  try {
+    const { username, password } = req.body || {};
+    if (!username || !password) return res.status(400).json({ error: "username and password required" });
+    const users = await loadUsers();
+    const user = users.find((u) => u.username === String(username).trim());
+    if (!user || hashPassword(String(password), user.salt) !== user.passwordHash) {
+      return res.status(401).json({ error: "Invalid username or password" });
+    }
+    const token = generateToken();
+    SESSIONS.set(token, { userId: user.id, username: user.username, name: user.name, role: user.role, exp: Date.now() + 86400000 });
+    res.json({ token, user: { id: user.id, username: user.username, name: user.name, role: user.role } });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get("/api/auth/me", requireAuth, (req, res) => {
+  res.json({ user: { id: req.user.userId, username: req.user.username, name: req.user.name, role: req.user.role } });
+});
+
+app.post("/api/auth/logout", requireAuth, (req, res) => {
+  SESSIONS.delete(req.headers["x-dm-token"]);
+  res.json({ ok: true });
+});
+
+app.get("/api/auth/users", requireAdmin, async (req, res) => {
+  try {
+    const users = await loadUsers();
+    res.json({ users: users.map((u) => ({ id: u.id, username: u.username, name: u.name, role: u.role })) });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post("/api/auth/users", requireAdmin, async (req, res) => {
+  try {
+    const { username, password, name, role } = req.body || {};
+    if (!username || !password || !["admin", "viewer"].includes(role)) {
+      return res.status(400).json({ error: "username, password, and role (admin|viewer) required" });
+    }
+    const users = await loadUsers();
+    if (users.find((u) => u.username === username)) {
+      return res.status(409).json({ error: "Username already exists" });
+    }
+    const salt = randomBytes(16).toString("hex");
+    const newUser = { id: `u${Date.now()}`, username, salt, passwordHash: hashPassword(password, salt), role, name: name || username };
+    users.push(newUser);
+    await saveUsers(users);
+    res.json({ user: { id: newUser.id, username: newUser.username, name: newUser.name, role: newUser.role } });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.put("/api/auth/users/:id", requireAdmin, async (req, res) => {
+  try {
+    const { name, role, password } = req.body || {};
+    const users = await loadUsers();
+    const idx = users.findIndex((u) => u.id === req.params.id);
+    if (idx < 0) return res.status(404).json({ error: "User not found" });
+    if (name) users[idx].name = name;
+    if (role && ["admin", "viewer"].includes(role)) users[idx].role = role;
+    if (password) {
+      const salt = randomBytes(16).toString("hex");
+      users[idx].salt = salt;
+      users[idx].passwordHash = hashPassword(password, salt);
+    }
+    await saveUsers(users);
+    res.json({ user: { id: users[idx].id, username: users[idx].username, name: users[idx].name, role: users[idx].role } });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.delete("/api/auth/users/:id", requireAdmin, async (req, res) => {
+  try {
+    let users = await loadUsers();
+    users = users.filter((u) => u.id !== req.params.id);
+    await saveUsers(users);
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+
+ensureDefaultUsers().catch(console.error);
 
 app.listen(PORT, () => {
   console.log(`[duckcodemodeling] Local file server running on http://localhost:${PORT}`);
