@@ -418,7 +418,16 @@ export default function ConnectorsPanel() {
     loadProjects,
     selectProject,
   } = useWorkspaceStore();
-  const { addToast, setBottomPanelTab } = useUiStore();
+  const { addToast, setBottomPanelTab, pendingConnectorType, setPendingConnectorType } = useUiStore();
+
+  // Deep-link from sidebar connector click
+  useEffect(() => {
+    if (pendingConnectorType) {
+      setSelectedConnector(pendingConnectorType);
+      setStep(0);
+      setPendingConnectorType(null);
+    }
+  }, [pendingConnectorType]);
 
   const refreshSavedConnections = useCallback(async () => {
     try {

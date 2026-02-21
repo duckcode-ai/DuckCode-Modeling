@@ -2,7 +2,7 @@ import express from "express";
 import cors from "cors";
 import { readdir, readFile, writeFile, mkdir, stat, rename, copyFile, unlink as unlinkFile } from "fs/promises";
 import { join, relative, extname, basename, resolve, isAbsolute, dirname } from "path";
-import { existsSync, mkdirSync, readFileSync, writeFileSync, unlinkSync, rmdirSync } from "fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync, unlinkSync, rmdirSync, rmSync } from "fs";
 import { execFileSync } from "child_process";
 import { tmpdir } from "os";
 import { createRequire } from "module";
@@ -25,6 +25,7 @@ app.use((req, _res, next) => {
 const REPO_ROOT = process.env.REPO_ROOT || join(process.cwd(), "../..");
 const PROJECTS_FILE = join(REPO_ROOT, ".dm-projects.json");
 const CONNECTIONS_FILE = join(REPO_ROOT, ".dm-connections.json");
+const CREDENTIALS_FILE = join(REPO_ROOT, ".dm-credentials.json");
 const WEB_DIST = process.env.WEB_DIST || join(REPO_ROOT, "packages", "web-app", "dist");
 
 // Use venv Python if available, otherwise fall back to system python3
@@ -76,6 +77,47 @@ async function loadProjects() {
 
 async function saveProjects(projects) {
   await writeFile(PROJECTS_FILE, JSON.stringify(projects, null, 2), "utf-8");
+}
+
+// Credentials store — kept in a separate file, never committed
+async function loadCredentials() {
+  try {
+    if (existsSync(CREDENTIALS_FILE)) {
+      const raw = await readFile(CREDENTIALS_FILE, "utf-8");
+      return JSON.parse(raw);
+    }
+  } catch (_) {}
+  return {};
+}
+async function saveCredentials(creds) {
+  await writeFile(CREDENTIALS_FILE, JSON.stringify(creds, null, 2), "utf-8");
+  // Auto-add to .gitignore so it is never accidentally committed
+  const gitignorePath = join(REPO_ROOT, ".gitignore");
+  try {
+    const existing = existsSync(gitignorePath) ? readFileSync(gitignorePath, "utf-8") : "";
+    if (!existing.includes(".dm-credentials.json")) {
+      writeFileSync(gitignorePath, existing + (existing.endsWith("\n") ? "" : "\n") + ".dm-credentials.json\n", "utf-8");
+    }
+  } catch (_) {}
+}
+
+// Build an authenticated clone URL by injecting the token into the HTTPS URL
+function buildAuthUrl(url, token) {
+  if (!token) return url;
+  try {
+    const u = new URL(url.replace(/^git\+https:\/\//, "https://"));
+    // GitLab uses oauth2 as the username; GitHub and others accept the token as username
+    if (/gitlab/i.test(u.hostname)) {
+      u.username = "oauth2";
+      u.password = token;
+    } else {
+      u.username = token;
+      u.password = "";
+    }
+    return u.toString();
+  } catch (_) {
+    return url;
+  }
 }
 
 function runGit(args, cwd) {
@@ -1000,6 +1042,87 @@ app.get("/api/git/remote", async (req, res) => {
     }
   } catch (err) {
     res.status(500).json({ error: err.message });
+  }
+});
+
+// Git: clone or pull a GitHub/GitLab repo and register as a project
+app.post("/api/git/clone", async (req, res) => {
+  try {
+    const { repoUrl, branch = "main", projectName, token = "" } = req.body || {};
+    if (!repoUrl || !String(repoUrl).trim()) {
+      return res.status(400).json({ error: "repoUrl is required" });
+    }
+    const url = String(repoUrl).trim();
+    const tok = String(token || "").trim();
+    // Build auth URL — token injected into HTTPS URL, never logged or stored in plain projects file
+    const authUrl = buildAuthUrl(url, tok);
+
+    // Derive a safe folder name from the repo slug
+    const repoSlug = url.replace(/\.git$/, "").split("/").filter(Boolean).pop() || "repo";
+    const safeName = String(projectName || repoSlug)
+      .trim()
+      .replace(/[^a-zA-Z0-9._-]/g, "-")
+      .replace(/-+/g, "-")
+      .replace(/^-|-$/g, "") || "repo";
+
+    const workspacesDir = join(REPO_ROOT, "workspaces");
+    if (!existsSync(workspacesDir)) mkdirSync(workspacesDir, { recursive: true });
+
+    const clonePath = join(workspacesDir, safeName);
+    const gitOpts = (cwd) => ({ cwd, encoding: "utf-8", timeout: 120000, stdio: ["ignore", "pipe", "pipe"] });
+
+    if (existsSync(clonePath)) {
+      // Already cloned — update remote URL (token may have changed) then pull
+      try {
+        execFileSync("git", ["remote", "set-url", "origin", authUrl], gitOpts(clonePath));
+        execFileSync("git", ["fetch", "--depth", "1", "origin", branch], gitOpts(clonePath));
+        execFileSync("git", ["checkout", branch], gitOpts(clonePath));
+        execFileSync("git", ["reset", "--hard", `origin/${branch}`], gitOpts(clonePath));
+      } catch (_e) {
+        // Non-fatal: proceed with what's already on disk
+      }
+    } else {
+      // Fresh clone — try with specified branch, fall back to default branch
+      let cloned = false;
+      try {
+        execFileSync("git", ["clone", "--branch", branch, "--depth", "1", authUrl, clonePath], gitOpts(workspacesDir));
+        cloned = true;
+      } catch (_e) {
+        if (existsSync(clonePath)) {
+          try { rmSync(clonePath, { recursive: true, force: true }); } catch (_) {}
+        }
+      }
+      if (!cloned) {
+        // Branch not found — clone default branch
+        execFileSync("git", ["clone", "--depth", "1", authUrl, clonePath], gitOpts(workspacesDir));
+      }
+    }
+
+    // Register as a project (create or update) — store clean URL, not auth URL
+    const projects = await loadProjects();
+    const existingIdx = projects.findIndex((p) => p.path === clonePath);
+    let project;
+    if (existingIdx >= 0) {
+      project = { ...projects[existingIdx], name: safeName, githubRepo: url, defaultBranch: branch };
+      projects[existingIdx] = project;
+    } else {
+      project = { id: `git-${Date.now()}`, name: safeName, path: clonePath, githubRepo: url, defaultBranch: branch };
+      projects.push(project);
+    }
+    await saveProjects(projects);
+
+    // Persist token separately (never in projects file)
+    if (tok) {
+      const creds = await loadCredentials();
+      creds[project.id] = tok;
+      await saveCredentials(creds);
+    }
+
+    res.json({ project });
+  } catch (err) {
+    const raw = String(err.stderr || err.stdout || err.message || err);
+    const firstLine = raw.split("\n").map((l) => l.replace(/^(fatal|error):\s*/i, "").trim()).find(Boolean) || raw;
+    res.status(500).json({ error: firstLine });
   }
 });
 

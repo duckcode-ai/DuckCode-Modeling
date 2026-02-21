@@ -66,6 +66,14 @@ export async function updateProject(id, name, path, createIfMissing = false, opt
   return data.project;
 }
 
+export async function cloneGitRepo(repoUrl, branch = "main", projectName = "", token = "") {
+  const data = await request("/git/clone", {
+    method: "POST",
+    body: JSON.stringify({ repoUrl, branch, projectName, token }),
+  });
+  return data.project;
+}
+
 export async function fetchGitBranches(projectId) {
   const data = await request(`/git/branches?projectId=${encodeURIComponent(projectId)}`);
   return data.branches || [];

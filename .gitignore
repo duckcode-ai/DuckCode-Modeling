@@ -26,3 +26,4 @@ packages/web-app/dist/
 
 # local secrets
 .secrets/
+.dm-credentials.json

@@ -36,8 +36,12 @@ const useUiStore = create((set, get) => ({
   // ── Notifications ──
   toasts: [],
 
+  // ── Connector deep-link (sidebar → ConnectorsPanel pre-selection) ──
+  pendingConnectorType: null,
+
   // ── Actions ──
   setActiveActivity: (activity) => set({ activeActivity: activity }),
+  setPendingConnectorType: (type) => set({ pendingConnectorType: type }),
 
   toggleTheme: () => set((s) => {
     const next = s.theme === "light" ? "dark" : "light";
