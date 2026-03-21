@@ -31,6 +31,7 @@ const nodeTypes = { entityNode: EntityNode, annotation: AnnotationNode, group: S
 
 const LARGE_MODEL_THRESHOLD = 100;
 const COMPACT_MODE_THRESHOLD = 200;
+const UNASSIGNED_SUBJECT_AREA_FILTER = "__unassigned_subject_area__";
 
 // Build adjacency map from edges (undirected)
 function adjacencyFromEdges(edges) {
@@ -172,7 +173,7 @@ function applyLimit(nodes, edges, limit) {
 }
 
 // Apply visual styling (dim, highlight, selection glow)
-function applyVisualEffects(nodes, edges, vizSettings, selectedEntityId, entitySearch) {
+function applyVisualEffects(nodes, edges, vizSettings, selectedEntityId, entitySearch, modelingViewMode) {
   const search = entitySearch.trim().toLowerCase();
   const adjacency = adjacencyFromEdges(edges);
 
@@ -208,7 +209,7 @@ function applyVisualEffects(nodes, edges, vizSettings, selectedEntityId, entityS
         transition: "opacity 200ms ease",
         ...(isSelected ? { filter: "drop-shadow(0 0 10px rgba(59,130,246,0.6))" } : {}),
       },
-      data: { ...node.data, fieldView: vizSettings.fieldView },
+      data: { ...node.data, fieldView: vizSettings.fieldView, modelingViewMode },
     };
   });
 
@@ -240,17 +241,24 @@ function applyVisualEffects(nodes, edges, vizSettings, selectedEntityId, entityS
     if (isSelf) semanticHints.push("SELF");
     if (isSharedTarget) semanticHints.push(`shared-target x${sharedTargetCount}`);
 
-    const edgeFieldLabel =
+    const relationshipName = edge.data?.name || semanticLabel;
+    const physicalLabel =
       edge.data?.fromField && edge.data?.toField
         ? `${edge.data.fromField} -> ${edge.data.toField}`
         : `${edge.data?.fromRef || ""} -> ${edge.data?.toRef || ""}`;
+    const edgeLabel =
+      modelingViewMode === "conceptual"
+        ? `${relationshipName}${semanticLabel ? ` (${semanticLabel})` : ""}`
+        : modelingViewMode === "logical"
+          ? `${relationshipName} (${semanticLabel})${semanticHints.length ? ` • ${semanticHints.join(", ")}` : ""}`
+          : `${physicalLabel} (${semanticLabel})${semanticHints.length ? ` • ${semanticHints.join(", ")}` : ""}`;
 
     return {
       ...edge,
       type: isSelf ? "smoothstep" : vizSettings.edgeType,
       animated: isFocus || edge.animated,
       label: vizSettings.showEdgeLabels
-        ? `${edgeFieldLabel} (${semanticLabel})${semanticHints.length ? ` • ${semanticHints.join(", ")}` : ""}`
+        ? edgeLabel
         : undefined,
       style: {
         stroke: edgeColor,
@@ -315,6 +323,7 @@ function FlowCanvas() {
     centerEntityId,
     setCenterEntityId,
     layoutRefreshTick,
+    modelingViewMode,
     getSchemaOptions,
     setVizSettings,
     _lastAutoTuneCount,
@@ -375,6 +384,9 @@ function FlowCanvas() {
     if (activeSchemaFilter) {
       filtered = filtered.filter((n) => {
         const sa = n.data?.subject_area || n.data?.schema || "(default)";
+        if (activeSchemaFilter === UNASSIGNED_SUBJECT_AREA_FILTER) {
+          return !n.data?.subject_area && !n.data?.schema;
+        }
         return sa === activeSchemaFilter;
       });
       const ids = new Set(filtered.map((n) => n.id));
@@ -416,7 +428,8 @@ function FlowCanvas() {
         layoutResult.edges,
         vizSettings,
         selectedEntityId,
-        entitySearch
+        entitySearch,
+        modelingViewMode
       );
 
       // Apply compact mode flag
@@ -434,7 +447,7 @@ function FlowCanvas() {
     };
 
     doLayout();
-  }, [storeNodes, storeEdges, vizSettings, selectedEntityId, entitySearch, viewMode, visibleLimit, activeSchemaFilter, layoutRefreshTick, setRfNodes, setRfEdges, getSchemaOptions, handleSchemaOverviewDrillIn]);
+  }, [storeNodes, storeEdges, vizSettings, selectedEntityId, entitySearch, viewMode, visibleLimit, activeSchemaFilter, layoutRefreshTick, modelingViewMode, setRfNodes, setRfEdges, getSchemaOptions, handleSchemaOverviewDrillIn]);
 
   // Fit view after layout
   useEffect(() => {

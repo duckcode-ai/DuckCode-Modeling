@@ -16,6 +16,7 @@ const useDiagramStore = create((set, get) => ({
 
   // Exploration mode
   viewMode: "all", // "all" | "overview"
+  modelingViewMode: "physical", // conceptual | logical | physical
   visibleLimit: 0, // 0 = show all, >0 = limit visible entities
   activeSchemaFilter: null, // filter to a specific schema/subject_area
   largeModelBanner: null, // { total, showing } or null
@@ -40,11 +41,20 @@ const useDiagramStore = create((set, get) => ({
 
   // --- Actions ---
   setGraph: ({ nodes, edges, warnings, model }) => {
-    const selectedEntityId = get().selectedEntityId;
+    const { selectedEntityId, model: previousModel, modelingViewMode } = get();
     const selectedEntity = selectedEntityId
       ? (model?.entities || []).find((e) => e.name === selectedEntityId) || null
       : null;
-    set({ nodes, edges, warnings, model, selectedEntity });
+    const nextKind = model?.model?.kind || "";
+    const prevKind = previousModel?.model?.kind || "";
+    set({
+      nodes,
+      edges,
+      warnings,
+      model,
+      selectedEntity,
+      modelingViewMode: nextKind && nextKind !== prevKind ? nextKind : modelingViewMode,
+    });
   },
 
   clearGraph: () => {
@@ -69,6 +79,7 @@ const useDiagramStore = create((set, get) => ({
   setEntitySearch: (search) => set({ entitySearch: search }),
 
   setViewMode: (mode) => set({ viewMode: mode }),
+  setModelingViewMode: (mode) => set({ modelingViewMode: mode }),
   setVisibleLimit: (limit) => set({ visibleLimit: limit }),
   setActiveSchemaFilter: (schema) => set({ activeSchemaFilter: schema }),
   setLargeModelBanner: (banner) => set({ largeModelBanner: banner }),

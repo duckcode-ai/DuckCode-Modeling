@@ -174,3 +174,51 @@ test("modelToFlow normalizes non-scalar metadata values for safe rendering", () 
   assert.equal(typeof edge.data.name, "string");
   assert.equal(typeof edge.data.description, "string");
 });
+
+test("modelToFlow carries phase 2 modeling metadata onto diagram nodes", () => {
+  const doc = {
+    model: {
+      name: "phase2_metadata",
+      version: "1.0.0",
+      domain: "test",
+      owners: ["data-team@example.com"],
+      state: "draft",
+    },
+    entities: [
+      {
+        name: "Customer",
+        type: "logical_entity",
+        candidate_keys: [["customer_id"], ["customer_code", "source_system"]],
+        subtype_of: "Party",
+        subtypes: ["VipCustomer"],
+        derived_from: "CustomerConcept",
+        mapped_from: "crm.customer",
+        templates: ["audit_columns"],
+        partition_by: ["ingested_on"],
+        cluster_by: ["customer_id"],
+        distribution: "hash(customer_id)",
+        storage: "iceberg",
+        fields: [
+          { name: "customer_id", type: "string", nullable: false },
+          { name: "customer_code", type: "string", nullable: false },
+        ],
+      },
+    ],
+  };
+
+  const graph = modelToFlow(doc);
+  assert.equal(graph.warnings.length, 0);
+  assert.equal(graph.nodes.length, 1);
+
+  const customer = graph.nodes[0];
+  assert.deepEqual(customer.data.candidate_keys, [["customer_id"], ["customer_code", "source_system"]]);
+  assert.equal(customer.data.subtype_of, "Party");
+  assert.deepEqual(customer.data.subtypes, ["VipCustomer"]);
+  assert.equal(customer.data.derived_from, "CustomerConcept");
+  assert.equal(customer.data.mapped_from, "crm.customer");
+  assert.deepEqual(customer.data.templates, ["audit_columns"]);
+  assert.deepEqual(customer.data.partition_by, ["ingested_on"]);
+  assert.deepEqual(customer.data.cluster_by, ["customer_id"]);
+  assert.equal(customer.data.distribution, "hash(customer_id)");
+  assert.equal(customer.data.storage, "iceberg");
+});

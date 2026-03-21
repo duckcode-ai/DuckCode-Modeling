@@ -16,6 +16,160 @@ export function dumpYaml(doc) {
   return yaml.dump(doc, { lineWidth: 120, noRefs: true, sortKeys: false });
 }
 
+function coerceStringList(value) {
+  if (Array.isArray(value)) {
+    return value.map((item) => String(item || "").trim()).filter(Boolean);
+  }
+  return String(value || "")
+    .split(/\r?\n|,/)
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+function coerceKeySets(value) {
+  if (Array.isArray(value)) {
+    return value
+      .map((keyset) => coerceStringList(keyset))
+      .filter((keyset) => keyset.length > 0);
+  }
+  return String(value || "")
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .map((line) => line.split(",").map((item) => item.trim()).filter(Boolean))
+    .filter((keyset) => keyset.length > 0);
+}
+
+function uniqueEntityName(entities, requestedName, fallback = "NewEntity") {
+  const names = new Set((entities || []).map((entity) => entity.name));
+  let name = String(requestedName || fallback).trim() || fallback;
+  let index = 1;
+  while (names.has(name)) {
+    index += 1;
+    name = `${String(requestedName || fallback).trim() || fallback}${index}`;
+  }
+  return name;
+}
+
+function entitySeed(type, entityName) {
+  const stem = String(entityName || "entity")
+    .replace(/([a-z0-9])([A-Z])/g, "$1_$2")
+    .replace(/[^A-Za-z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "")
+    .toLowerCase() || "entity";
+
+  if (type === "concept") {
+    return {
+      type,
+      fields: [
+        { name: `${stem}_code`, type: "string", nullable: false },
+        { name: `${stem}_name`, type: "string", nullable: false },
+      ],
+    };
+  }
+  if (type === "logical_entity") {
+    return {
+      type,
+      candidate_keys: [[`${stem}_id`]],
+      fields: [
+        { name: `${stem}_id`, type: "string", nullable: false },
+        { name: `${stem}_name`, type: "string", nullable: false },
+      ],
+    };
+  }
+  if (type === "fact_table") {
+    return {
+      type,
+      grain: [`${stem}_id`],
+      dimension_refs: [],
+      fields: [
+        { name: `${stem}_id`, type: "integer", primary_key: true, nullable: false },
+        { name: "event_date", type: "date", nullable: false },
+        { name: "amount", type: "decimal(12,2)", nullable: false },
+      ],
+    };
+  }
+  if (type === "dimension_table") {
+    return {
+      type,
+      scd_type: 2,
+      natural_key: `${stem}_code`,
+      surrogate_key: `${stem}_sk`,
+      fields: [
+        { name: `${stem}_sk`, type: "integer", primary_key: true, nullable: false },
+        { name: `${stem}_code`, type: "string", nullable: false },
+        { name: `${stem}_name`, type: "string", nullable: false },
+        { name: "effective_from", type: "date", nullable: false },
+        { name: "effective_to", type: "date", nullable: false },
+        { name: "is_current", type: "boolean", nullable: false },
+      ],
+    };
+  }
+  if (type === "bridge_table") {
+    return {
+      type,
+      fields: [
+        { name: `${stem}_id`, type: "integer", primary_key: true, nullable: false },
+        { name: "left_entity_id", type: "integer", nullable: false, foreign_key: true },
+        { name: "right_entity_id", type: "integer", nullable: false, foreign_key: true },
+      ],
+    };
+  }
+  if (type === "hub") {
+    return {
+      type,
+      business_keys: [[`${stem}_id`]],
+      hash_key: `${stem}_hk`,
+      load_timestamp_field: "loaded_at",
+      record_source_field: "record_source",
+      fields: [
+        { name: `${stem}_hk`, type: "string", primary_key: true, nullable: false },
+        { name: `${stem}_id`, type: "string", nullable: false },
+        { name: "loaded_at", type: "timestamp", nullable: false },
+        { name: "record_source", type: "string", nullable: false },
+      ],
+    };
+  }
+  if (type === "link") {
+    return {
+      type,
+      link_refs: [],
+      hash_key: `${stem}_hk`,
+      load_timestamp_field: "loaded_at",
+      record_source_field: "record_source",
+      fields: [
+        { name: `${stem}_hk`, type: "string", primary_key: true, nullable: false },
+        { name: "left_hk", type: "string", nullable: false },
+        { name: "right_hk", type: "string", nullable: false },
+        { name: "loaded_at", type: "timestamp", nullable: false },
+        { name: "record_source", type: "string", nullable: false },
+      ],
+    };
+  }
+  if (type === "satellite") {
+    return {
+      type,
+      parent_entity: "",
+      hash_diff_fields: ["descriptive_attr"],
+      load_timestamp_field: "loaded_at",
+      record_source_field: "record_source",
+      fields: [
+        { name: "parent_hk", type: "string", nullable: false },
+        { name: "descriptive_attr", type: "string", nullable: false },
+        { name: "loaded_at", type: "timestamp", nullable: false },
+        { name: "record_source", type: "string", nullable: false },
+      ],
+    };
+  }
+
+  return {
+    type,
+    fields: [
+      { name: "id", type: "integer", primary_key: true, nullable: false },
+    ],
+  };
+}
+
 export function mutateModel(yamlText, mutator) {
   const { doc, error } = parseYamlSafe(yamlText);
   if (error || !doc) return { yaml: yamlText, error: error || "Invalid model" };
@@ -29,6 +183,24 @@ export function updateEntityMeta(yamlText, entityName, key, value) {
   return mutateModel(yamlText, (model) => {
     const entity = (model.entities || []).find((e) => e.name === entityName);
     if (entity) entity[key] = value;
+  });
+}
+
+export function setEntityScalarProperty(yamlText, entityName, key, value) {
+  return mutateModel(yamlText, (model) => {
+    const entity = (model.entities || []).find((e) => e.name === entityName);
+    if (!entity) return;
+    if (value === null || value === undefined) {
+      delete entity[key];
+      return;
+    }
+    if (typeof value === "string") {
+      const trimmed = value.trim();
+      if (!trimmed) delete entity[key];
+      else entity[key] = trimmed;
+      return;
+    }
+    entity[key] = value;
   });
 }
 
@@ -113,10 +285,7 @@ export function removeRelationship(yamlText, relName) {
 export function addEntity(yamlText, entityName) {
   return mutateModel(yamlText, (model) => {
     if (!Array.isArray(model.entities)) model.entities = [];
-    const names = new Set(model.entities.map((e) => e.name));
-    let name = entityName || "NewEntity";
-    let i = 1;
-    while (names.has(name)) { i++; name = `${entityName || "NewEntity"}${i}`; }
+    const name = uniqueEntityName(model.entities, entityName, "NewEntity");
     model.entities.push({
       name,
       type: "table",
@@ -126,6 +295,24 @@ export function addEntity(yamlText, entityName) {
         { name: "id", type: "integer", primary_key: true, nullable: false },
       ],
     });
+  });
+}
+
+export function addEntityWithOptions(yamlText, options = {}) {
+  return mutateModel(yamlText, (model) => {
+    if (!Array.isArray(model.entities)) model.entities = [];
+    const type = String(options.type || "table").trim() || "table";
+    const name = uniqueEntityName(model.entities, options.name, "NewEntity");
+    const starter = entitySeed(type, name);
+    const entity = {
+      name,
+      description: String(options.description || ""),
+      tags: Array.isArray(options.tags) ? options.tags : [],
+      ...starter,
+    };
+    if (options.subjectArea) entity.subject_area = String(options.subjectArea).trim();
+    if (options.schema) entity.schema = String(options.schema).trim();
+    model.entities.push(entity);
   });
 }
 
@@ -280,5 +467,126 @@ export function renameEntity(yamlText, oldEntityName, newEntityName) {
         metric.entity === oldEntityName ? { ...metric, entity: next } : metric
       );
     }
+  });
+}
+
+export function setEntityListProperty(yamlText, entityName, key, value) {
+  const nextValues = coerceStringList(value);
+  return mutateModel(yamlText, (model) => {
+    const entity = (model.entities || []).find((e) => e.name === entityName);
+    if (!entity) return;
+    if (nextValues.length === 0) delete entity[key];
+    else entity[key] = nextValues;
+  });
+}
+
+export function setEntityKeySets(yamlText, entityName, key, value) {
+  const nextKeySets = coerceKeySets(value);
+  return mutateModel(yamlText, (model) => {
+    const entity = (model.entities || []).find((e) => e.name === entityName);
+    if (!entity) return;
+    if (nextKeySets.length === 0) delete entity[key];
+    else entity[key] = nextKeySets;
+  });
+}
+
+export function bulkAssignSubjectArea(yamlText, entityNames, subjectArea) {
+  const targets = new Set(coerceStringList(entityNames));
+  const area = String(subjectArea || "").trim();
+  return mutateModel(yamlText, (model) => {
+    for (const entity of model.entities || []) {
+      if (!targets.has(entity.name)) continue;
+      if (area) entity.subject_area = area;
+      else delete entity.subject_area;
+    }
+  });
+}
+
+export function addDomain(yamlText, name, dataType = "string", description = "") {
+  return mutateModel(yamlText, (model) => {
+    if (!Array.isArray(model.domains)) model.domains = [];
+    const domainName = String(name || "").trim();
+    if (!domainName || model.domains.some((item) => item?.name === domainName)) return;
+    model.domains.push({
+      name: domainName,
+      data_type: String(dataType || "string").trim() || "string",
+      description: String(description || ""),
+    });
+  });
+}
+
+export function addTemplate(yamlText, name) {
+  return mutateModel(yamlText, (model) => {
+    if (!Array.isArray(model.templates)) model.templates = [];
+    const templateName = String(name || "").trim();
+    if (!templateName || model.templates.some((item) => item?.name === templateName)) return;
+    model.templates.push({
+      name: templateName,
+      fields: [
+        { name: "created_at", type: "timestamp", nullable: false },
+      ],
+    });
+  });
+}
+
+export function addEnum(yamlText, name, values) {
+  const enumValues = coerceStringList(values);
+  return mutateModel(yamlText, (model) => {
+    if (!Array.isArray(model.enums)) model.enums = [];
+    const enumName = String(name || "").trim();
+    if (!enumName || model.enums.some((item) => item?.name === enumName)) return;
+    model.enums.push({
+      name: enumName,
+      values: enumValues,
+    });
+  });
+}
+
+export function addSubjectArea(yamlText, name, description = "") {
+  return mutateModel(yamlText, (model) => {
+    if (!Array.isArray(model.subject_areas)) model.subject_areas = [];
+    const areaName = String(name || "").trim();
+    if (!areaName || model.subject_areas.some((item) => item?.name === areaName)) return;
+    model.subject_areas.push({ name: areaName, description: String(description || "") });
+  });
+}
+
+export function setNamingRule(yamlText, target, style, pattern = "") {
+  return mutateModel(yamlText, (model) => {
+    if (!model.naming_rules || typeof model.naming_rules !== "object" || Array.isArray(model.naming_rules)) {
+      model.naming_rules = {};
+    }
+    const key = String(target || "").trim();
+    if (!key) return;
+    const nextRule = {};
+    if (String(style || "").trim()) nextRule.style = String(style).trim();
+    if (String(pattern || "").trim()) nextRule.pattern = String(pattern).trim();
+    if (Object.keys(nextRule).length === 0) delete model.naming_rules[key];
+    else model.naming_rules[key] = nextRule;
+  });
+}
+
+export function addIndex(yamlText, name, entityName, fields, unique = false, type = "btree") {
+  const indexName = String(name || "").trim();
+  const entity = String(entityName || "").trim();
+  const fieldList = coerceStringList(fields);
+  return mutateModel(yamlText, (model) => {
+    if (!indexName || !entity || fieldList.length === 0) return;
+    if (!Array.isArray(model.indexes)) model.indexes = [];
+    if (model.indexes.some((item) => item?.name === indexName)) return;
+    model.indexes.push({
+      name: indexName,
+      entity,
+      fields: fieldList,
+      unique: Boolean(unique),
+      ...(type && type !== "btree" ? { type } : {}),
+    });
+  });
+}
+
+export function removeIndex(yamlText, name) {
+  return mutateModel(yamlText, (model) => {
+    if (!Array.isArray(model.indexes)) return;
+    model.indexes = model.indexes.filter((idx) => idx.name !== name);
   });
 }

@@ -1,7 +1,7 @@
 import React, { useState, useMemo } from "react";
 import { Handle, Position } from "@xyflow/react";
-import { Key, Fingerprint, Diamond, ChevronDown, ChevronUp, ArrowRightLeft, Tag, Shield, Database, AlertTriangle } from "lucide-react";
-import { SCHEMA_COLORS, getSchemaColor } from "../../lib/schemaColors";
+import { Key, Fingerprint, ChevronDown, ChevronUp, ArrowRightLeft, Shield, Database, AlertTriangle } from "lucide-react";
+import { getSchemaColor } from "../../lib/schemaColors";
 
 function CompletenessIndicator({ score }) {
   if (score === null || score === undefined) return null;
@@ -22,6 +22,8 @@ function CompletenessIndicator({ score }) {
 }
 
 const TYPE_COLORS = {
+  concept: { bg: "from-slate-50 to-zinc-100/70", border: "border-slate-300", badge: "bg-slate-200 text-slate-700" },
+  logical_entity: { bg: "from-cyan-50 to-sky-100/70", border: "border-cyan-300", badge: "bg-cyan-100 text-cyan-700" },
   table: { bg: "from-blue-50 to-blue-100/60", border: "border-blue-200", badge: "bg-blue-100 text-blue-700" },
   view: { bg: "from-purple-50 to-purple-100/60", border: "border-purple-200", badge: "bg-purple-100 text-purple-700" },
   materialized_view: { bg: "from-indigo-50 to-indigo-100/60", border: "border-indigo-200", badge: "bg-indigo-100 text-indigo-700" },
@@ -174,8 +176,13 @@ function DimBadges({ entityType, scdType, conformed, dimensionRefs, businessKeys
   return badges.length > 0 ? <>{badges}</> : null;
 }
 
+function keySetLabel(keySet) {
+  return (Array.isArray(keySet) ? keySet : []).filter(Boolean).join(" + ");
+}
+
 export default function EntityNode({ data }) {
   const [collapsed, setCollapsed] = useState(false);
+  const modelingViewMode = data.modelingViewMode || "physical";
   const fieldView = data.fieldView || "all";
   const entityType = data.type || "table";
   const colors = TYPE_COLORS[entityType] || TYPE_COLORS.table;
@@ -198,9 +205,82 @@ export default function EntityNode({ data }) {
   const businessKeys = Array.isArray(data.business_keys) ? data.business_keys : [];
   const linkRefs = Array.isArray(data.link_refs) ? data.link_refs : [];
   const parentEntity = data.parent_entity || "";
+  const candidateKeys = Array.isArray(data.candidate_keys) ? data.candidate_keys : [];
+  const subtypeOf = data.subtype_of || "";
+  const subtypes = Array.isArray(data.subtypes) ? data.subtypes : [];
+  const derivedFrom = data.derived_from || "";
+  const mappedFrom = data.mapped_from || "";
+  const templates = Array.isArray(data.templates) ? data.templates : [];
+  const grain = Array.isArray(data.grain) ? data.grain : [];
+  const partitionBy = Array.isArray(data.partition_by) ? data.partition_by : [];
+  const clusterBy = Array.isArray(data.cluster_by) ? data.cluster_by : [];
+  const distribution = data.distribution || "";
+  const storage = data.storage || "";
 
   const schemaColor = getSchemaColor(data.schemaColorIndex);
   const schemaName = data.subject_area || data.schema || null;
+  const isConceptual = modelingViewMode === "conceptual";
+  const isLogical = modelingViewMode === "logical";
+  const isPhysical = !isConceptual && !isLogical;
+  const effectiveFieldView = isConceptual ? "minimal" : (isLogical && fieldView === "all" ? "keys" : fieldView);
+  const modelingHints = [];
+  const modelingBadges = [];
+
+  if (candidateKeys.length > 0) {
+    modelingBadges.push(
+      <span key="candidate-keys" className="px-1.5 py-0 rounded text-[9px] font-bold bg-slate-100 text-slate-700 border border-slate-200">
+        {candidateKeys.length}CK
+      </span>
+    );
+  }
+  if (subtypeOf) {
+    modelingBadges.push(
+      <span key="subtype-of" className="px-1.5 py-0 rounded text-[9px] font-bold bg-violet-100 text-violet-700 border border-violet-200">
+        SUBTYPE
+      </span>
+    );
+  }
+  if (subtypes.length > 0) {
+    modelingBadges.push(
+      <span key="subtypes" className="px-1.5 py-0 rounded text-[9px] font-bold bg-fuchsia-100 text-fuchsia-700 border border-fuchsia-200">
+        {subtypes.length}SUB
+      </span>
+    );
+  }
+  if (templates.length > 0) {
+    modelingBadges.push(
+      <span key="templates" className="px-1.5 py-0 rounded text-[9px] font-bold bg-indigo-100 text-indigo-700 border border-indigo-200">
+        {templates.length}TPL
+      </span>
+    );
+  }
+  if (derivedFrom || mappedFrom) {
+    modelingBadges.push(
+      <span key="mapping" className="px-1.5 py-0 rounded text-[9px] font-bold bg-amber-100 text-amber-700 border border-amber-200">
+        MAP
+      </span>
+    );
+  }
+
+  if (isConceptual) {
+    if (derivedFrom) modelingHints.push(`Derived from ${derivedFrom}`);
+    if (mappedFrom) modelingHints.push(`Mapped from ${mappedFrom}`);
+    if (templates.length > 0) modelingHints.push(`Templates: ${templates.join(", ")}`);
+  }
+  if (isLogical) {
+    if (candidateKeys.length > 0) {
+      modelingHints.push(`Candidate keys: ${candidateKeys.slice(0, 2).map(keySetLabel).join(" | ")}`);
+    }
+    if (subtypeOf) modelingHints.push(`Subtype of ${subtypeOf}`);
+    if (subtypes.length > 0) modelingHints.push(`Subtypes: ${subtypes.join(", ")}`);
+    if (grain.length > 0 && entityType !== "fact_table") modelingHints.push(`Grain: ${grain.join(", ")}`);
+  }
+  if (isPhysical) {
+    if (partitionBy.length > 0) modelingHints.push(`Partition: ${partitionBy.join(", ")}`);
+    if (clusterBy.length > 0) modelingHints.push(`Cluster: ${clusterBy.join(", ")}`);
+    if (distribution) modelingHints.push(`Distribution: ${distribution}`);
+    if (storage) modelingHints.push(`Storage: ${storage}`);
+  }
 
   // Compact dot mode for large models
   if (data.compactMode) {
@@ -233,15 +313,15 @@ export default function EntityNode({ data }) {
   if (collapsed) {
     visibleFields = [];
     hiddenCount = fields.length;
-  } else if (fieldView === "keys") {
+  } else if (effectiveFieldView === "keys") {
     visibleFields = fields.filter((f) => {
       const key = `${data.name}.${f.name}`;
       return f.primary_key || f.unique || Boolean(classifications[key]);
     });
     hiddenCount = fields.length - visibleFields.length;
-  } else if (fieldView === "minimal") {
-    visibleFields = fields.slice(0, 8);
-    hiddenCount = Math.max(0, fields.length - 8);
+  } else if (effectiveFieldView === "minimal") {
+    visibleFields = fields.slice(0, isConceptual ? 4 : 8);
+    hiddenCount = Math.max(0, fields.length - visibleFields.length);
   }
 
   const relCount = data.relationshipCount || 0;
@@ -269,6 +349,7 @@ export default function EntityNode({ data }) {
                 </span>
               )}
               <DimBadges entityType={entityType} scdType={scdType} conformed={conformed} dimensionRefs={dimensionRefs} businessKeys={businessKeys} linkRefs={linkRefs} parentEntity={parentEntity} />
+              {!isConceptual && modelingBadges}
               {relCount > 0 && (
                 <span className="flex items-center gap-0.5 text-[10px] text-text-muted">
                   <ArrowRightLeft size={9} />
@@ -331,6 +412,16 @@ export default function EntityNode({ data }) {
         </div>
       )}
 
+      {!collapsed && modelingHints.length > 0 && (
+        <div className="px-3 py-1.5 border-b border-slate-100 bg-slate-50/60 space-y-1">
+          {modelingHints.slice(0, isConceptual ? 3 : 4).map((hint) => (
+            <div key={hint} className="text-[10px] text-slate-500 leading-snug">
+              {hint}
+            </div>
+          ))}
+        </div>
+      )}
+
       {/* Fields */}
       {!collapsed && visibleFields.length > 0 && (
         <div className="py-1">
@@ -345,9 +436,9 @@ export default function EntityNode({ data }) {
                 {field.name}
                 {field.deprecated && <AlertTriangle size={8} className="inline ml-0.5 text-amber-500" />}
               </span>
-              <span className="font-mono text-slate-400 text-[10px] shrink-0">{field.type}</span>
-              <FieldBadges field={field} entityName={data.name} classifications={classifications} indexedFields={indexedFields} />
-              {field.nullable === false && (
+              {!isConceptual && <span className="font-mono text-slate-400 text-[10px] shrink-0">{field.type}</span>}
+              {!isConceptual && <FieldBadges field={field} entityName={data.name} classifications={classifications} indexedFields={indexedFields} />}
+              {isPhysical && field.nullable === false && (
                 <span className="text-[8px] text-accent-red font-bold">NN</span>
               )}
             </div>

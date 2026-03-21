@@ -35,6 +35,18 @@ function toTagList(value) {
   return value.map((v) => toDisplayText(v, "").trim()).filter(Boolean);
 }
 
+function toStringList(value) {
+  if (!Array.isArray(value)) return [];
+  return value.map((v) => toDisplayText(v, "").trim()).filter(Boolean);
+}
+
+function toKeySets(value) {
+  if (!Array.isArray(value)) return [];
+  return value
+    .map((keySet) => toStringList(keySet))
+    .filter((keySet) => keySet.length > 0);
+}
+
 function toFieldList(value) {
   if (!Array.isArray(value)) return [];
   const fields = [];
@@ -148,19 +160,34 @@ export function modelToFlow(doc) {
       schema: toDisplayText(entity?.schema, ""),
       database: toDisplayText(entity?.database, ""),
       sla: toNormalizedSla(entity?.sla),
+      candidate_keys: toKeySets(entity?.candidate_keys),
+      subtype_of: toDisplayText(entity?.subtype_of, ""),
+      subtypes: toStringList(entity?.subtypes),
+      derived_from: toDisplayText(entity?.derived_from, ""),
+      mapped_from: toDisplayText(entity?.mapped_from, ""),
+      templates: Array.from(
+        new Set([
+          ...toStringList(entity?.templates),
+          ...toStringList(entity?.template ? [entity.template] : []),
+        ])
+      ),
       scd_type: entity?.scd_type ?? null,
       natural_key: toDisplayText(entity?.natural_key, ""),
       surrogate_key: toDisplayText(entity?.surrogate_key, ""),
       conformed: Boolean(entity?.conformed),
-      dimension_refs: Array.isArray(entity?.dimension_refs) ? entity.dimension_refs.map((r) => toDisplayText(r, "").trim()).filter(Boolean) : [],
-      business_keys: Array.isArray(entity?.business_keys) ? entity.business_keys : [],
+      dimension_refs: toStringList(entity?.dimension_refs),
+      business_keys: toKeySets(entity?.business_keys),
       hash_key: toDisplayText(entity?.hash_key, ""),
-      link_refs: Array.isArray(entity?.link_refs) ? entity.link_refs.map((r) => toDisplayText(r, "").trim()).filter(Boolean) : [],
+      link_refs: toStringList(entity?.link_refs),
       parent_entity: toDisplayText(entity?.parent_entity, ""),
-      hash_diff_fields: Array.isArray(entity?.hash_diff_fields) ? entity.hash_diff_fields : [],
+      hash_diff_fields: toStringList(entity?.hash_diff_fields),
       load_timestamp_field: toDisplayText(entity?.load_timestamp_field, ""),
       record_source_field: toDisplayText(entity?.record_source_field, ""),
-      grain: Array.isArray(entity?.grain) ? entity.grain : [],
+      grain: toStringList(entity?.grain),
+      partition_by: toStringList(entity?.partition_by),
+      cluster_by: toStringList(entity?.cluster_by),
+      distribution: toDisplayText(entity?.distribution, ""),
+      storage: toDisplayText(entity?.storage, ""),
     };
     normalizedEntities.push(normalizedEntity);
     entityByName.set(normalizedEntity.name, normalizedEntity);
@@ -191,6 +218,12 @@ export function modelToFlow(doc) {
         database: entity.database,
         sla: entity.sla,
         indexes: entityIndexes,
+        candidate_keys: entity.candidate_keys,
+        subtype_of: entity.subtype_of,
+        subtypes: entity.subtypes,
+        derived_from: entity.derived_from,
+        mapped_from: entity.mapped_from,
+        templates: entity.templates,
         scd_type: entity.scd_type,
         natural_key: entity.natural_key,
         surrogate_key: entity.surrogate_key,
@@ -204,6 +237,10 @@ export function modelToFlow(doc) {
         load_timestamp_field: entity.load_timestamp_field,
         record_source_field: entity.record_source_field,
         grain: entity.grain,
+        partition_by: entity.partition_by,
+        cluster_by: entity.cluster_by,
+        distribution: entity.distribution,
+        storage: entity.storage,
       }
     };
   });

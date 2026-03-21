@@ -8,6 +8,9 @@ import StatusBar from "./components/layout/StatusBar";
 import YamlEditor from "./components/editor/YamlEditor";
 import DiagramCanvas from "./components/diagram/DiagramCanvas";
 import EntityPanel from "./components/panels/EntityPanel";
+import ModelerPanel from "./components/panels/ModelerPanel";
+import LibrariesPanel from "./components/panels/LibrariesPanel";
+import SubjectAreasPanel from "./components/panels/SubjectAreasPanel";
 import ValidationPanel from "./components/panels/ValidationPanel";
 import DiffPanel from "./components/panels/DiffPanel";
 import ImpactPanel from "./components/panels/ImpactPanel";
@@ -44,11 +47,17 @@ import {
   Import,
   GitBranch,
   RefreshCw,
+  Wand2,
+  LibraryBig,
+  Map,
 } from "lucide-react";
 import { fetchGitBranches, fetchGitRemote } from "./lib/api";
 
 const ALL_BOTTOM_TABS = [
+  { id: "modeler",     label: "Modeler",     icon: Wand2 },
   { id: "properties",  label: "Properties",  icon: Columns3 },
+  { id: "libraries",   label: "Libraries",   icon: LibraryBig },
+  { id: "subject-areas", label: "Subject Areas", icon: Map },
   { id: "validation",  label: "Validation",  icon: ShieldCheck, adminOnly: true },
   { id: "diff",        label: "Diff & Gate", icon: GitCompare,  adminOnly: true },
   { id: "impact",      label: "Impact",      icon: Activity,    adminOnly: true },
@@ -491,8 +500,14 @@ function EditProjectModal() {
 
 function BottomPanelContent({ tab }) {
   switch (tab) {
+    case "modeler":
+      return <ModelerPanel />;
     case "properties":
       return <EntityPanel />;
+    case "libraries":
+      return <LibrariesPanel />;
+    case "subject-areas":
+      return <SubjectAreasPanel />;
     case "validation":
       return <ValidationPanel />;
     case "diff":
