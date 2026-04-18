@@ -2,7 +2,7 @@
 
 This package implements the DataLex specification (see
 /Users/Kranthi/Documents/Claude/Projects/DataLex/skills/datalex-builder/) on top of
-the existing DuckCode core engine.
+the DataLex core engine.
 
 Public surface:
   types    — logical type parser (primitives + array/map/struct)

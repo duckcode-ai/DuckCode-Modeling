@@ -3,7 +3,7 @@ description: >-
   Reusable composite action that validates a DataLex project, runs a
   breaking-change diff against a base revision, emits dbt sources.yml /
   schema.yml, and optionally runs `dbt parse` against the emitted YAML.
-author: "DuckCode Modeling"
+author: "DuckCode AI Labs"
 
 inputs:
   root:

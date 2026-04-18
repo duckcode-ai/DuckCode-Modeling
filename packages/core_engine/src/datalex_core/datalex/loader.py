@@ -483,7 +483,7 @@ def _load_imports(
 
 
 def _infer_schemas_root(project_root: Path) -> Path:
-    """Walk up from the project root looking for a DuckCode repo with schemas/datalex/."""
+    """Walk up from the project root looking for a DataLex repo with schemas/datalex/."""
     here = project_root
     for _ in range(6):
         candidate = here / "schemas" / "datalex"

@@ -14,7 +14,7 @@
     "dialects": {
       "type": "array",
       "items": { "type": "string", "pattern": "^[a-z][a-z0-9_]*$" },
-      "description": "Enabled dialect plugins. Must correspond to modules under dm_core/dialects/."
+      "description": "Enabled dialect plugins. Must correspond to modules under datalex_core/dialects/."
     },
     "default_dialect": { "type": "string", "pattern": "^[a-z][a-z0-9_]*$" },
     "glossary": {

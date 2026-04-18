@@ -1325,7 +1325,7 @@ def cmd_import_dbt(args: argparse.Namespace) -> int:
 
 
 def cmd_dbt_sync(args: argparse.Namespace) -> int:
-    """Merge DuckCode model metadata into an existing dbt schema.yml (non-destructive)."""
+    """Merge DataLex model metadata into an existing dbt schema.yml (non-destructive)."""
     model = load_yaml_model(args.model)
     dbt_schema_path = Path(args.dbt_schema)
     if not dbt_schema_path.exists():
@@ -1340,7 +1340,7 @@ def cmd_dbt_sync(args: argparse.Namespace) -> int:
 
 
 def cmd_dbt_push(args: argparse.Namespace) -> int:
-    """Push DuckCode metadata into all schema.yml files found in a dbt project directory."""
+    """Push DataLex metadata into all schema.yml files found in a dbt project directory."""
     model = load_yaml_model(args.model)
     dbt_project_root = Path(args.dbt_project)
     if not dbt_project_root.is_dir():
@@ -2627,14 +2627,14 @@ def build_parser() -> argparse.ArgumentParser:
     dbt_parser = sub.add_parser("dbt", help="dbt round-trip: sync DataLex metadata into dbt schema.yml files")
     dbt_sub = dbt_parser.add_subparsers(dest="dbt_command", required=True)
 
-    dbt_sync_parser = dbt_sub.add_parser("sync", help="Merge DuckCode metadata into a single dbt schema.yml (non-destructive)")
-    dbt_sync_parser.add_argument("model", help="Path to the DuckCode .model.yaml file")
+    dbt_sync_parser = dbt_sub.add_parser("sync", help="Merge DataLex metadata into a single dbt schema.yml (non-destructive)")
+    dbt_sync_parser.add_argument("model", help="Path to the DataLex .model.yaml file")
     dbt_sync_parser.add_argument("--dbt-schema", required=True, help="Path to the existing dbt schema.yml to update")
     dbt_sync_parser.add_argument("--out", default=None, help="Output path (default: overwrites --dbt-schema in-place)")
     dbt_sync_parser.set_defaults(func=cmd_dbt_sync)
 
-    dbt_push_parser = dbt_sub.add_parser("push", help="Push DuckCode metadata into all schema.yml files found in a dbt project")
-    dbt_push_parser.add_argument("model", help="Path to the DuckCode .model.yaml file")
+    dbt_push_parser = dbt_sub.add_parser("push", help="Push DataLex metadata into all schema.yml files found in a dbt project")
+    dbt_push_parser.add_argument("model", help="Path to the DataLex .model.yaml file")
     dbt_push_parser.add_argument("--dbt-project", required=True, help="Root path of the dbt project to scan for schema.yml files")
     dbt_push_parser.set_defaults(func=cmd_dbt_push)
 

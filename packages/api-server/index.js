@@ -2179,7 +2179,7 @@ app.post("/api/forward/migrate", requireAdmin, express.json(), async (req, res) 
   }
 });
 
-// dbt round-trip sync: merge DuckCode metadata into an existing dbt schema.yml
+// dbt round-trip sync: merge DataLex metadata into an existing dbt schema.yml
 app.post("/api/forward/dbt-sync", requireAdmin, express.json({ limit: "5mb" }), async (req, res) => {
   try {
     const { model_content, dbt_schema_content, model_path, dbt_schema_path, write_back } = req.body || {};

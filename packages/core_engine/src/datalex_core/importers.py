@@ -1052,9 +1052,9 @@ def sync_dbt_schema_yml(
     model: Dict[str, Any],
     existing_dbt_schema_yml: str,
 ) -> str:
-    """Merge DuckCode model metadata INTO an existing dbt schema.yml (non-destructive).
+    """Merge DataLex model metadata INTO an existing dbt schema.yml (non-destructive).
 
-    DuckCode-sourced metadata (descriptions, tags, owner, sensitivity, dimensional
+    DataLex-sourced metadata (descriptions, tags, owner, sensitivity, dimensional
     properties) is written into dbt models/columns that have empty counterparts.
     Existing dbt content (tests, ref() expressions, non-empty descriptions) is NEVER
     overwritten.
@@ -1136,7 +1136,7 @@ def sync_dbt_schema_yml(
             if entity.get("dimension_refs") and not dbt_meta.get("dimension_refs"):
                 dbt_meta["dimension_refs"] = entity["dimension_refs"]
 
-        # Build field lookup from DuckCode entity
+        # Build field lookup from DataLex entity
         field_map: Dict[str, Dict[str, Any]] = {
             str(f.get("name", "")): f for f in entity.get("fields", [])
         }
