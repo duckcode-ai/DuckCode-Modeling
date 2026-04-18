@@ -23,6 +23,10 @@ with contracts, lineage, ERDs, and clean round-trip back to dbt.
 </p>
 </div>
 
+<p align="center">
+  <img src="Assets/Overview.png" alt="DataLex Visual Studio — file tree, YAML editor, and React Flow ERD on the same entity" width="100%" />
+</p>
+
 ## 60-second demo
 
 ```bash
