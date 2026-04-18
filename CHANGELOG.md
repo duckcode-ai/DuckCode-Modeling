@@ -7,6 +7,12 @@ from `v0.1.0` onward.
 
 ## [Unreleased]
 
+### Added
+
+- JSON Schemas are now bundled with the `datalex_core` Python package under
+  `datalex_core/_schemas/datalex/`. `pip install datalex-cli` from any
+  working directory can validate projects without needing the repo on disk.
+
 ## [0.1.0] — 2026-04-18
 
 First tagged release. The project was previously known as

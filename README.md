@@ -114,10 +114,11 @@ Prereqs: Python 3.9+, Git. Node.js 18+ if you want the UI.
 DataLex/
   packages/
     core_engine/           # Python: loader, dialects, dbt integration, packages
+      src/datalex_core/
+        _schemas/datalex/  # JSON Schema per `kind:` — bundled with the package
     cli/                   # `datalex` entry point
     api-server/            # Node.js API (UI backend)
     web-app/               # React Flow studio
-  schemas/datalex/         # JSON Schema per `kind:` (project, entity, source, ...)
   examples/
     jaffle_shop_demo/      # zero-setup dbt-sync demo (DuckDB)
   model-examples/          # sample projects and scenario walkthroughs

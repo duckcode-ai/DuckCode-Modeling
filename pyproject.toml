@@ -58,3 +58,6 @@ datalex = "datalex_cli.main:main"
 
 [tool.setuptools.packages.find]
 where = ["packages/core_engine/src", "packages/cli/src"]
+
+[tool.setuptools.package-data]
+"datalex_core" = ["_schemas/**/*.json"]

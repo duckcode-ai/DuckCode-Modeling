@@ -169,13 +169,13 @@ DataLex/
       dialects/     # dialect plugin registry (postgres, snowflake, …)
       dbt/          # manifest, profiles, warehouse, sync, emit
       connectors/   # full-schema introspection per warehouse
+      _schemas/datalex/  # JSON Schema per kind: — bundled with the package
       …             # legacy importers/emitters/policy kept in parallel
     cli/src/datalex_cli/
       datalex_cli.py        # datalex datalex … subcommand tree
       main.py               # legacy flat commands
     api-server/             # Node.js: UI backend
     web-app/                # React Flow studio
-  schemas/datalex/          # JSON Schema per kind:
   examples/jaffle_shop_demo # dbt sync demo (DuckDB, zero setup)
   model-examples/           # legacy scenario projects
   docs/                     # current docs (this file + tutorials/reference)

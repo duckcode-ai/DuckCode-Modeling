@@ -483,7 +483,21 @@ def _load_imports(
 
 
 def _infer_schemas_root(project_root: Path) -> Path:
-    """Walk up from the project root looking for a DataLex repo with schemas/datalex/."""
+    """Locate the DataLex JSON Schemas.
+
+    Order of precedence:
+      1. Bundled schemas shipped with the installed `datalex_core` package
+         (so `pip install datalex-cli` works from any working directory).
+      2. A repo-relative `schemas/datalex/` when running from a clone —
+         walk up from the project root.
+      3. Repo-root fallback based on this file's location.
+    """
+    # 1. Bundled package resource — the canonical location for an installed package.
+    bundled = Path(__file__).resolve().parent.parent / "_schemas" / "datalex"
+    if bundled.exists():
+        return bundled
+
+    # 2. Walk up from the project root (legacy clone layout with top-level schemas/).
     here = project_root
     for _ in range(6):
         candidate = here / "schemas" / "datalex"
@@ -493,13 +507,6 @@ def _infer_schemas_root(project_root: Path) -> Path:
             break
         here = here.parent
 
-    # Fallback: relative to this file
-    this_file = Path(__file__).resolve()
-    for _ in range(6):
-        candidate = this_file.parent / "schemas" / "datalex"
-        if candidate.exists():
-            return candidate
-        this_file = this_file.parent
-    # Final fallback — the repo-relative path
+    # 3. Final fallback — repo-root-relative path from this file's location.
     repo_root = Path(__file__).resolve().parents[4]
     return repo_root / "schemas" / "datalex"

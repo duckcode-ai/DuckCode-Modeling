@@ -35,7 +35,8 @@ In-scope:
 - The web API server (`packages/api-server`) and Visual Studio UI
   (`packages/web-app`).
 - CI reusable GitHub Action (`.github/actions/datalex`).
-- JSON Schemas shipped under `schemas/datalex/`.
+- JSON Schemas bundled with the `datalex_core` package under
+  `datalex_core/_schemas/datalex/`.
 
 Out of scope:
 

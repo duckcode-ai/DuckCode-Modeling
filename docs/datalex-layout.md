@@ -58,7 +58,7 @@ imports:
     alias: wc
 ```
 
-Schema: [`schemas/datalex/project.schema.json`](../schemas/datalex/project.schema.json).
+Schema: [`datalex_core/_schemas/datalex/project.schema.json`](../packages/core_engine/src/datalex_core/_schemas/datalex/project.schema.json).
 
 ## `kind: entity` — tables and views in three layers
 
@@ -111,7 +111,7 @@ Notable fields:
 - `meta.datalex.*` — emitter-owned namespace; user `meta` fields anywhere
   else are preserved across import/emit.
 
-Schema: [`schemas/datalex/entity.schema.json`](../schemas/datalex/entity.schema.json).
+Schema: [`datalex_core/_schemas/datalex/entity.schema.json`](../packages/core_engine/src/datalex_core/_schemas/datalex/entity.schema.json).
 
 ## `kind: source` — external data (dbt sources)
 
@@ -141,7 +141,7 @@ tables:
 Populated by `datalex datalex dbt sync`; emitted back to `sources.yml` by
 `datalex datalex dbt emit`.
 
-Schema: [`schemas/datalex/source.schema.json`](../schemas/datalex/source.schema.json).
+Schema: [`datalex_core/_schemas/datalex/source.schema.json`](../packages/core_engine/src/datalex_core/_schemas/datalex/source.schema.json).
 
 ## `kind: model` — derived tables (dbt models)
 
@@ -162,7 +162,7 @@ columns:
 Emits with `contract.enforced: true` when the DataLex columns carry
 `data_type`, so `dbt parse` passes without edits.
 
-Schema: [`schemas/datalex/model.schema.json`](../schemas/datalex/model.schema.json).
+Schema: [`datalex_core/_schemas/datalex/model.schema.json`](../packages/core_engine/src/datalex_core/_schemas/datalex/model.schema.json).
 
 ## `kind: term` — glossary entries
 
@@ -222,7 +222,7 @@ apply:
 Entities opt in via `columns: - use: audit_columns`. Preview the expanded
 output with `datalex datalex expand <root>`.
 
-Schema: [`schemas/datalex/snippet.schema.json`](../schemas/datalex/snippet.schema.json).
+Schema: [`datalex_core/_schemas/datalex/snippet.schema.json`](../packages/core_engine/src/datalex_core/_schemas/datalex/snippet.schema.json).
 
 ## How the loader works
 
@@ -271,4 +271,4 @@ entity of the same name.
 - [Tutorial: dbt sync in 5 minutes](./tutorial-dbt-sync.md)
 - [CLI cheat sheet](./cli.md)
 - [Architecture](./architecture.md)
-- [JSON Schemas](../schemas/datalex/) — machine-readable reference
+- [JSON Schemas](../packages/core_engine/src/datalex_core/_schemas/datalex/) — machine-readable reference

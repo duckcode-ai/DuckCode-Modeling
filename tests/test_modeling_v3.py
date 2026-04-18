@@ -19,7 +19,7 @@ from datalex_core.modeling import apply_standards_fixes, normalize_model, standa
 from datalex_core.schema import load_schema, schema_issues
 
 SCHEMA_PATH = str(ROOT / "schemas" / "model.schema.json")
-DM_CLI = str(ROOT / "dm")
+DM_CLI = str(ROOT / "datalex")
 
 
 def _schema():
