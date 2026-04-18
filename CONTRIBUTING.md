@@ -44,3 +44,9 @@ Thanks for contributing. This project includes a React web app, a Node API serve
 ## Reporting Bugs and Requesting Features
 - Open a GitHub issue with reproduction steps and expected behavior.
 - For connector issues, include connector type, redacted config, and failing command/log excerpt.
+
+## Cutting a release
+See [RELEASING.md](RELEASING.md) for the full process. Short version:
+bump `project.version` in `pyproject.toml`, move items from `[Unreleased]`
+into a new dated section in `CHANGELOG.md`, merge, then push a signed
+`vX.Y.Z` tag. CI publishes to PyPI automatically.
