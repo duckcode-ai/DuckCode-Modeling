@@ -24,6 +24,7 @@ from dm_core.datalex.migrate_layout import migrate_project
 import dm_core.dialects  # noqa: F401  — side-effect registers built-in dialects
 from dm_core.dialects.registry import get_dialect, known_dialects
 from dm_core.dbt import emit_dbt, import_manifest, write_import_result
+from dm_core.dbt.sync import sync_dbt_project, report_to_json
 from dm_core.packages import PackageResolveError, load_imports_for, resolve_imports
 
 
@@ -155,6 +156,41 @@ def register_datalex(parent_sub: argparse._SubParsersAction) -> None:
         help="Existing DataLex project root to merge user-authored fields from",
     )
     dbt_import.set_defaults(func=_cmd_dbt_import)
+
+    dbt_sync = dbt_sub.add_parser(
+        "sync",
+        help="Sync a dbt project into DataLex (manifest + live warehouse types)",
+    )
+    dbt_sync.add_argument("dbt_project", help="Path to dbt project (contains dbt_project.yml)")
+    dbt_sync.add_argument(
+        "--out-root",
+        required=True,
+        help="DataLex project root to write sources/ and models/dbt/",
+    )
+    dbt_sync.add_argument(
+        "--profile",
+        dest="target_override",
+        help="Pick a non-default target name from the dbt profile",
+    )
+    dbt_sync.add_argument(
+        "--profiles-dir",
+        help="Override profiles.yml search (default: dbt's own precedence)",
+    )
+    dbt_sync.add_argument(
+        "--manifest",
+        help="Explicit path to manifest.json (default: <dbt_project>/target/manifest.json)",
+    )
+    dbt_sync.add_argument(
+        "--skip-warehouse",
+        action="store_true",
+        help="Skip live warehouse introspection; use manifest data_type only",
+    )
+    dbt_sync.add_argument(
+        "--output-json",
+        action="store_true",
+        help="Emit the sync report as JSON",
+    )
+    dbt_sync.set_defaults(func=_cmd_dbt_sync)
 
     # expand
     expand_parser = dsub.add_parser(
@@ -441,6 +477,27 @@ def _cmd_dbt_import(args: argparse.Namespace) -> int:
         print("\nWarnings:")
         for w in result.warnings:
             print(f"  - {w}")
+    return 0
+
+
+def _cmd_dbt_sync(args: argparse.Namespace) -> int:
+    try:
+        report = sync_dbt_project(
+            dbt_project_dir=args.dbt_project,
+            datalex_root=args.out_root,
+            profiles_dir=args.profiles_dir,
+            target_override=args.target_override,
+            skip_warehouse=args.skip_warehouse,
+            manifest_path=args.manifest,
+        )
+    except FileNotFoundError as e:
+        print(f"error: {e}", file=sys.stderr)
+        return 1
+
+    if args.output_json:
+        print(report_to_json(report))
+    else:
+        print(report.summary())
     return 0
 
 

@@ -1,6 +1,10 @@
-# YAML Spec v1 (MVP)
+# YAML Spec v1 (MVP) — **archived**
 
-> **Note:** YAML Spec v2 is now available with enterprise features including indexes, glossary, new entity types, field-level sensitivity, computed columns, and more. See [yaml-spec-v2.md](yaml-spec-v2.md). All v1 models are fully backward compatible with v2.
+> **Deprecated.** This file describes the single-`*.model.yaml` shape that
+> predates the DataLex layout. The current layout is documented in
+> [../datalex-layout.md](../datalex-layout.md). To convert a v1 file to the
+> current tree, run
+> `dm datalex migrate to-datalex-layout path/to/legacy.model.yaml`.
 
 ## Purpose
 Define data models in a strict, readable YAML format that can be validated, versioned, and rendered.

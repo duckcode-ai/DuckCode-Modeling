@@ -1,166 +1,205 @@
 # DuckCodeModeling Architecture
 
-## 1. System Overview
-DuckCodeModeling is a YAML-first data modeling platform (Schema v2) with three runtime surfaces:
-1. CLI (`dm`) for validation, linting, diffing, formatting, stats, policy checks, generation, and imports.
-2. Core engine (`packages/core_engine`) for deterministic model processing.
-3. Web UI (`packages/web-app`) for visual modeling, quality gate review, and change tracking.
+## 1. System overview
 
-## 2. Core Planes
+DuckCodeModeling is a Git-native data modeling platform with three runtime
+surfaces:
 
-### 2.1 Authoring Plane
-- Source of truth: `*.model.yaml` files.
-- Authoring channels:
-  - direct YAML editing
-  - visual node-focused property editing (round-trip into YAML)
-- Workspace supports multi-file current/baseline comparisons.
+1. **CLI (`dm`)** — validation, dbt sync, DDL emission, diff, package
+   resolution, layout migration.
+2. **Core engine (`packages/core_engine`)** — deterministic loader,
+   dialect plugins, dbt integration, cross-repo packages.
+3. **Web UI (`packages/web-app`)** — visual studio for editing the same
+   YAML the CLI reads.
 
-### 2.2 Validation and Compile Plane
-- Structural validation: JSON Schema v2 (`schemas/model.schema.json`).
-- Semantic validation: duplicate names, PK rules (tables only — views/materialized_views/external_tables/snapshots exempt), reference integrity, index validation, glossary validation, deprecated field warnings, computed field checks, governance checks.
-- Canonical compiler: deterministic ordering for entities/fields/relationships/indexes/glossary.
-- Diff engine: change summary + breaking-change detection including index removal tracking.
+The authoritative source of truth is a **DataLex project tree** — one YAML
+file per object, dispatched by `kind:`. See
+[datalex-layout.md](./datalex-layout.md) for the reference.
 
-### 2.3 Governance and Policy Plane
-- Policy packs in YAML (`policies/*.policy.yaml`).
-- Policy schema (`schemas/policy.schema.json`).
-- Policy evaluation command: `dm policy-check`.
-- CI gate can combine schema + semantic + policy enforcement.
+## 2. Core engine modules (`dm_core`)
 
-### 2.4 Visualization Plane
-- React Flow renderer for entity-relationship graph.
-- View controls:
-  - layout mode (`grid`, `layered`, `circle`)
-  - density (`compact`, `normal`, `wide`)
-  - scope filters (entity type, tag)
-  - search/focus, edge style, field density, label toggles
-- Property panel updates selected entity directly in YAML (safe subset).
+### 2.1 DataLex loader (`dm_core/datalex/`)
 
-### 2.5 Integration Plane
-- Import:
-  - SQL DDL -> YAML (`dm import sql`)
-  - DBML -> YAML (`dm import dbml`)
-- Generate:
-  - SQL DDL (`dm generate sql --dialect postgres|snowflake|bigquery|databricks`)
-  - dbt scaffold with v2 metadata (`dm generate dbt`)
-  - metadata JSON export (`dm generate metadata`)
-- Utilities:
-  - Auto-format YAML to canonical style (`dm fmt`)
-  - Model statistics (`dm stats`)
+- **`loader.py`** — streaming, `kind:`-dispatched walker. Reads one file at
+  a time; does not materialize the whole project in memory. Source-located
+  errors (`file`, `line`, `column`, `suggested_fix`).
+- **`project.py`** — `DataLexProject` dataclass: entities, sources, models,
+  terms, domains, policies, snippets, imports. Resolves snippets at load
+  time.
+- **`parse_cache.py`** — content-addressed on-disk cache
+  (`build/.cache/*.json` or `~/.datalex/cache/`), keyed by
+  `sha256(content) + schema_hash`. Warm loads skip re-parsing unchanged
+  files.
+- **`migrate_layout.py`** — one-shot migrator from legacy `*.model.yaml` to
+  the DataLex tree. Invoked via `dm datalex migrate to-datalex-layout`.
+- **`diff.py`** — semantic diff with explicit `previous_name:` rename
+  detection; breaking-change classification.
+- **`errors.py`** — source-positioned diagnostics with `to_dict()` for
+  `--output-json`.
+- **`types.py`** — type palette + composite type parser (`array<T>`,
+  `map<K,V>`, `struct<...>`).
 
-### 2.6 Advanced Import & Reverse Engineering Plane
-- Enhanced SQL DDL importer (`dm_core/importers.py`): CREATE VIEW, CREATE MATERIALIZED VIEW, CREATE INDEX (unique detection), DEFAULT values, CHECK constraints, schema-qualified table names, foreign_key field flag.
-- JSON Schema / OpenAPI importer: `$defs`, `definitions`, `components.schemas` → entities with type mapping, enum → CHECK, format detection (uuid, date-time, email, int64), nullable union types, custom extensions (x-sensitivity, x-subject-area).
-- dbt manifest importer: models/seeds/snapshots → entities with materialized type mapping, column tests → PK/UQ/NN detection, sensitivity metadata, schema/database/tags, optional catalog.json for column types.
-- Spark schema importer: StructType JSON files from `df.schema.json()`, Databricks catalog exports, and arrays of named table schemas. Type mapping for all Spark types including decimal, complex types (array/map/struct → json), metadata comments, and sensitivity.
-- **Database connectors** (`dm_core/connectors/`): Pull schema directly from live databases via `information_schema` / catalog introspection.
-  - PostgreSQL (`psycopg2`): tables, columns, PKs, FKs, unique constraints, indexes from `information_schema` + `pg_indexes`.
-  - MySQL (`mysql-connector-python`): tables, columns (with PK/UNI from COLUMN_KEY), FKs, indexes from `information_schema`.
-  - Snowflake (`snowflake-connector-python`): tables, columns, PKs via `SHOW PRIMARY KEYS`, FKs via `SHOW IMPORTED KEYS`.
-  - BigQuery (`google-cloud-bigquery`): tables, columns, PKs, FKs from `INFORMATION_SCHEMA` views.
-  - Databricks (`databricks-sql-connector`): tables via `SHOW TABLES`, columns via `DESCRIBE TABLE`, PKs/FKs from Unity Catalog `information_schema`.
-  - Connector framework: `BaseConnector` ABC, `ConnectorConfig` dataclass, `ConnectorResult` with summary, driver check, table include/exclude filters, registry with `get_connector()` / `list_connectors()`.
-- CLI commands:
-  - `dm import sql <file>` — import SQL DDL
-  - `dm import dbml <file>` — import DBML
-  - `dm import spark-schema <file>` — import Spark schema JSON
-  - `dm pull <connector>` — pull schema from a live database (postgres, mysql, snowflake, bigquery, databricks)
-  - `dm connectors` — list available connectors and driver status
-- Web UI: Import panel with drag-and-drop file upload, format auto-detection, and YAML preview.
-- API server: `POST /api/import` endpoint for web UI file import.
+### 2.2 Dialect registry (`dm_core/dialects/`)
 
-### 2.7 Documentation & Data Dictionary Plane
-- HTML data dictionary generator (`dm_core/docs_generator.py`): self-contained single-page site with entity catalog, field details, relationship map, indexes, glossary, data classifications, and client-side search.
-- Markdown export for GitHub wiki / Confluence integration.
-- Auto-changelog generation from semantic diffs between model versions.
-- CLI commands:
-  - `dm generate docs <model>` — generate HTML or Markdown data dictionary (`--format html|markdown`)
-  - `dm generate changelog <old> <new>` — generate changelog from model diff
-- Web UI: Dictionary panel with expandable entity cards, field tables, inline search across entities/fields/tags/glossary.
+- **`base.py`** — `DialectPlugin` protocol (`render_type`,
+  `render_entity`, …).
+- **`registry.py`** — `register()` / `get_dialect()` / `known_dialects()`.
+- **`postgres.py`, `snowflake.py`** — shipped today; plugin shape means
+  new dialects are a self-contained module, not an edit to a monolith.
 
-### 2.8 Multi-Model Resolution Plane
-- Cross-file imports via `model.imports` with alias, entity filtering, and path resolution.
-- Resolver (`dm_core/resolver.py`): recursive import resolution, cycle detection, duplicate entity warnings.
-- Unified entity/relationship/index graph across all imported models.
-- Project-level resolution: scan all `*.model.yaml` files in a directory.
-- Project-level diff: compare two model directories for added/removed/changed models.
-- CLI commands:
-  - `dm resolve <model>` — resolve a single model and its imports
-  - `dm resolve-project <dir>` — resolve all models in a project
-  - `dm diff-all <old-dir> <new-dir>` — project-level semantic diff
-  - `dm init --multi-model` — scaffold a multi-model project structure
-- Web UI: Model Graph panel for visualizing cross-model dependencies and cross-model relationship badges in EntityPanel.
-- API server: `/api/projects/:id/model-graph` endpoint for project-wide model dependency graph.
+### 2.3 dbt integration (`dm_core/dbt/`)
 
-### 2.9 Web UI Enterprise Features Plane
-- **Subject area grouping**: ELK layout groups entities by `subject_area` into compound nodes with color-coded dashed borders and labels. Toggle via toolbar button. 8 distinct color palettes for visual separation.
-- **Enhanced entity nodes**: SLA indicator badge in entity header alongside subject area label. Full badge set: PK, FK, UQ, IDX, COMP, CHK, DEF, sensitivity, deprecated strikethrough.
-- **Diagram export**: PNG export (2× pixel ratio) and SVG export via `html-to-image`. Download buttons in diagram toolbar.
-- **Dark mode**: Full dark theme with CSS custom properties (`[data-theme="dark"]`). Toggle via Moon/Sun button in TopBar. Persisted to `localStorage`. Covers editor, diagram, panels, and all UI surfaces.
-- **Schema-aware YAML autocomplete**: Context-sensitive completions for model keys, entity properties, field properties, types, cardinalities, states, sensitivity levels, and boolean values. Powered by CodeMirror `autocompletion` extension.
-- **Inline validation errors**: Real-time lint diagnostics in the editor gutter via CodeMirror `linter` extension. Maps validation issues to source lines with error/warning severity markers.
-- **Global search**: Bottom panel tab searching across entities, fields, tags, descriptions, and glossary terms. Category filter pills with counts. Click-to-navigate selects entity in diagram.
-- **Diagram annotations**: Draggable sticky-note nodes with 5 color variants. Inline text editing, delete on hover. Added via toolbar "Note" button.
-- **Keyboard shortcuts**: `⌘+S` save, `⌘+K` global search, `⌘+\` toggle sidebar, `⌘+J` toggle bottom panel, `⌘+D` toggle dark mode, `?` shortcuts panel. Full shortcuts reference modal with grouped categories.
-- **Large model scaling (1000+ tables)**:
-  - **Virtual rendering**: `onlyRenderVisibleElements` on React Flow — only DOM-renders nodes in viewport.
-  - **Force layout**: Auto-switches ELK from `layered` to `force` algorithm for >200 nodes (O(n log n) vs O(n²)).
-  - **Auto-tune**: Models with >100 entities auto-set to top-50 visible, keys-only fields, compact density, no edge labels.
-  - **Compact dot mode**: >200 visible nodes render as 140px mini-cards (name + type badge + field/rel counts only).
-  - **Schema overview mode**: New "Overview" view shows schemas/subject_areas as clickable summary cards with entity counts. Click to drill into a schema.
-  - **Entity list panel**: Sidebar panel with searchable, sortable entity list. Click to select + center in diagram. Filter by schema, sort by name/fields/relationships.
-  - **Large model banner**: Dismissible info bar with "Show All" and "Overview" quick actions.
+- **`manifest.py`** — imports `target/manifest.json` into DataLex sources /
+  models. Idempotent via `meta.datalex.dbt.unique_id`; user-authored
+  fields merged, not overwritten.
+- **`profiles.py`** — parses `profiles.yml` (with dbt's precedence:
+  `--profiles-dir` → `$DBT_PROFILES_DIR` → `<project>/profiles.yml` →
+  `~/.dbt/profiles.yml`). Resolves relative DuckDB paths against the dbt
+  project dir.
+- **`warehouse.py`** — narrow per-table introspection (not full schema
+  discovery). Supports `duckdb` and `postgres` today; other dialects fall
+  back to the full connector in §2.5.
+- **`sync.py`** — orchestrator behind `dm datalex dbt sync`. Merge policy:
+  warehouse owns `type` + `nullable`; manifest/user own everything else.
+- **`emit.py`** — emits `sources.yml` + `models/_schema.yml` with
+  `contract.enforced: true` and `data_type:` on every column.
 
-### 2.10 Policy Engine & Governance Maturity Plane
-- **Policy schema v2** (`schemas/policy.schema.json`): 10 policy types (4 original + 6 new), `pack.extends` for inheritance.
-- **New policy types** (`dm_core/policy.py`):
-  - `naming_convention` — Regex patterns for entity, field, relationship, and index names. Fullmatch validation with configurable patterns per object type.
-  - `require_indexes` — Tables with ≥ N fields (default 5) must have at least one index. Configurable `min_fields` and `entity_types` filter.
-  - `require_owner` — Every entity must have an `owner` field. Optional `require_email` validation and `entity_types` filter.
-  - `require_sla` — Entities must define SLA with freshness/quality_score. Filterable by `entity_types` and `required_tags` (e.g. only GOLD-tagged tables).
-  - `deprecation_check` — Deprecated fields must have `deprecated_message`. Optionally checks relationships and indexes for references to deprecated fields.
-  - `custom_expression` — User-defined Python expressions evaluated against entity, field, or model context. Supports `{name}` message templates. Scopes: `entity`, `field`, `model`.
-- **Policy inheritance** (`merge_policy_packs`, `load_policy_pack_with_inheritance`): Compose policy packs via `pack.extends` (string or array). Policies merged by `id` — later definitions override earlier ones. Transitive resolution supported.
-- **CLI**: `dm policy-check --inherit` flag resolves `pack.extends` chain before evaluation.
-- **CI integration templates** (`ci-templates/`):
-  - `github-actions.yml` — GitHub Actions workflow: validate, policy-check, PR gate
-  - `gitlab-ci.yml` — GitLab CI pipeline: validate, policy, gate stages
-  - `bitbucket-pipelines.yml` — Bitbucket Pipelines: validate, policy, PR gate
-  - `pr-comment-bot.yml` — GitHub Actions PR comment bot: auto-posts diff summary, validation results, policy results, and breaking change detection as a sticky PR comment
+### 2.4 Cross-repo packages (`dm_core/packages.py`)
 
-### 2.11 CLI & Developer Experience Plane
-- **`dm doctor`** (`dm_core/doctor.py`): Project health diagnostics — checks schema files, policy schema, model files, policy packs, Python dependencies, CLI entry point, requirements.txt. Human-readable output with ✓/✗/! icons and summary. JSON output via `--output-json`.
-- **`dm migrate`** (`dm_core/migrate.py`): SQL migration script generator between two model versions. Produces ALTER TABLE (ADD/DROP/ALTER COLUMN), CREATE TABLE, DROP TABLE, CREATE/DROP INDEX statements. Supports Postgres, Snowflake, BigQuery, Databricks dialects. Skips views, materialized views, external tables, snapshots. Version header in output. File output via `--out`.
-- **`dm apply`** (`dm_cli/main.py`): Forward-engineering execution command for Snowflake, Databricks, and BigQuery. Supports `--sql-file` or `--old/--new` migration generation, `--dry-run`, policy preflight checks, destructive-change guardrails, migration ledger writes, and JSON execution reports. In product mode this is intended for CI/CD runners, not interactive UI apply.
-- **`dm completion`** (`dm_core/completion.py`): Shell completion generators for bash, zsh, and fish. Covers all commands, subcommands (generate/import), dialects, and file type filters. Usage: `eval "$(dm completion bash)"`.
-- **`dm watch`**: File watcher that polls for `*.model.yaml` changes and runs schema + semantic validation on each change. Configurable glob pattern and poll interval. Zero-dependency (uses `stat()` polling).
-- **JSON output**: `--output-json` flag on `doctor`, `stats`, `policy-check`, `gate`, `diff`, `diff-all`, `resolve`, `resolve-project` commands.
+- `ImportSpec.from_dict` — parses `imports:` entries
+  (`org/name@version`, `git:` + `ref:`, or `path:`).
+- `resolve_imports` — fetches each package (shallow git clone or local
+  copy), hashes contents, writes `.datalex/lock.yaml`.
+- `load_imports_for` — consumes the lockfile; errors on `content_hash`
+  drift. Imported entities namespaced under `@alias.entity_name`.
+- Cache root: `~/.datalex/packages/` (override via `--cache-root` or
+  `DATALEX_CACHE_ROOT`).
 
-### 2.12 Forward Engineering API
-- `POST /api/forward/generate-sql` -> wraps `dm generate sql`
-- `POST /api/forward/migrate` -> wraps `dm migrate`
-- `POST /api/forward/apply` -> wraps `dm apply` for Snowflake/Databricks/BigQuery (disabled by default; enable with `DM_ENABLE_DIRECT_APPLY=true`)
-- `POST /api/git/branch/create` -> create/checkout feature branch in project repo
-- `POST /api/git/push` -> push branch to remote origin
-- `POST /api/git/pull` -> pull latest changes (fast-forward only by default)
-- `POST /api/git/github/pr` -> open GitHub pull request from feature branch to base branch
+### 2.5 Database connectors (`dm_core/connectors/`)
 
-## 3. End-to-End Data Flow
-1. User edits/imports YAML (single or multi-model project).
-2. CLI/UI runs structural + semantic checks.
-3. For multi-model projects, resolver builds unified graph from imports.
-4. Canonical model is compiled for deterministic diff and generation.
-5. Policy pack is evaluated for governance rules.
-6. Outputs:
-   - UI diagram + gate report (with cross-model annotations)
-   - SQL/dbt/metadata artifacts
-   - CI pass/fail result
-   - Project-level diff reports
+Full-schema introspection for reverse engineering (distinct from the
+narrow `dbt/warehouse.py`):
 
-## 4. Non-Enterprise Prototype Boundaries
-Excluded in this prototype scope:
-- SSO/OIDC/SAML
-- RBAC and workspace isolation services
-- audit log service and approval workflow backend
+- PostgreSQL, MySQL, Snowflake, BigQuery, Databricks, SQL Server, Azure
+  SQL, Redshift.
+- `BaseConnector` ABC, `ConnectorConfig` dataclass, `ConnectorResult` with
+  driver check + include/exclude filters.
+- Used by legacy `dm pull <connector>` and by `dbt sync` as a fallback
+  when the narrow path doesn't support a dialect.
 
-These remain for the enterprise platform phase.
+### 2.6 Legacy importers and emitters (`dm_core/`)
+
+These predate DataLex but remain wired in for reverse-engineering tasks:
+
+- `importers.py` — SQL DDL, DBML, JSON Schema / OpenAPI, Spark schema,
+  dbt manifest (the legacy path; `dm_core/dbt/manifest.py` is the current
+  one).
+- `generators.py` — DDL emission; migrated into the dialect registry for
+  Postgres and Snowflake, retained for other dialects during rollout.
+- `docs_generator.py` — HTML / Markdown data dictionary.
+- `policy.py` — policy rule evaluator (10 rule types: naming conventions,
+  required fields, SLA, deprecation checks, custom expressions).
+
+## 3. CLI surface (`packages/cli`)
+
+- `datalex_cli.py` — registers the `dm datalex …` subcommand tree:
+  `migrate`, `validate`, `info`, `emit ddl`, `diff`, `expand`, `dbt sync`,
+  `dbt emit`, `dbt import`, `packages resolve`, `packages list`.
+- Legacy flat `dm` commands (`dm validate`, `dm pull`, `dm generate sql`,
+  `dm doctor`, `dm watch`, `dm apply`, `dm migrate`) still exist — see
+  [archive/yaml-spec-v2.md](./archive/yaml-spec-v2.md) for their semantics
+  if you're on a legacy project.
+
+See [cli.md](./cli.md) for the current cheat sheet.
+
+## 4. Web UI (`packages/web-app` + `packages/api-server`)
+
+- React + React Flow studio reading/writing the DataLex tree through the
+  Node API server.
+- Features: subject-area grouping, dark mode, schema-aware YAML
+  autocomplete with inline lint, virtualized rendering for 1000+ entities,
+  diagram export (PNG/SVG), global search, keyboard shortcuts.
+- The UI has no database of its own — everything is filesystem + Git.
+
+## 5. End-to-end flow: dbt sync path
+
+```
+┌──────────────────┐    1. manifest.json      ┌──────────────────┐
+│ dbt project      │  ─────────────────────▶  │ dm_core.dbt      │
+│   target/        │    2. profiles.yml       │   .manifest      │
+│   dbt_project.yml│  ─────────────────────▶  │   .profiles      │
+│   profiles.yml   │                          │   .warehouse     │
+└────────┬─────────┘                          │   .sync          │
+         │                                    └────────┬─────────┘
+         │ 3. information_schema query                 │
+         │    (per table, per profile target)          │
+         ▼                                             │
+┌──────────────────┐                                   │
+│ Warehouse        │ ◀─────────────────────────────────┘
+│ (duckdb/postgres)│
+└──────────────────┘                                   ▼
+                                         ┌──────────────────────┐
+                                         │ DataLex YAML tree    │
+                                         │   sources/*.yaml     │
+                                         │   models/dbt/*.yaml  │
+                                         │   (unique_id stamped)│
+                                         └──────────┬───────────┘
+                                                    │  4. dm datalex dbt emit
+                                                    ▼
+                                         ┌──────────────────────┐
+                                         │ dbt YAML out         │
+                                         │   sources/*.yml      │
+                                         │   models/_schema.yml │
+                                         │   (contracts on)     │
+                                         └──────────────────────┘
+```
+
+Full walkthrough: [tutorial-dbt-sync.md](./tutorial-dbt-sync.md).
+
+## 6. Repository layout
+
+```text
+DuckCodeModeling/
+  packages/
+    core_engine/src/dm_core/
+      datalex/      # loader, project, migrator, diff, parse cache
+      dialects/     # dialect plugin registry (postgres, snowflake, …)
+      dbt/          # manifest, profiles, warehouse, sync, emit
+      connectors/   # full-schema introspection per warehouse
+      …             # legacy importers/emitters/policy kept in parallel
+    cli/src/dm_cli/
+      datalex_cli.py        # dm datalex … subcommand tree
+      main.py               # legacy flat commands
+    api-server/             # Node.js: UI backend
+    web-app/                # React Flow studio
+  schemas/datalex/          # JSON Schema per kind:
+  examples/jaffle_shop_demo # dbt sync demo (DuckDB, zero setup)
+  model-examples/           # legacy scenario projects
+  docs/                     # current docs (this file + tutorials/reference)
+  docs/archive/             # pre-DataLex specs (kept for reference)
+  tests/datalex/            # unittest suite for the DataLex surface
+```
+
+## 7. Design choices worth knowing
+
+- **File-per-entity, `kind:`-dispatched.** Diffs stay small; the parser
+  can stream; concurrent edits don't collide on a single 10K-line file.
+- **`meta.datalex.*` is emitter-owned.** Anything else under `meta:` is
+  yours and survives round-trip. This is the contract that makes
+  `dbt sync` safe to re-run.
+- **Warehouse introspection is narrow on purpose.** `dbt sync` only needs
+  columns for named tables, not the full schema — so `dbt/warehouse.py`
+  is a tight `information_schema.columns` query, not the heavier
+  `connectors/` path.
+- **Cross-repo packages are content-hashed.** Lockfile drift is an error,
+  not a warning. If your CI runs `load_imports_for` it will catch
+  silent upstream changes.
+
+## 8. Non-goals (for now)
+
+- Multi-tenant / hosted SaaS. Everything is local filesystem + Git.
+- SSO / OIDC / SAML / RBAC.
+- Write-path to live warehouses (no `dm apply` auto-run in prod).
+
+These remain options for a future enterprise phase; the current tool is
+shaped for individual dbt users and teams who want their models in Git.

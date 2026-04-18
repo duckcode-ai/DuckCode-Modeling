@@ -1,4 +1,10 @@
-# YAML Spec v2
+# YAML Spec v2 — **archived**
+
+> **Deprecated.** This file describes the single-`*.model.yaml` shape that
+> predates the DataLex layout. The current layout is documented in
+> [../datalex-layout.md](../datalex-layout.md). To convert a v2 file to the
+> current tree, run
+> `dm datalex migrate to-datalex-layout path/to/legacy.model.yaml`.
 
 ## Purpose
 Define data models in a strict, readable YAML format with enterprise-grade schema richness for real data warehouse teams. Backward compatible with v1.

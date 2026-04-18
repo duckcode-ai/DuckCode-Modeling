@@ -5,9 +5,10 @@
 
 # DuckCodeModeling
 
-**YAML-first data modeling and metadata intelligence platform**
+**Git-native data modeling for dbt users.**
 
-Open source UI, API, and CLI for modeling, governance, and schema-aware workflows.
+Point us at your dbt project and warehouse — we produce versioned, reviewable YAML
+with contracts, lineage, ERDs, and clean round-trip back to dbt.
 
 <p align="center">
   <a href="https://github.com/duckcode-ai/DuckCode-Modeling/blob/main/LICENSE">
@@ -19,185 +20,148 @@ Open source UI, API, and CLI for modeling, governance, and schema-aware workflow
   <a href="https://github.com/duckcode-ai/DuckCode-Modeling/stargazers">
     <img src="https://img.shields.io/github/stars/duckcode-ai/DuckCode-Modeling?style=for-the-badge&color=f59e0b" alt="GitHub Stars" />
   </a>
-  <a href="https://github.com/duckcode-ai/DuckCode-Modeling/issues">
-    <img src="https://img.shields.io/github/issues/duckcode-ai/DuckCode-Modeling?style=for-the-badge&color=0ea5e9" alt="Open Issues" />
-  </a>
 </p>
 </div>
 
-## Why DuckCodeModeling
-DuckCodeModeling helps data teams treat data models as versioned code.
+## 60-second demo
 
-- Define models in YAML (`*.model.yaml`)
-- Explore entities and relationships in a visual graph UI
-- Validate structure, quality, and governance policies
-- Track diffs and compatibility gates in CI
-- Pull physical schemas from databases into model files
-- Generate baseline DDL (`.sql`) as an artifact for GitOps-based deployments
+```bash
+git clone https://github.com/duckcode-ai/DuckCode-Modeling.git
+cd DuckCode-Modeling
+pip install -r requirements.txt
 
-## What Is Included
-- `packages/web-app`: React + Vite modeling studio
-- `packages/api-server`: Node.js API for project/files/connectors operations
-- `packages/core_engine`: Python core engine (validation, policy, docs, importers)
-- `packages/cli`: Python CLI (`dm`) entry points and commands
-- `model-examples`: sample models and guided scenario walkthroughs
-- `schemas`: JSON schema contracts
-- `policies`: baseline and strict policy packs
-- `docs`: architecture, specs, SLOs, runbooks
+# 1. Build a local DuckDB warehouse (no external credentials)
+python examples/jaffle_shop_demo/setup.py
 
-## Supported Connectors
-### Available Now
-<p>
-  <img src="https://img.shields.io/badge/Snowflake-29B5E8?style=for-the-badge&logo=snowflake&logoColor=white" alt="Snowflake" />
-  <img src="https://img.shields.io/badge/Databricks-EF3E42?style=for-the-badge&logo=databricks&logoColor=white" alt="Databricks" />
-  <img src="https://img.shields.io/badge/dbt-FF694B?style=for-the-badge&logo=dbt&logoColor=white" alt="dbt Local Project" />
-  <img src="https://img.shields.io/badge/BigQuery-4285F4?style=for-the-badge&logo=googlebigquery&logoColor=white" alt="BigQuery" />
-  <img src="https://img.shields.io/badge/PostgreSQL-336791?style=for-the-badge&logo=postgresql&logoColor=white" alt="PostgreSQL" />
-  <img src="https://img.shields.io/badge/MySQL-4479A1?style=for-the-badge&logo=mysql&logoColor=white" alt="MySQL" />
-  <img src="https://img.shields.io/badge/SQL%20Server-CC2927?style=for-the-badge&logo=microsoftsqlserver&logoColor=white" alt="SQL Server" />
-  <img src="https://img.shields.io/badge/Azure%20SQL-0078D4?style=for-the-badge&logo=microsoftazure&logoColor=white" alt="Azure SQL" />
-  <img src="https://img.shields.io/badge/Redshift-8C4FFF?style=for-the-badge&logo=amazonredshift&logoColor=white" alt="Amazon Redshift" />
-  <img src="https://img.shields.io/badge/Microsoft%20Fabric-0078D4?style=for-the-badge&logo=microsoftfabric&logoColor=white" alt="Microsoft Fabric" />
-</p>
+# 2. Sync the dbt project into DataLex YAML
+./dm datalex dbt sync examples/jaffle_shop_demo \
+    --out-root examples/jaffle_shop_demo/datalex-out
 
-## Screenshots
-![DuckCodeModeling Overview](screenshots/overview.png)
-![DuckCodeModeling Search](screenshots/search.png)
-
-## Repository Structure
-```text
-DuckCodeModeling/
-  packages/
-    api-server/
-    web-app/
-    cli/
-    core_engine/
-  docs/
-  model-examples/
-  policies/
-  schemas/
-  tests/
+# 3. Emit dbt-parseable YAML back, with contracts enforced
+./dm datalex dbt emit examples/jaffle_shop_demo/datalex-out \
+    --out-dir examples/jaffle_shop_demo/dbt-out
 ```
 
-## Prerequisites
-- Node.js 18+
-- npm 9+
-- Python 3.9+
-- Git
-- Docker (optional)
+Open `examples/jaffle_shop_demo/datalex-out/sources/jaffle_shop_raw.yaml` —
+every column has its warehouse type, descriptions from the manifest, and a
+`meta.datalex.dbt.unique_id` stamp so re-running the sync never clobbers
+anything you've hand-authored.
 
-## Quick Start (Local Recommended)
-Local setup gives the best experience because the app can access your folders directly.
+## What it does
+
+DuckCodeModeling treats your data models as code. On top of a stricter YAML
+substrate (the **DataLex** layout — one file per entity, `kind:`-dispatched,
+streaming-safe for 10K+ entities), it gives you:
+
+- **`dm datalex dbt sync <project>`** — reads `target/manifest.json` + your
+  `profiles.yml`, introspects live column types, and merges them into
+  DataLex YAML. Idempotent: user-authored `description:`, `tags:`,
+  `sensitivity:`, and `tests:` survive re-sync.
+- **`dm datalex dbt emit`** — writes `sources.yml` and `schema.yml` with
+  `contract.enforced: true` and `data_type:` on every column. `dbt parse`
+  succeeds out of the box.
+- **`dm datalex emit ddl --dialect ...`** — Postgres, Snowflake, BigQuery,
+  Databricks, MySQL, SQL Server, Redshift. Same source, all dialects.
+- **`dm datalex diff`** — semantic diff with explicit rename tracking
+  (`previous_name:`), breaking-change gate for CI.
+- **Cross-repo package imports** — pin `acme/warehouse-core@1.4.0` in
+  `imports:`, lockfile + content hash drift detection, Git-or-path
+  resolution, on-disk parse cache for large projects.
+- **Visual studio** — React Flow UI for editing entities, relationships,
+  and metadata; same YAML files as the CLI.
+
+## Supported warehouses
+
+| Warehouse | `dbt sync` introspection | Forward DDL | Reverse engineering |
+|---|:---:|:---:|:---:|
+| DuckDB | ✓ | — | — |
+| PostgreSQL | ✓ | ✓ | ✓ |
+| Snowflake | (fallback) | ✓ | ✓ |
+| BigQuery | (fallback) | ✓ | ✓ |
+| Databricks | (fallback) | ✓ | ✓ |
+| MySQL | (fallback) | ✓ | ✓ |
+| SQL Server / Azure SQL | (fallback) | ✓ | ✓ |
+| Redshift | (fallback) | ✓ | ✓ |
+
+"Fallback" = uses the existing full-schema connector (slower than the
+per-table path but already works today; a narrow introspection path ships
+per-dialect over time).
+
+## Install
 
 ```bash
 git clone https://github.com/duckcode-ai/DuckCode-Modeling.git
 cd DuckCode-Modeling
 
-npm --prefix packages/api-server install
-npm --prefix packages/web-app install
-
 python3 -m venv .venv
 source .venv/bin/activate
-pip install --upgrade pip
 pip install -r requirements.txt
+
+# optional — only needed for the Visual Studio
+npm --prefix packages/api-server install
+npm --prefix packages/web-app install
 ```
 
-Run in two terminals:
+Prereqs: Python 3.9+, Git. Node.js 18+ if you want the UI.
 
-Terminal 1:
+## Project layout
+
+```text
+DuckCodeModeling/
+  packages/
+    core_engine/           # Python: loader, dialects, dbt integration, packages
+    cli/                   # `dm` entry point
+    api-server/            # Node.js API (UI backend)
+    web-app/               # React Flow studio
+  schemas/datalex/         # JSON Schema per `kind:` (project, entity, source, ...)
+  examples/
+    jaffle_shop_demo/      # zero-setup dbt-sync demo (DuckDB)
+  model-examples/          # sample projects and scenario walkthroughs
+  docs/                    # architecture, specs, runbooks
+  tests/                   # unittest suite (core engine + datalex)
+```
+
+## Visual Studio (optional)
+
+If you want the UI on top of your DataLex project, run the two dev servers:
+
 ```bash
+# Terminal 1
 npm --prefix packages/api-server run dev
-```
-
-Terminal 2:
-```bash
+# Terminal 2
 npm --prefix packages/web-app run dev
 ```
 
-Open:
-- Web UI: `http://localhost:5173`
-- API: `http://localhost:3001`
+Then open `http://localhost:5173`. The UI reads and writes the same YAML
+files the CLI does — no database, no hosted service.
 
-## GitOps Workflow (Recommended)
-DuckCodeModeling is intentionally Git-first: it generates code artifacts and you deploy them via your existing CI/CD.
+## CI / GitOps
 
-1. Create/select a project folder (a normal git repo works best).
-2. Pull from a connector (or import) to generate `models/*.model.yaml`.
-3. Edit models in the UI:
-   - Add tables, add columns, rename tables/columns, update metadata and constraints.
-4. Save (`Cmd+S` / `Ctrl+S`):
-   - Saves the YAML file.
-   - Auto-generates baseline DDL into `ddl/<dialect>/<model>.sql` (defaults to `snowflake` if unset).
-5. Commit + push from the built-in Diff & Git panel, or from your terminal.
-6. Deploy with CI/CD by applying the generated `.sql` artifacts in your warehouse (Snowflake/Databricks/BigQuery).
-
-Project config lives in `.duckcodemodeling/project.json` (folders + `defaultDialect`).
-
-## Quick Start (Docker)
-```bash
-docker build -t duckcodemodeling:latest .
-docker run --rm -p 3001:3001 duckcodemodeling:latest
-```
-
-Open: `http://localhost:3001`
-
-If running in Docker, mount host paths so project folders are visible to the container:
+DuckCodeModeling is designed to live in your repo next to your dbt project.
+A typical CI step:
 
 ```bash
-docker run --rm -p 3001:3001 \
-  -v /Users/<you>:/workspace/host \
-  duckcodemodeling:latest
+./dm datalex validate datalex/
+./dm datalex diff datalex-main/ datalex/ --exit-on-breaking
+./dm datalex dbt emit datalex/ --out-dir dbt/
+dbt parse
 ```
 
-## CLI Quick Start
-```bash
-source .venv/bin/activate
+## Documentation
 
-./dm validate model-examples/starter-commerce.model.yaml
-./dm stats model-examples/starter-commerce.model.yaml
-./dm import sql model-examples/schema.sql --out model-examples/imported.model.yaml
-./dm docs model-examples/starter-commerce.model.yaml --out docs-site
-```
+- **[Tutorial: dbt sync in 5 minutes](docs/tutorial-dbt-sync.md)** — the
+  full jaffle_shop walkthrough with explanations.
+- **[DataLex layout reference](docs/datalex-layout.md)** — what each
+  `kind:` file looks like and how the loader discovers them.
+- **[CLI cheat sheet](docs/cli.md)** — every `dm datalex …` subcommand on
+  one page.
+- **[Architecture](docs/architecture.md)** — core engine modules and
+  end-to-end data flow.
+- Pre-DataLex specs have moved to [docs/archive/](docs/archive/).
 
-## End-to-End Modeling Template
-Use this to scaffold source, transform, reporting, and dictionary workflows in one repo structure.
+## Community
 
-```bash
-./dm init --path my-modeling-repo --template end-to-end
-
-cd my-modeling-repo
-dm validate-all --glob "models/**/*.model.yaml"
-dm policy-check models/report/commerce_reporting.model.yaml --policy policies/end_to_end_dictionary.policy.yaml --inherit
-dm resolve-project models
-dm generate docs models/report/commerce_reporting.model.yaml --format html --out docs/dictionary/reporting-dictionary.html
-```
-
-## Example Models
-- Showcase model: `model-examples/00-retail-ops-showcase.model.yaml`
-- End-to-end dictionary example: `model-examples/end-to-end-dictionary/README.md`
-- All scenario guides: `model-examples/README.md`
-
-## Documentation Map
-- Architecture: `docs/architecture.md`
-- API contracts: `docs/api-contracts.md`
-- YAML spec v1: `docs/yaml-spec-v1.md`
-- YAML spec v2: `docs/yaml-spec-v2.md`
-- Governance policy spec: `docs/governance-policy-spec.md`
-- End-to-end modeling dictionary blueprint: `docs/end-to-end-modeling-dictionary.md`
-- Observability SLOs: `docs/observability-slos.md`
-- Backup and restore runbook: `docs/backup-restore-runbook.md`
-
-## Open Source
-- Contributing guide: `CONTRIBUTING.md`
-- Code of Conduct: `CODE_OF_CONDUCT.md`
-- Security policy: `SECURITY.md`
-- License: [![MIT License](https://img.shields.io/badge/License-MIT-22c55e?style=flat-square)](LICENSE)
-
-## Community and Support
 - Discord: [![Join Discord](https://img.shields.io/badge/Discord-Join%20DuckCode%20AI-5865F2?logo=discord&logoColor=white)](https://discord.gg/Dnm6bUvk)
 - Issues: [![GitHub Issues](https://img.shields.io/badge/Issues-Report%20or%20Request-0ea5e9)](https://github.com/duckcode-ai/DuckCode-Modeling/issues)
-
-## Notes
-- Local connector profiles are stored in `.dm-connections.json`.
-- Local project registry is stored in `.dm-projects.json`.
-- CLI binary remains `dm` for compatibility.
+- Contributing: `CONTRIBUTING.md`
+- License: [![MIT](https://img.shields.io/badge/License-MIT-22c55e?style=flat-square)](LICENSE)

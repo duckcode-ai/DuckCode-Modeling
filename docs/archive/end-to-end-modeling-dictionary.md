@@ -1,4 +1,9 @@
-# End-to-End Modeling Dictionary Blueprint
+# End-to-End Modeling Dictionary Blueprint — **archived**
+
+> **Deprecated.** The concepts here (source / transformation / reporting
+> layers + glossary) map onto the current DataLex `kind:` tree — see
+> [../datalex-layout.md](../datalex-layout.md) and
+> [../tutorial-dbt-sync.md](../tutorial-dbt-sync.md) for the replacement.
 
 This blueprint provides an out-of-the-box YAML-first structure for modeling source,
 transformation, and reporting layers while keeping dictionary metadata in the same system.

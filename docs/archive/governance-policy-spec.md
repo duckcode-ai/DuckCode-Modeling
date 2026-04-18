@@ -1,4 +1,11 @@
-# Governance Policy Spec v1 (Prototype)
+# Governance Policy Spec v1 (Prototype) — **archived**
+
+> **Partial deprecation.** The wrapper layout (policy pack files) has been
+> replaced by `kind: policy` files — see
+> [../datalex-layout.md § `kind: policy`](../datalex-layout.md#kind-policy--governance-rules).
+> The **rule semantics** below (`require_description`, `require_owner`,
+> `naming_convention`, etc.) are still accurate — the current validator
+> enforces the same rule set through `dm datalex validate`.
 
 ## 1. Purpose
 Policy packs let teams enforce governance and modeling standards as code.

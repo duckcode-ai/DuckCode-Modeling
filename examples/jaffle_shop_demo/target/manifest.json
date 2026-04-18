@@ -1,0 +1,97 @@
+{
+  "metadata": {
+    "dbt_schema_version": "https://schemas.getdbt.com/dbt/manifest/v11.json",
+    "project_name": "jaffle_shop",
+    "adapter_type": "duckdb"
+  },
+  "sources": {
+    "source.jaffle_shop.jaffle_shop_raw.raw_customers": {
+      "unique_id": "source.jaffle_shop.jaffle_shop_raw.raw_customers",
+      "resource_type": "source",
+      "name": "raw_customers",
+      "source_name": "jaffle_shop_raw",
+      "database": "warehouse",
+      "schema": "main",
+      "identifier": "raw_customers",
+      "description": "Raw customer records from the source system.",
+      "columns": {
+        "id": {"name": "id", "description": "Primary key."},
+        "first_name": {"name": "first_name"},
+        "last_name": {"name": "last_name"}
+      }
+    },
+    "source.jaffle_shop.jaffle_shop_raw.raw_orders": {
+      "unique_id": "source.jaffle_shop.jaffle_shop_raw.raw_orders",
+      "resource_type": "source",
+      "name": "raw_orders",
+      "source_name": "jaffle_shop_raw",
+      "database": "warehouse",
+      "schema": "main",
+      "identifier": "raw_orders",
+      "description": "Raw orders from the source system.",
+      "columns": {
+        "id": {"name": "id"},
+        "user_id": {"name": "user_id", "description": "Customer who placed the order."},
+        "order_date": {"name": "order_date"},
+        "status": {"name": "status"}
+      }
+    },
+    "source.jaffle_shop.jaffle_shop_raw.raw_payments": {
+      "unique_id": "source.jaffle_shop.jaffle_shop_raw.raw_payments",
+      "resource_type": "source",
+      "name": "raw_payments",
+      "source_name": "jaffle_shop_raw",
+      "database": "warehouse",
+      "schema": "main",
+      "identifier": "raw_payments",
+      "columns": {
+        "id": {"name": "id"},
+        "order_id": {"name": "order_id"},
+        "payment_method": {"name": "payment_method"},
+        "amount": {"name": "amount"}
+      }
+    }
+  },
+  "nodes": {
+    "model.jaffle_shop.stg_customers": {
+      "unique_id": "model.jaffle_shop.stg_customers",
+      "resource_type": "model",
+      "name": "stg_customers",
+      "database": "warehouse",
+      "schema": "main",
+      "description": "Staged customers — one row per customer.",
+      "config": {"materialized": "view"},
+      "depends_on": {
+        "nodes": ["source.jaffle_shop.jaffle_shop_raw.raw_customers"]
+      },
+      "columns": {
+        "customer_id": {"name": "customer_id", "description": "Unique customer identifier."},
+        "first_name": {"name": "first_name"},
+        "last_name": {"name": "last_name"}
+      }
+    },
+    "model.jaffle_shop.customers": {
+      "unique_id": "model.jaffle_shop.customers",
+      "resource_type": "model",
+      "name": "customers",
+      "database": "warehouse",
+      "schema": "main",
+      "description": "Customer mart with order history aggregates.",
+      "config": {"materialized": "table"},
+      "depends_on": {
+        "nodes": [
+          "model.jaffle_shop.stg_customers",
+          "source.jaffle_shop.jaffle_shop_raw.raw_orders",
+          "source.jaffle_shop.jaffle_shop_raw.raw_payments"
+        ]
+      },
+      "columns": {
+        "customer_id": {"name": "customer_id"},
+        "first_name": {"name": "first_name"},
+        "last_name": {"name": "last_name"},
+        "number_of_orders": {"name": "number_of_orders"},
+        "customer_lifetime_value": {"name": "customer_lifetime_value"}
+      }
+    }
+  }
+}
