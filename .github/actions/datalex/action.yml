@@ -1,0 +1,131 @@
+name: "DataLex Validate / Diff / dbt Emit"
+description: >-
+  Reusable composite action that validates a DataLex project, runs a
+  breaking-change diff against a base revision, emits dbt sources.yml /
+  schema.yml, and optionally runs `dbt parse` against the emitted YAML.
+author: "DuckCode Modeling"
+
+inputs:
+  root:
+    description: "Path to the DataLex project root (contains datalex.yaml)."
+    required: true
+  base-ref:
+    description: >-
+      Git ref (branch/SHA) to diff against for breaking-change detection.
+      When set, the action checks out `base-ref` into a temp worktree and runs
+      `dm datalex diff --exit-on-breaking`. Leave empty to skip the diff step.
+    required: false
+    default: ""
+  dbt-out-dir:
+    description: >-
+      If set, the action emits dbt YAML for the project into this directory
+      via `dm datalex dbt emit`. Leave empty to skip emission.
+    required: false
+    default: ""
+  dbt-parse:
+    description: >-
+      If "true" and `dbt-out-dir` is set, install dbt-core and run
+      `dbt parse` against the emitted YAML. Requires a dbt profile to be
+      provided by the caller (via DBT_PROFILES_DIR or profiles.yml inside
+      `dbt-out-dir`).
+    required: false
+    default: "false"
+  python-version:
+    description: "Python version to use."
+    required: false
+    default: "3.11"
+  strict:
+    description: "Pass --non-strict to validate if set to \"false\". Default is strict."
+    required: false
+    default: "true"
+
+outputs:
+  dbt-out-dir:
+    description: "Resolved dbt emission directory (echo of input)."
+    value: ${{ inputs.dbt-out-dir }}
+
+runs:
+  using: "composite"
+  steps:
+    - name: Setup Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: ${{ inputs.python-version }}
+
+    - name: Install DataLex dependencies
+      shell: bash
+      run: |
+        python3 -m pip install --upgrade pip
+        if [ -f "${{ github.action_path }}/../../../requirements.txt" ]; then
+          python3 -m pip install -r "${{ github.action_path }}/../../../requirements.txt"
+        else
+          python3 -m pip install "PyYAML>=6.0" "jsonschema>=4.0"
+        fi
+
+    - name: Resolve dm entry script
+      id: dm
+      shell: bash
+      run: |
+        set -euo pipefail
+        if [ -x "./dm" ]; then
+          echo "cmd=./dm" >> "$GITHUB_OUTPUT"
+        else
+          repo_dm="${{ github.action_path }}/../../../dm"
+          if [ -x "$repo_dm" ]; then
+            echo "cmd=$repo_dm" >> "$GITHUB_OUTPUT"
+          else
+            echo "Could not find ./dm entry script." >&2
+            exit 1
+          fi
+        fi
+
+    - name: Validate DataLex project
+      shell: bash
+      run: |
+        set -euo pipefail
+        flags=""
+        if [ "${{ inputs.strict }}" = "false" ]; then
+          flags="--non-strict"
+        fi
+        ${{ steps.dm.outputs.cmd }} datalex validate "${{ inputs.root }}" $flags
+
+    - name: Breaking-change diff against base-ref
+      if: ${{ inputs.base-ref != '' }}
+      shell: bash
+      run: |
+        set -euo pipefail
+        base_ref="${{ inputs.base-ref }}"
+        worktree_dir="$(mktemp -d)/base"
+        git fetch --no-tags --depth=1 origin "$base_ref" || git fetch --no-tags origin "$base_ref"
+        git worktree add --detach "$worktree_dir" "$base_ref"
+        trap 'git worktree remove --force "$worktree_dir" >/dev/null 2>&1 || true' EXIT
+
+        base_root="$worktree_dir/${{ inputs.root }}"
+        if [ ! -f "$base_root/datalex.yaml" ]; then
+          echo "Base ref $base_ref has no DataLex project at ${{ inputs.root }} — skipping diff."
+          exit 0
+        fi
+
+        ${{ steps.dm.outputs.cmd }} datalex diff "$base_root" "${{ inputs.root }}" --exit-on-breaking
+
+    - name: Emit dbt YAML
+      if: ${{ inputs.dbt-out-dir != '' }}
+      shell: bash
+      run: |
+        set -euo pipefail
+        mkdir -p "${{ inputs.dbt-out-dir }}"
+        ${{ steps.dm.outputs.cmd }} datalex dbt emit "${{ inputs.root }}" --out-dir "${{ inputs.dbt-out-dir }}"
+
+    - name: Run dbt parse on emitted YAML
+      if: ${{ inputs.dbt-parse == 'true' && inputs.dbt-out-dir != '' }}
+      shell: bash
+      run: |
+        set -euo pipefail
+        python3 -m pip install "dbt-core>=1.7"
+        cd "${{ inputs.dbt-out-dir }}"
+        if [ ! -f dbt_project.yml ]; then
+          echo "No dbt_project.yml in ${{ inputs.dbt-out-dir }} — dbt parse needs one." >&2
+          echo "Provide a dbt_project.yml + profiles.yml next to the emitted YAML, or set dbt-parse=false." >&2
+          exit 2
+        fi
+        dbt parse

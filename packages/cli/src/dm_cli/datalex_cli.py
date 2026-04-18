@@ -23,6 +23,7 @@ from dm_core.datalex.errors import DataLexLoadError
 from dm_core.datalex.migrate_layout import migrate_project
 import dm_core.dialects  # noqa: F401  — side-effect registers built-in dialects
 from dm_core.dialects.registry import get_dialect, known_dialects
+from dm_core.dbt import emit_dbt, import_manifest, write_import_result
 
 
 def register_datalex(parent_sub: argparse._SubParsersAction) -> None:
@@ -113,6 +114,59 @@ def register_datalex(parent_sub: argparse._SubParsersAction) -> None:
         "--output-json", action="store_true", help="Emit summary as JSON"
     )
     info_parser.set_defaults(func=_cmd_info)
+
+    # dbt
+    dbt_parser = dsub.add_parser("dbt", help="dbt integration (emit / import)")
+    dbt_sub = dbt_parser.add_subparsers(dest="dbt_command", required=True)
+
+    dbt_emit = dbt_sub.add_parser(
+        "emit", help="Emit dbt-parseable YAML (sources.yml + schema.yml)"
+    )
+    dbt_emit.add_argument("root", help="DataLex project root")
+    dbt_emit.add_argument(
+        "--out-dir", required=True, help="Target directory to write dbt YAML"
+    )
+    dbt_emit.add_argument(
+        "--only",
+        choices=["sources", "models", "all"],
+        default="all",
+        help="Emit only sources, only models, or both (default: all)",
+    )
+    dbt_emit.add_argument(
+        "--output-json",
+        action="store_true",
+        help="Emit the report as JSON",
+    )
+    dbt_emit.set_defaults(func=_cmd_dbt_emit)
+
+    dbt_import = dbt_sub.add_parser(
+        "import",
+        help="Import a dbt manifest.json into DataLex source/model files (idempotent by unique_id)",
+    )
+    dbt_import.add_argument("manifest", help="Path to dbt target/manifest.json")
+    dbt_import.add_argument(
+        "--out-root",
+        required=True,
+        help="Target DataLex project root to write sources/ and models/dbt/",
+    )
+    dbt_import.add_argument(
+        "--merge-from",
+        help="Existing DataLex project root to merge user-authored fields from",
+    )
+    dbt_import.set_defaults(func=_cmd_dbt_import)
+
+    # expand
+    expand_parser = dsub.add_parser(
+        "expand",
+        help="Preview a project with snippets expanded (does not modify files)",
+    )
+    expand_parser.add_argument("root", help="Project root")
+    expand_parser.add_argument(
+        "--output-json",
+        action="store_true",
+        help="Print expanded entities as JSON",
+    )
+    expand_parser.set_defaults(func=_cmd_expand)
 
 
 # ----------------- command impls -----------------
@@ -300,6 +354,86 @@ def _cmd_info(args: argparse.Namespace) -> int:
         print(f"  models:    {len(project.models)}")
         print(f"  policies:  {len(project.policies)}")
         print(f"  snippets:  {len(project.snippets)}")
+    return 0
+
+
+def _cmd_dbt_emit(args: argparse.Namespace) -> int:
+    try:
+        project = load_project(args.root, strict=True)
+    except DataLexLoadError as e:
+        for err in e.errors:
+            print(str(err), file=sys.stderr)
+        return 1
+
+    include_sources = args.only in ("all", "sources")
+    include_models = args.only in ("all", "models")
+    report = emit_dbt(
+        project,
+        out_dir=args.out_dir,
+        include_sources=include_sources,
+        include_models=include_models,
+    )
+    if args.output_json:
+        print(
+            json.dumps(
+                {
+                    "out_dir": args.out_dir,
+                    "sources": report.sources,
+                    "models": report.models,
+                    "files": report.files,
+                },
+                indent=2,
+            )
+        )
+    else:
+        print(report.summary())
+    return 0
+
+
+def _cmd_dbt_import(args: argparse.Namespace) -> int:
+    result = import_manifest(
+        args.manifest,
+        existing_project_root=args.merge_from or args.out_root,
+    )
+    written = write_import_result(result, args.out_root)
+    print(
+        f"Imported {len(result.sources)} source(s) and {len(result.models)} model(s) "
+        f"from {args.manifest} into {args.out_root}."
+    )
+    for f in written:
+        print(f"  - {f}")
+    if result.warnings:
+        print("\nWarnings:")
+        for w in result.warnings:
+            print(f"  - {w}")
+    return 0
+
+
+def _cmd_expand(args: argparse.Namespace) -> int:
+    try:
+        project = load_project(args.root, strict=False)
+    except DataLexLoadError as e:
+        for err in e.errors:
+            print(str(err), file=sys.stderr)
+        return 1
+
+    # load_project already ran resolve(), so snippets are already expanded.
+    # Emit the resulting entity dicts so users can diff against the on-disk YAML
+    # to see what each snippet contributed.
+    if args.output_json:
+        print(
+            json.dumps(
+                {"entities": project.entities, "sources": project.sources, "models": project.models},
+                indent=2,
+                default=str,
+            )
+        )
+    else:
+        import yaml as _yaml
+
+        for key, ent in sorted(project.entities.items()):
+            print(f"# {key}")
+            print(_yaml.safe_dump(ent, sort_keys=False, default_flow_style=False))
     return 0
 
 

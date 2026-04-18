@@ -1,0 +1,60 @@
+name: DataLex
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  datalex:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Discover DataLex projects
+        id: discover
+        shell: bash
+        run: |
+          set -euo pipefail
+          roots=$(find . -maxdepth 4 -name datalex.yaml -not -path '*/node_modules/*' -not -path '*/.git/*' -printf '%h\n' | sort -u)
+          echo "roots<<EOF" >> "$GITHUB_OUTPUT"
+          echo "$roots" >> "$GITHUB_OUTPUT"
+          echo "EOF" >> "$GITHUB_OUTPUT"
+
+      - name: DataLex validate + diff + dbt emit (per project)
+        if: ${{ steps.discover.outputs.roots != '' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          while IFS= read -r root; do
+            [ -z "$root" ] && continue
+            echo "::group::DataLex project: $root"
+            ./dm datalex validate "$root"
+            if [ "${{ github.event_name }}" = "pull_request" ]; then
+              base_ref="origin/${{ github.base_ref }}"
+              git fetch origin "${{ github.base_ref }}" --depth=1 || true
+              worktree_dir="$(mktemp -d)/base"
+              if git worktree add --detach "$worktree_dir" "$base_ref" 2>/dev/null; then
+                if [ -f "$worktree_dir/$root/datalex.yaml" ]; then
+                  ./dm datalex diff "$worktree_dir/$root" "$root" --exit-on-breaking
+                else
+                  echo "No DataLex project at $root in base — skipping diff."
+                fi
+                git worktree remove --force "$worktree_dir" >/dev/null 2>&1 || true
+              fi
+            fi
+            out="build/dbt/$root"
+            mkdir -p "$out"
+            ./dm datalex dbt emit "$root" --out-dir "$out"
+            echo "::endgroup::"
+          done <<< "${{ steps.discover.outputs.roots }}"
+
+      - name: Upload emitted dbt YAML
+        if: ${{ steps.discover.outputs.roots != '' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: datalex-dbt-yaml
+          path: build/dbt/
+          if-no-files-found: ignore

@@ -271,6 +271,7 @@ def load_project(
 
     globs = {
         "models": (manifest or {}).get("models", "models/**/*.yaml"),
+        "sources": (manifest or {}).get("sources", "sources/**/*.yaml"),
         "glossary": (manifest or {}).get("glossary", "glossary/**/*.yaml"),
         "snippets": (manifest or {}).get("snippets", ".datalex/snippets/**/*.yaml"),
         "policies": (manifest or {}).get("policies", "policies/**/*.yaml"),

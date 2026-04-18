@@ -25,6 +25,10 @@
       "type": "string",
       "description": "Glob for entity/source/model files, e.g. 'models/**/*.yaml'."
     },
+    "sources": {
+      "type": "string",
+      "description": "Glob for kind:source files, e.g. 'sources/**/*.yaml'. Optional."
+    },
     "snippets": {
       "type": "string",
       "description": "Glob for snippet files, default '.datalex/snippets/**/*.yaml'."
