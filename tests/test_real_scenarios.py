@@ -10,7 +10,7 @@ SCENARIOS = ROOT / "tests" / "scenarios"
 class RealScenarioTests(unittest.TestCase):
     def run_dm(self, args):
         return subprocess.run(
-            ["./dm", *args],
+            ["./datalex", *args],
             cwd=ROOT,
             check=False,
             capture_output=True,

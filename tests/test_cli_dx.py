@@ -1,10 +1,10 @@
 """Phase 7 — CLI & Developer Experience tests.
 
 Covers:
-  - dm doctor (diagnostics)
-  - dm migrate (SQL migration generation)
-  - dm completion (bash/zsh/fish)
-  - dm watch (parser only — actual watch is interactive)
+  - datalex doctor (diagnostics)
+  - datalex migrate (SQL migration generation)
+  - datalex completion (bash/zsh/fish)
+  - datalex watch (parser only — actual watch is interactive)
   - CLI parser entries for new commands
   - Migration SQL correctness (add/drop/alter column, create/drop table, indexes)
   - Rich output helpers
@@ -293,7 +293,7 @@ class TestMigrationGenerator(unittest.TestCase):
 # ===========================================================================
 
 class TestDoctor(unittest.TestCase):
-    """Tests for dm doctor diagnostics."""
+    """Tests for datalex doctor diagnostics."""
 
     def test_run_diagnostics_on_project(self):
         results = run_diagnostics(str(ROOT))

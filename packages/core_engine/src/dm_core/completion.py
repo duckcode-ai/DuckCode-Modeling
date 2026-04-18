@@ -28,7 +28,7 @@ def generate_bash_completion() -> str:
     dialects = " ".join(_DIALECTS)
 
     return f'''# bash completion for dm (DataLex CLI)
-# Add to ~/.bashrc: eval "$(dm completion bash)"
+# Add to ~/.bashrc: eval "$(datalex completion bash)"
 
 _dm_completions() {{
     local cur prev commands
@@ -113,7 +113,7 @@ def generate_zsh_completion() -> str:
 
     return f'''#compdef dm
 # zsh completion for dm (DataLex CLI)
-# Add to ~/.zshrc: eval "$(dm completion zsh)"
+# Add to ~/.zshrc: eval "$(datalex completion zsh)"
 
 _dm() {{
     local -a commands

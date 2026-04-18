@@ -6,8 +6,8 @@
 3. UI build artifact health (`npm run build`).
 
 ## 2. Prototype SLO Targets
-1. `dm validate` for medium model (<200 entities): under 3 seconds.
-2. `dm gate` for medium model: under 5 seconds.
+1. `datalex validate` for medium model (<200 entities): under 3 seconds.
+2. `datalex gate` for medium model: under 5 seconds.
 3. UI first render for medium model: under 2 seconds in local dev mode.
 
 ## 3. Recommended Metrics for Hosted Phase

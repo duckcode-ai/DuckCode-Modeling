@@ -407,7 +407,7 @@ async function bootstrapProjectStructure(projectPath, { initializeGit = false } 
     "    steps:",
     "      - uses: actions/checkout@v4",
     "      - name: Placeholder",
-    "        run: echo \"Add dm validate/migrate checks here\"",
+    "        run: echo \"Add datalex validate/migrate checks here\"",
     "",
   ].join("\n");
 
@@ -1934,7 +1934,7 @@ app.post("/api/forward/generate-sql", requireAdmin, express.json(), async (req, 
 });
 
 app.post("/api/model/transform", requireAdmin, express.json({ limit: "10mb" }), async (req, res) => {
-  const tmpDir = join(tmpdir(), `dm-transform-${Date.now()}`);
+  const tmpDir = join(tmpdir(), `datalex-transform-${Date.now()}`);
   try {
     const { model_content, model_path, transform, dialect = "postgres", out, write_back } = req.body || {};
     if (!transform) {
@@ -1978,7 +1978,7 @@ app.post("/api/model/transform", requireAdmin, express.json({ limit: "10mb" }), 
 });
 
 app.post("/api/model/standards/check", requireAdmin, express.json({ limit: "10mb" }), async (req, res) => {
-  const tmpDir = join(tmpdir(), `dm-standards-check-${Date.now()}`);
+  const tmpDir = join(tmpdir(), `datalex-standards-check-${Date.now()}`);
   try {
     const { model_content, model_path } = req.body || {};
     const modelYaml = resolveYamlInput({ content: model_content, path: model_path, label: "model_path" });
@@ -1999,7 +1999,7 @@ app.post("/api/model/standards/check", requireAdmin, express.json({ limit: "10mb
 });
 
 app.post("/api/model/standards/fix", requireAdmin, express.json({ limit: "10mb" }), async (req, res) => {
-  const tmpDir = join(tmpdir(), `dm-standards-fix-${Date.now()}`);
+  const tmpDir = join(tmpdir(), `datalex-standards-fix-${Date.now()}`);
   try {
     const { model_content, model_path, out, write_back } = req.body || {};
     const modelYaml = resolveYamlInput({ content: model_content, path: model_path, label: "model_path" });
@@ -2032,7 +2032,7 @@ app.post("/api/model/standards/fix", requireAdmin, express.json({ limit: "10mb" 
 });
 
 app.post("/api/model/sync/compare", requireAdmin, express.json({ limit: "10mb" }), async (req, res) => {
-  const tmpDir = join(tmpdir(), `dm-sync-compare-${Date.now()}`);
+  const tmpDir = join(tmpdir(), `datalex-sync-compare-${Date.now()}`);
   try {
     const {
       current_content,
@@ -2072,7 +2072,7 @@ app.post("/api/model/sync/compare", requireAdmin, express.json({ limit: "10mb" }
 });
 
 app.post("/api/model/sync/merge", requireAdmin, express.json({ limit: "10mb" }), async (req, res) => {
-  const tmpDir = join(tmpdir(), `dm-sync-merge-${Date.now()}`);
+  const tmpDir = join(tmpdir(), `datalex-sync-merge-${Date.now()}`);
   try {
     const {
       current_content,

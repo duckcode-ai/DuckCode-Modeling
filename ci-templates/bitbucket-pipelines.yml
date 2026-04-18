@@ -18,7 +18,7 @@ definitions:
         script:
           - pip install --upgrade pip
           - pip install -r requirements.txt
-          - ./dm validate-all --schema schemas/model.schema.json
+          - ./datalex validate-all --schema schemas/model.schema.json
 
     - step: &policy-check
         name: Policy Check
@@ -30,7 +30,7 @@ definitions:
           - |
             for model in $(find . -name '*.model.yaml' -not -path '*/node_modules/*' -not -path '*/.git/*'); do
               echo "Policy check: ${model}"
-              ./dm policy-check "${model}" \
+              ./datalex policy-check "${model}" \
                 --policy policies/default.policy.yaml \
                 --schema schemas/model.schema.json
             done
@@ -59,14 +59,14 @@ definitions:
               if git cat-file -e "origin/${BITBUCKET_PR_DESTINATION_BRANCH}:${model_path}" 2>/dev/null; then
                 git show "origin/${BITBUCKET_PR_DESTINATION_BRANCH}:${model_path}" > /tmp/base-model.yaml
                 if [ -f "${model_path}" ]; then
-                  ./dm gate /tmp/base-model.yaml "${model_path}" --schema schemas/model.schema.json
+                  ./datalex gate /tmp/base-model.yaml "${model_path}" --schema schemas/model.schema.json
                 else
                   echo "Deleted model file '${model_path}' is treated as breaking."
                   exit 2
                 fi
               else
                 if [ -f "${model_path}" ]; then
-                  ./dm validate "${model_path}" --schema schemas/model.schema.json
+                  ./datalex validate "${model_path}" --schema schemas/model.schema.json
                 fi
               fi
             done

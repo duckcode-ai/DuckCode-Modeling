@@ -10,8 +10,8 @@ Comprehensive enterprise showcase covering data dictionary, governance, rules, r
 
 ## Step-by-Step Review
 1. Activate Python environment: `source .venv/bin/activate`.
-2. Validate schema and rules: `./dm validate model-examples/00-retail-ops-showcase.model.yaml`.
-3. Get model statistics: `./dm stats model-examples/00-retail-ops-showcase.model.yaml`.
+2. Validate schema and rules: `./datalex validate model-examples/00-retail-ops-showcase.model.yaml`.
+3. Get model statistics: `./datalex stats model-examples/00-retail-ops-showcase.model.yaml`.
 4. Open the DataLex UI and add/open project folder `model-examples`.
 5. Load `00-retail-ops-showcase.model.yaml`, run Search with business terms, and inspect entities/relationships in the diagram.
 6. Open the bottom panel to review properties, business descriptions, governance, and data dictionary/glossary entries when present.

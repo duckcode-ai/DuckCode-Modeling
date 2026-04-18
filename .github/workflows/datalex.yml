@@ -31,14 +31,14 @@ jobs:
           while IFS= read -r root; do
             [ -z "$root" ] && continue
             echo "::group::DataLex project: $root"
-            ./dm datalex validate "$root"
+            ./datalex datalex validate "$root"
             if [ "${{ github.event_name }}" = "pull_request" ]; then
               base_ref="origin/${{ github.base_ref }}"
               git fetch origin "${{ github.base_ref }}" --depth=1 || true
               worktree_dir="$(mktemp -d)/base"
               if git worktree add --detach "$worktree_dir" "$base_ref" 2>/dev/null; then
                 if [ -f "$worktree_dir/$root/datalex.yaml" ]; then
-                  ./dm datalex diff "$worktree_dir/$root" "$root" --exit-on-breaking
+                  ./datalex datalex diff "$worktree_dir/$root" "$root" --exit-on-breaking
                 else
                   echo "No DataLex project at $root in base — skipping diff."
                 fi
@@ -47,7 +47,7 @@ jobs:
             fi
             out="build/dbt/$root"
             mkdir -p "$out"
-            ./dm datalex dbt emit "$root" --out-dir "$out"
+            ./datalex datalex dbt emit "$root" --out-dir "$out"
             echo "::endgroup::"
           done <<< "${{ steps.discover.outputs.roots }}"
 

@@ -58,17 +58,17 @@ This keeps metrics and dictionary metadata in the same YAML model and enables on
 ## Required Validation Flow
 
 ```bash
-dm validate-all --glob "models/**/*.model.yaml"
-dm policy-check models/source/source_sales_raw.model.yaml --policy policies/end_to_end_dictionary.policy.yaml --inherit
-dm policy-check models/transform/commerce_transform.model.yaml --policy policies/end_to_end_dictionary.policy.yaml --inherit
-dm policy-check models/report/commerce_reporting.model.yaml --policy policies/end_to_end_dictionary.policy.yaml --inherit
-dm resolve-project models
+datalex validate-all --glob "models/**/*.model.yaml"
+datalex policy-check models/source/source_sales_raw.model.yaml --policy policies/end_to_end_dictionary.policy.yaml --inherit
+datalex policy-check models/transform/commerce_transform.model.yaml --policy policies/end_to_end_dictionary.policy.yaml --inherit
+datalex policy-check models/report/commerce_reporting.model.yaml --policy policies/end_to_end_dictionary.policy.yaml --inherit
+datalex resolve-project models
 ```
 
 ## Dictionary Artifact Generation
 
 ```bash
-dm generate docs models/report/commerce_reporting.model.yaml --format html --out docs/dictionary/reporting-dictionary.html
+datalex generate docs models/report/commerce_reporting.model.yaml --format html --out docs/dictionary/reporting-dictionary.html
 ```
 
 The generated artifact becomes your human-readable data dictionary for reporting metrics,

@@ -8,7 +8,7 @@ The prototype exposes integration contracts through CLI commands rather than a h
 ### 2.1 SQL Import
 Command:
 ```bash
-dm import sql <schema.sql> --out imported.model.yaml
+datalex import sql <schema.sql> --out imported.model.yaml
 ```
 Contract:
 1. Input: SQL DDL with `CREATE TABLE` statements.
@@ -18,7 +18,7 @@ Contract:
 ### 2.2 DBML Import
 Command:
 ```bash
-dm import dbml <schema.dbml> --out imported.model.yaml
+datalex import dbml <schema.dbml> --out imported.model.yaml
 ```
 Contract:
 1. Input: DBML table/ref declarations.
@@ -28,7 +28,7 @@ Contract:
 
 ### 3.1 SQL DDL Generation
 ```bash
-dm generate sql model.yaml --dialect postgres --out model.sql
+datalex generate sql model.yaml --dialect postgres --out model.sql
 ```
 Output:
 - SQL create table statements
@@ -36,7 +36,7 @@ Output:
 
 ### 3.2 dbt Scaffold Generation
 ```bash
-dm generate dbt model.yaml --out-dir ./dbt
+datalex generate dbt model.yaml --out-dir ./dbt
 ```
 Output files:
 1. `dbt_project.yml`
@@ -46,14 +46,14 @@ Output files:
 
 ### 3.3 Metadata Export
 ```bash
-dm generate metadata model.yaml --out metadata.json
+datalex generate metadata model.yaml --out metadata.json
 ```
 Output:
 - canonical model metadata JSON for external system ingestion.
 
 ### 3.4 Migration SQL Generation
 ```bash
-dm migrate old.model.yaml new.model.yaml --dialect snowflake --out migration.sql
+datalex migrate old.model.yaml new.model.yaml --dialect snowflake --out migration.sql
 ```
 Output:
 - ordered migration SQL (CREATE/DROP/ALTER/INDEX)
@@ -62,7 +62,7 @@ Output:
 ### 3.5 Apply to Warehouse (Forward Engineering)
 ```bash
 # Optional direct apply command (typically CI/CD-only)
-dm apply snowflake --sql-file migration.sql --dry-run
+datalex apply snowflake --sql-file migration.sql --dry-run
 ```
 Output:
 - execution summary (statement count, migration name, checksum)
@@ -110,7 +110,7 @@ Output:
 
 ### 4.1 Validation
 ```bash
-dm validate model.yaml
+datalex validate model.yaml
 ```
 Exit codes:
 1. `0`: pass
@@ -118,7 +118,7 @@ Exit codes:
 
 ### 4.2 Policy Check
 ```bash
-dm policy-check model.yaml --policy policies/default.policy.yaml
+datalex policy-check model.yaml --policy policies/default.policy.yaml
 ```
 Exit codes:
 1. `0`: no error-severity policy violations
@@ -126,7 +126,7 @@ Exit codes:
 
 ### 4.3 Gate
 ```bash
-dm gate old.yaml new.yaml
+datalex gate old.yaml new.yaml
 ```
 Exit codes:
 1. `0`: pass

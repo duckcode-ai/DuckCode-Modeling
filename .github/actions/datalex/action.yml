@@ -13,13 +13,13 @@ inputs:
     description: >-
       Git ref (branch/SHA) to diff against for breaking-change detection.
       When set, the action checks out `base-ref` into a temp worktree and runs
-      `dm datalex diff --exit-on-breaking`. Leave empty to skip the diff step.
+      `datalex datalex diff --exit-on-breaking`. Leave empty to skip the diff step.
     required: false
     default: ""
   dbt-out-dir:
     description: >-
       If set, the action emits dbt YAML for the project into this directory
-      via `dm datalex dbt emit`. Leave empty to skip emission.
+      via `datalex datalex dbt emit`. Leave empty to skip emission.
     required: false
     default: ""
   dbt-parse:
@@ -67,14 +67,14 @@ runs:
       shell: bash
       run: |
         set -euo pipefail
-        if [ -x "./dm" ]; then
-          echo "cmd=./dm" >> "$GITHUB_OUTPUT"
+        if [ -x "./datalex" ]; then
+          echo "cmd=./datalex" >> "$GITHUB_OUTPUT"
         else
-          repo_dm="${{ github.action_path }}/../../../dm"
+          repo_dm="${{ github.action_path }}/../../../datalex"
           if [ -x "$repo_dm" ]; then
             echo "cmd=$repo_dm" >> "$GITHUB_OUTPUT"
           else
-            echo "Could not find ./dm entry script." >&2
+            echo "Could not find ./datalex entry script." >&2
             exit 1
           fi
         fi

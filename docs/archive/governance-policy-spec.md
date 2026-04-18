@@ -5,7 +5,7 @@
 > [../datalex-layout.md § `kind: policy`](../datalex-layout.md#kind-policy--governance-rules).
 > The **rule semantics** below (`require_description`, `require_owner`,
 > `naming_convention`, etc.) are still accurate — the current validator
-> enforces the same rule set through `dm datalex validate`.
+> enforces the same rule set through `datalex datalex validate`.
 
 ## 1. Purpose
 Policy packs let teams enforce governance and modeling standards as code.
@@ -52,15 +52,15 @@ Requires rule entries for target field types.
 - `params.field_types`: list of field types
 
 ## 4. Severity Behavior
-- `error`: fails `dm policy-check`
+- `error`: fails `datalex policy-check`
 - `warn`: reported, does not fail
 - `info`: reported, does not fail
 
 ## 5. Commands
 1. Validate/evaluate policy:
-   - `dm policy-check model.yaml --policy policies/default.policy.yaml`
+   - `datalex policy-check model.yaml --policy policies/default.policy.yaml`
 2. Print policy schema:
-   - `dm print-policy-schema`
+   - `datalex print-policy-schema`
 
 ## 6. Bundled Packs
 1. `policies/default.policy.yaml`

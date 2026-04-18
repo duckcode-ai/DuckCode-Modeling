@@ -1,4 +1,4 @@
-"""Project health diagnostics for ``dm doctor``.
+"""Project health diagnostics for ``datalex doctor``.
 
 Checks:
   - Schema files exist and are valid JSON
@@ -122,15 +122,15 @@ def run_diagnostics(project_dir: str) -> List[DiagnosticResult]:
     results.append(_check_importable("dm_core"))
 
     # 7. CLI entry point
-    dm_path = root / "dm"
-    if dm_path.exists():
-        results.append(DiagnosticResult("cli_entrypoint", "ok", str(dm_path)))
-        if os.access(str(dm_path), os.X_OK):
+    cli_path = root / "datalex"
+    if cli_path.exists():
+        results.append(DiagnosticResult("cli_entrypoint", "ok", str(cli_path)))
+        if os.access(str(cli_path), os.X_OK):
             results.append(DiagnosticResult("cli_executable", "ok"))
         else:
-            results.append(DiagnosticResult("cli_executable", "warn", "dm is not executable (chmod +x dm)"))
+            results.append(DiagnosticResult("cli_executable", "warn", "datalex is not executable (chmod +x datalex)"))
     else:
-        results.append(DiagnosticResult("cli_entrypoint", "warn", "dm script not found at project root"))
+        results.append(DiagnosticResult("cli_entrypoint", "warn", "datalex script not found at project root"))
 
     # 8. requirements.txt
     req_path = root / "requirements.txt"

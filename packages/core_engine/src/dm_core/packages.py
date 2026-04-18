@@ -29,7 +29,7 @@ Lockfile layout (`.datalex/lock.yaml`):
 
 Security notes:
   * When a lockfile exists, we refuse to use any resolution whose resolved_sha
-    disagrees with the locked entry. Run `dm datalex packages resolve --update`
+    disagrees with the locked entry. Run `datalex datalex packages resolve --update`
     to regenerate.
   * `path:` imports are not sandboxed — a local import can be anywhere on the
     filesystem. That is the user's choice.
@@ -238,13 +238,13 @@ def _verify_against_lock(
     if locked_ch and locked_ch != content_hash:
         raise PackageResolveError(
             f"Package '{spec.package}' content_hash {content_hash} does not match "
-            f"lockfile {locked_ch}. Run `dm datalex packages resolve --update` to regenerate."
+            f"lockfile {locked_ch}. Run `datalex datalex packages resolve --update` to regenerate."
         )
     locked_sha = lock_entry.get("resolved_sha")
     if locked_sha and resolved_sha and locked_sha != resolved_sha:
         raise PackageResolveError(
             f"Package '{spec.package}' resolved_sha {resolved_sha} does not match "
-            f"lockfile {locked_sha}. Run `dm datalex packages resolve --update` to regenerate."
+            f"lockfile {locked_sha}. Run `datalex datalex packages resolve --update` to regenerate."
         )
 
 
@@ -398,7 +398,7 @@ def load_imports_for(
             if locked_ch and locked_ch != resolved.content_hash:
                 raise PackageResolveError(
                     f"Package '{spec.package}' content_hash drifted from lockfile; "
-                    f"run `dm datalex packages resolve --update`."
+                    f"run `datalex datalex packages resolve --update`."
                 )
         out.append(resolved)
     return out
@@ -424,7 +424,7 @@ def _probe_resolved(
     if not pkg_dir.exists():
         raise PackageResolveError(
             f"Package '{spec.package}@{ref}' is not in the cache. "
-            f"Run `dm datalex packages resolve` first."
+            f"Run `datalex datalex packages resolve` first."
         )
     sha = (pkg_dir / ".git_sha").read_text().strip() if (pkg_dir / ".git_sha").exists() else ""
     return ResolvedPackage(spec=spec, root=pkg_dir, resolved_sha=sha, content_hash=_hash_tree(pkg_dir))

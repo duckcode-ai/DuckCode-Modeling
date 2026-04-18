@@ -11,7 +11,7 @@ For current docs, start here:
   way to see the tool work.
 - **[DataLex layout reference](../datalex-layout.md)** — replaces
   `yaml-spec-v1.md` and `yaml-spec-v2.md`.
-- **[CLI cheat sheet](../cli.md)** — every `dm datalex …` subcommand.
+- **[CLI cheat sheet](../cli.md)** — every `datalex datalex …` subcommand.
 - **[Architecture](../architecture.md)** — updated for the DataLex substrate.
 
 ## What's here
@@ -26,10 +26,10 @@ For current docs, start here:
 ## Migrating a legacy project
 
 ```bash
-./dm datalex migrate to-datalex-layout path/to/legacy.model.yaml \
+./datalex datalex migrate to-datalex-layout path/to/legacy.model.yaml \
     --output-root path/to/new-datalex-project \
     --dialect postgres
 ```
 
-See `dm datalex migrate to-datalex-layout --help` for options
+See `datalex datalex migrate to-datalex-layout --help` for options
 (`--dry-run`, `--output-json`).

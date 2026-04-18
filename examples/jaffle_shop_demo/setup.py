@@ -3,13 +3,13 @@
 Creates `warehouse.duckdb` next to this file, populated with three raw tables
 (`raw_customers`, `raw_orders`, `raw_payments`) and two dbt model outputs
 (`stg_customers`, `customers`). The manifest.json shipped under `target/`
-already describes these; running `dm datalex dbt sync .` will then merge
+already describes these; running `datalex datalex dbt sync .` will then merge
 warehouse types into the DataLex YAML tree.
 
 Usage:
     cd examples/jaffle_shop_demo
     python setup.py
-    dm datalex dbt sync . --out-root datalex-out/
+    datalex datalex dbt sync . --out-root datalex-out/
 """
 
 from __future__ import annotations
@@ -88,7 +88,7 @@ def main() -> int:
     print(f"Built demo warehouse at: {db_path}")
     print()
     print("Next: from this directory, run")
-    print("    dm datalex dbt sync . --out-root datalex-out")
+    print("    datalex datalex dbt sync . --out-root datalex-out")
     return 0
 
 

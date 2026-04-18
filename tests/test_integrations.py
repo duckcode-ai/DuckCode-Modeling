@@ -13,7 +13,7 @@ MODEL = ROOT / "model-examples" / "starter-commerce.model.yaml"
 class IntegrationCommandTests(unittest.TestCase):
     def run_dm(self, args):
         return subprocess.run(
-            ["./dm", *args],
+            ["./datalex", *args],
             cwd=ROOT,
             check=False,
             capture_output=True,

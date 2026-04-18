@@ -15,7 +15,7 @@ Thanks for contributing. This project includes a React web app, a Node API serve
 ## Run Locally
 - API: `npm --prefix packages/api-server run dev`
 - Web: `npm --prefix packages/web-app run dev`
-- CLI example: `./dm validate model-examples/starter-commerce.model.yaml`
+- CLI example: `./datalex validate model-examples/starter-commerce.model.yaml`
 
 ## Branch and PR Flow
 1. Create a branch from `main`.
@@ -30,7 +30,7 @@ Thanks for contributing. This project includes a React web app, a Node API serve
 - Web tests:
   - `npm --prefix packages/web-app test`
 - Validate example models:
-  - `./dm validate-all --schema schemas/model.schema.json`
+  - `./datalex validate-all --schema schemas/model.schema.json`
 
 ## Commit Style
 - Use short, imperative commit messages.

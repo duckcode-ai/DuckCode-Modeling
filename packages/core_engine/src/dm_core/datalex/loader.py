@@ -440,7 +440,7 @@ def _load_imports(
                 code="PACKAGE_RESOLVE",
                 message=str(e),
                 location=SourceLocation(file=str(project.root / "datalex.yaml")),
-                suggested_fix="Run `dm datalex packages resolve` and re-validate.",
+                suggested_fix="Run `datalex datalex packages resolve` and re-validate.",
             )
         )
         return

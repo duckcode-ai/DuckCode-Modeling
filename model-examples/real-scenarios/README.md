@@ -9,8 +9,8 @@ These files are designed for UI import and gate testing with complex, enterprise
 4. `fintech-risk-change.model.yaml`
 
 ## Suggested Gate Tests
-1. `./dm gate model-examples/real-scenarios/retail-analytics-baseline.model.yaml model-examples/real-scenarios/retail-analytics-change.model.yaml`
-2. `./dm gate model-examples/real-scenarios/fintech-risk-baseline.model.yaml model-examples/real-scenarios/fintech-risk-change.model.yaml`
+1. `./datalex gate model-examples/real-scenarios/retail-analytics-baseline.model.yaml model-examples/real-scenarios/retail-analytics-change.model.yaml`
+2. `./datalex gate model-examples/real-scenarios/fintech-risk-baseline.model.yaml model-examples/real-scenarios/fintech-risk-change.model.yaml`
 
 ## Expected Outcomes (without `--allow-breaking`)
 1. Retail pair should fail gate because of breaking changes:

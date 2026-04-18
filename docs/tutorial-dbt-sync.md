@@ -42,7 +42,7 @@ outputs (`stg_customers`, `customers`). The manifest at
 ## 2. Run the sync
 
 ```bash
-./dm datalex dbt sync examples/jaffle_shop_demo \
+./datalex datalex dbt sync examples/jaffle_shop_demo \
     --out-root examples/jaffle_shop_demo/datalex-out
 ```
 
@@ -124,7 +124,7 @@ Open the source file and add a `sensitivity:` tag to one column:
 Save. Now re-run the sync:
 
 ```bash
-./dm datalex dbt sync examples/jaffle_shop_demo \
+./datalex datalex dbt sync examples/jaffle_shop_demo \
     --out-root examples/jaffle_shop_demo/datalex-out
 ```
 
@@ -135,7 +135,7 @@ contract: **anything you author in YAML stays yours**.
 ## 5. Emit dbt YAML back
 
 ```bash
-./dm datalex dbt emit examples/jaffle_shop_demo/datalex-out \
+./datalex datalex dbt emit examples/jaffle_shop_demo/datalex-out \
     --out-dir examples/jaffle_shop_demo/dbt-out
 ```
 
@@ -155,31 +155,31 @@ dbt manifest  ->  DataLex YAML  ->  reviewable PR  ->  dbt YAML w/ contracts
 
 ```bash
 # Strict validation + structured diagnostics
-./dm datalex validate examples/jaffle_shop_demo/datalex-out
+./datalex datalex validate examples/jaffle_shop_demo/datalex-out
 
 # Project summary (entities by layer, sources, models, policies, …)
-./dm datalex info examples/jaffle_shop_demo/datalex-out
+./datalex datalex info examples/jaffle_shop_demo/datalex-out
 
 # Emit per-dialect DDL for every physical entity
-./dm datalex emit ddl examples/jaffle_shop_demo/datalex-out \
+./datalex datalex emit ddl examples/jaffle_shop_demo/datalex-out \
     --dialect postgres \
     --out /tmp/ddl.sql
 
 # Semantic diff between two snapshots (git-friendly in CI)
-./dm datalex diff old-snapshot/ new-snapshot/ --exit-on-breaking
+./datalex datalex diff old-snapshot/ new-snapshot/ --exit-on-breaking
 ```
 
 ## 7. Where to go next
 
 - [DataLex layout reference](./datalex-layout.md) — what each `kind:` file
   looks like and how the parser discovers them.
-- [CLI cheat sheet](./cli.md) — every `dm datalex …` subcommand on one page.
+- [CLI cheat sheet](./cli.md) — every `datalex datalex …` subcommand on one page.
 - [Architecture overview](./architecture.md) — the core engine modules and
   how they fit together.
 - Try sync against your own dbt project:
   ```bash
   dbt parse                                          # in your dbt project
-  ./dm datalex dbt sync /path/to/your/dbt/project \
+  ./datalex datalex dbt sync /path/to/your/dbt/project \
       --out-root /path/to/datalex-out
   ```
 

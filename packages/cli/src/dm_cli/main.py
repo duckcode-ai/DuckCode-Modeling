@@ -687,12 +687,12 @@ and business dictionary metadata in one programmable YAML system.
 ## Mandatory Validation Flow
 
 ```bash
-dm validate-all --glob "models/**/*.model.yaml"
-dm policy-check models/source/source_sales_raw.model.yaml --policy policies/end_to_end_dictionary.policy.yaml --inherit
-dm policy-check models/transform/commerce_transform.model.yaml --policy policies/end_to_end_dictionary.policy.yaml --inherit
-dm policy-check models/report/commerce_reporting.model.yaml --policy policies/end_to_end_dictionary.policy.yaml --inherit
-dm resolve-project models
-dm generate docs models/report/commerce_reporting.model.yaml --format html --out docs/dictionary/reporting-dictionary.html
+datalex validate-all --glob "models/**/*.model.yaml"
+datalex policy-check models/source/source_sales_raw.model.yaml --policy policies/end_to_end_dictionary.policy.yaml --inherit
+datalex policy-check models/transform/commerce_transform.model.yaml --policy policies/end_to_end_dictionary.policy.yaml --inherit
+datalex policy-check models/report/commerce_reporting.model.yaml --policy policies/end_to_end_dictionary.policy.yaml --inherit
+datalex resolve-project models
+datalex generate docs models/report/commerce_reporting.model.yaml --format html --out docs/dictionary/reporting-dictionary.html
 ```
 """
 
@@ -1222,7 +1222,7 @@ def cmd_generate_metadata(args: argparse.Namespace) -> int:
         "indexes": canonical.get("indexes", []),
         "glossary": canonical.get("glossary", []),
         "governance": canonical.get("governance", {}),
-        "generated_by": "dm generate metadata",
+        "generated_by": "datalex generate metadata",
     }
     output = json.dumps(payload, indent=2)
 
@@ -1455,7 +1455,7 @@ def cmd_connectors(args: argparse.Namespace) -> int:
             status = "installed" if c["installed"] else "NOT INSTALLED"
             print(f"  {c['type']:12s}  {c['name']:30s}  driver: {c['driver']:25s}  [{status}]")
         print(
-            "\nUsage: dm pull <connector> --host <host> --database <db> --user <user> "
+            "\nUsage: datalex pull <connector> --host <host> --database <db> --user <user> "
             "--password <pass> [--out model.yaml | --project-dir ./models]"
         )
     return 0
@@ -2445,7 +2445,7 @@ def cmd_watch(args: argparse.Namespace) -> int:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="dm", description="DataLex CLI")
+    parser = argparse.ArgumentParser(prog="datalex", description="DataLex CLI")
     sub = parser.add_subparsers(dest="command", required=True)
 
     init_parser = sub.add_parser("init", help="Initialize a new workspace")
@@ -2624,7 +2624,7 @@ def build_parser() -> argparse.ArgumentParser:
     import_dbt_parser.set_defaults(func=cmd_import_dbt)
 
     # dbt round-trip subcommand group
-    dbt_parser = sub.add_parser("dbt", help="dbt round-trip: sync DuckCode metadata into dbt schema.yml files")
+    dbt_parser = sub.add_parser("dbt", help="dbt round-trip: sync DataLex metadata into dbt schema.yml files")
     dbt_sub = dbt_parser.add_subparsers(dest="dbt_command", required=True)
 
     dbt_sync_parser = dbt_sub.add_parser("sync", help="Merge DuckCode metadata into a single dbt schema.yml (non-destructive)")
@@ -2783,7 +2783,7 @@ def build_parser() -> argparse.ArgumentParser:
     sync_merge.add_argument("--out", help="Write merged model YAML")
     sync_merge.set_defaults(func=cmd_sync_merge)
 
-    sync_pull = sync_sub.add_parser("pull", help="Alias of 'dm pull' for round-trip workflows")
+    sync_pull = sync_sub.add_parser("pull", help="Alias of 'datalex pull' for round-trip workflows")
     sync_pull.add_argument("connector", help="Connector type (postgres, mysql, snowflake, bigquery, databricks, sqlserver, azure_sql, azure_fabric, redshift)")
     sync_pull.add_argument("--host", help="Database host (or Snowflake account, Databricks server hostname)")
     sync_pull.add_argument("--port", type=int, help="Database port")

@@ -862,9 +862,9 @@ class TestCITemplates(unittest.TestCase):
         self.assertTrue(path.exists(), f"Missing: {path}")
         content = path.read_text()
         self.assertIn("DataLex", content)
-        self.assertIn("dm validate", content)
-        self.assertIn("dm policy-check", content)
-        self.assertIn("dm gate", content)
+        self.assertIn("datalex validate", content)
+        self.assertIn("datalex policy-check", content)
+        self.assertIn("datalex gate", content)
 
     def test_gitlab_ci_template_exists(self):
         path = ROOT / "ci-templates" / "gitlab-ci.yml"
@@ -888,7 +888,7 @@ class TestCITemplates(unittest.TestCase):
         content = path.read_text()
         self.assertIn("DataLex", content)
         self.assertIn("PR Comment", content)
-        self.assertIn("dm diff", content)
+        self.assertIn("datalex diff", content)
 
 
 # ===========================================================================

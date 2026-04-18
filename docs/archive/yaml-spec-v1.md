@@ -4,7 +4,7 @@
 > predates the DataLex layout. The current layout is documented in
 > [../datalex-layout.md](../datalex-layout.md). To convert a v1 file to the
 > current tree, run
-> `dm datalex migrate to-datalex-layout path/to/legacy.model.yaml`.
+> `datalex datalex migrate to-datalex-layout path/to/legacy.model.yaml`.
 
 ## Purpose
 Define data models in a strict, readable YAML format that can be validated, versioned, and rendered.

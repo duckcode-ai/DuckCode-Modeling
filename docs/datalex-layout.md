@@ -4,7 +4,7 @@ Every DataLex project is a directory tree with one YAML file per object. The
 file's `kind:` key dispatches it to the right parser. This page is the
 reference for what each `kind:` looks like and how the loader discovers them.
 
-> **Migrating from v1/v2 `*.model.yaml`?** Use `dm datalex migrate
+> **Migrating from v1/v2 `*.model.yaml`?** Use `datalex datalex migrate
 > to-datalex-layout path/to/legacy.model.yaml` to explode a legacy file into
 > this layout. See also [archive/yaml-spec-v2.md](./archive/yaml-spec-v2.md).
 
@@ -97,7 +97,7 @@ indexes:
 
 Notable fields:
 
-- `previous_name:` — explicit rename tracking; `dm datalex diff` prefers
+- `previous_name:` — explicit rename tracking; `datalex datalex diff` prefers
   explicit renames over heuristics.
 - `physical:` on a column — per-dialect type overrides:
   ```yaml
@@ -138,8 +138,8 @@ tables:
           unique_id: source.jaffle_shop.jaffle_shop_raw.raw_customers
 ```
 
-Populated by `dm datalex dbt sync`; emitted back to `sources.yml` by
-`dm datalex dbt emit`.
+Populated by `datalex datalex dbt sync`; emitted back to `sources.yml` by
+`datalex datalex dbt emit`.
 
 Schema: [`schemas/datalex/source.schema.json`](../schemas/datalex/source.schema.json).
 
@@ -199,7 +199,7 @@ severity: error
 applies_to: [entity]
 ```
 
-The validator enforces policies during `dm datalex validate`. See
+The validator enforces policies during `datalex datalex validate`. See
 [governance-policy-spec in archive](./archive/governance-policy-spec.md) for
 rule semantics (still accurate; the wrapper changed, the rules didn't).
 
@@ -220,7 +220,7 @@ apply:
 ```
 
 Entities opt in via `columns: - use: audit_columns`. Preview the expanded
-output with `dm datalex expand <root>`.
+output with `datalex datalex expand <root>`.
 
 Schema: [`schemas/datalex/snippet.schema.json`](../schemas/datalex/snippet.schema.json).
 
@@ -251,7 +251,7 @@ imports:
     path: ../shared-models
 ```
 
-`dm datalex packages resolve` fetches, caches (under `~/.datalex/packages/`
+`datalex datalex packages resolve` fetches, caches (under `~/.datalex/packages/`
 by default), and writes a content-hashed lockfile at `.datalex/lock.yaml`.
 Later loads reject drift unless you re-run with `--update`.
 

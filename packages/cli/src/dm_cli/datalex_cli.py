@@ -1,4 +1,4 @@
-"""`dm datalex ...` CLI surface — thin wrapper over dm_core.datalex.
+"""`datalex datalex ...` CLI surface — thin wrapper over dm_core.datalex.
 
 Subcommands:
   migrate to-datalex-layout <v3-model.yaml>   split legacy v3 model into DataLex tree
@@ -29,7 +29,7 @@ from dm_core.packages import PackageResolveError, load_imports_for, resolve_impo
 
 
 def register_datalex(parent_sub: argparse._SubParsersAction) -> None:
-    """Register `dm datalex <...>` under the given subparsers object."""
+    """Register `datalex datalex <...>` under the given subparsers object."""
     datalex = parent_sub.add_parser("datalex", help="DataLex spec-layout tooling")
     dsub = datalex.add_subparsers(dest="datalex_command", required=True)
 

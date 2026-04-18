@@ -18,7 +18,7 @@
    - `cd packages/web-app && npm install`
 3. Validate integrity:
    - `python3 -m unittest -q tests/test_mvp.py tests/test_real_scenarios.py tests/test_integrations.py tests/test_performance.py`
-   - `./dm validate-all`
+   - `./datalex validate-all`
 
 ## 4. Disaster Recovery Drill (Prototype)
 Run monthly:

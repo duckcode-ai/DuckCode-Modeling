@@ -19,17 +19,17 @@ and dictionary metadata in one YAML-first workflow.
 ## Run
 
 ```bash
-dm validate-all --glob "model-examples/end-to-end-dictionary/*.model.yaml"
-dm resolve-project model-examples/end-to-end-dictionary
-dm generate docs model-examples/end-to-end-dictionary/commerce_reporting.model.yaml --format html --out docs-site/reporting-dictionary.html
+datalex validate-all --glob "model-examples/end-to-end-dictionary/*.model.yaml"
+datalex resolve-project model-examples/end-to-end-dictionary
+datalex generate docs model-examples/end-to-end-dictionary/commerce_reporting.model.yaml --format html --out docs-site/reporting-dictionary.html
 ```
 
 ## Suggested CI Gate
 
 ```bash
-dm validate-all --glob "models/**/*.model.yaml"
-dm policy-check models/source/source_sales_raw.model.yaml --policy policies/end_to_end_dictionary.policy.yaml --inherit
-dm policy-check models/transform/commerce_transform.model.yaml --policy policies/end_to_end_dictionary.policy.yaml --inherit
-dm policy-check models/report/commerce_reporting.model.yaml --policy policies/end_to_end_dictionary.policy.yaml --inherit
-dm resolve-project models
+datalex validate-all --glob "models/**/*.model.yaml"
+datalex policy-check models/source/source_sales_raw.model.yaml --policy policies/end_to_end_dictionary.policy.yaml --inherit
+datalex policy-check models/transform/commerce_transform.model.yaml --policy policies/end_to_end_dictionary.policy.yaml --inherit
+datalex policy-check models/report/commerce_reporting.model.yaml --policy policies/end_to_end_dictionary.policy.yaml --inherit
+datalex resolve-project models
 ```

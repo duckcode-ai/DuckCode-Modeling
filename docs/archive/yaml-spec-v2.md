@@ -4,7 +4,7 @@
 > predates the DataLex layout. The current layout is documented in
 > [../datalex-layout.md](../datalex-layout.md). To convert a v2 file to the
 > current tree, run
-> `dm datalex migrate to-datalex-layout path/to/legacy.model.yaml`.
+> `datalex datalex migrate to-datalex-layout path/to/legacy.model.yaml`.
 
 ## Purpose
 Define data models in a strict, readable YAML format with enterprise-grade schema richness for real data warehouse teams. Backward compatible with v1.
@@ -63,8 +63,8 @@ Resolution rules:
 1. Imports are resolved recursively (transitive imports are supported)
 2. Circular imports are detected and reported as errors
 3. Duplicate entity names across models produce warnings
-4. Use `dm resolve <model>` to verify import resolution
-5. Use `dm resolve-project <dir>` to verify all models in a project
+4. Use `datalex resolve <model>` to verify import resolution
+5. Use `datalex resolve-project <dir>` to verify all models in a project
 
 ## `entities`
 Each entity requires:

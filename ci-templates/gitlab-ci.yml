@@ -26,7 +26,7 @@ validate-models:
   <<: *datalex-setup
   stage: validate
   script:
-    - ./dm validate-all --schema "$SCHEMA_PATH"
+    - ./datalex validate-all --schema "$SCHEMA_PATH"
 
 policy-check:
   <<: *datalex-setup
@@ -35,7 +35,7 @@ policy-check:
     - |
       for model in $(find . -name '*.model.yaml' -not -path '*/node_modules/*' -not -path '*/.git/*'); do
         echo "Policy check: ${model}"
-        ./dm policy-check "${model}" \
+        ./datalex policy-check "${model}" \
           --policy "$POLICY_PATH" \
           --schema "$SCHEMA_PATH"
       done
@@ -62,14 +62,14 @@ breaking-change-gate:
         if git cat-file -e "origin/${CI_MERGE_REQUEST_TARGET_BRANCH_NAME}:${model_path}" 2>/dev/null; then
           git show "origin/${CI_MERGE_REQUEST_TARGET_BRANCH_NAME}:${model_path}" > /tmp/base-model.yaml
           if [ -f "${model_path}" ]; then
-            ./dm gate /tmp/base-model.yaml "${model_path}" --schema "$SCHEMA_PATH"
+            ./datalex gate /tmp/base-model.yaml "${model_path}" --schema "$SCHEMA_PATH"
           else
             echo "Deleted model file '${model_path}' is treated as breaking."
             exit 2
           fi
         else
           if [ -f "${model_path}" ]; then
-            ./dm validate "${model_path}" --schema "$SCHEMA_PATH"
+            ./datalex validate "${model_path}" --schema "$SCHEMA_PATH"
           fi
         fi
       done

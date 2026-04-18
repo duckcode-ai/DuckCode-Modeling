@@ -5,7 +5,7 @@
 DataLex is a Git-native data modeling platform with three runtime
 surfaces:
 
-1. **CLI (`dm`)** — validation, dbt sync, DDL emission, diff, package
+1. **CLI (`datalex`)** — validation, dbt sync, DDL emission, diff, package
    resolution, layout migration.
 2. **Core engine (`packages/core_engine`)** — deterministic loader,
    dialect plugins, dbt integration, cross-repo packages.
@@ -31,7 +31,7 @@ file per object, dispatched by `kind:`. See
   `sha256(content) + schema_hash`. Warm loads skip re-parsing unchanged
   files.
 - **`migrate_layout.py`** — one-shot migrator from legacy `*.model.yaml` to
-  the DataLex tree. Invoked via `dm datalex migrate to-datalex-layout`.
+  the DataLex tree. Invoked via `datalex datalex migrate to-datalex-layout`.
 - **`diff.py`** — semantic diff with explicit `previous_name:` rename
   detection; breaking-change classification.
 - **`errors.py`** — source-positioned diagnostics with `to_dict()` for
@@ -59,7 +59,7 @@ file per object, dispatched by `kind:`. See
 - **`warehouse.py`** — narrow per-table introspection (not full schema
   discovery). Supports `duckdb` and `postgres` today; other dialects fall
   back to the full connector in §2.5.
-- **`sync.py`** — orchestrator behind `dm datalex dbt sync`. Merge policy:
+- **`sync.py`** — orchestrator behind `datalex datalex dbt sync`. Merge policy:
   warehouse owns `type` + `nullable`; manifest/user own everything else.
 - **`emit.py`** — emits `sources.yml` + `models/_schema.yml` with
   `contract.enforced: true` and `data_type:` on every column.
@@ -84,7 +84,7 @@ narrow `dbt/warehouse.py`):
   SQL, Redshift.
 - `BaseConnector` ABC, `ConnectorConfig` dataclass, `ConnectorResult` with
   driver check + include/exclude filters.
-- Used by legacy `dm pull <connector>` and by `dbt sync` as a fallback
+- Used by legacy `datalex pull <connector>` and by `dbt sync` as a fallback
   when the narrow path doesn't support a dialect.
 
 ### 2.6 Legacy importers and emitters (`dm_core/`)
@@ -102,11 +102,14 @@ These predate DataLex but remain wired in for reverse-engineering tasks:
 
 ## 3. CLI surface (`packages/cli`)
 
-- `datalex_cli.py` — registers the `dm datalex …` subcommand tree:
-  `migrate`, `validate`, `info`, `emit ddl`, `diff`, `expand`, `dbt sync`,
-  `dbt emit`, `dbt import`, `packages resolve`, `packages list`.
-- Legacy flat `dm` commands (`dm validate`, `dm pull`, `dm generate sql`,
-  `dm doctor`, `dm watch`, `dm apply`, `dm migrate`) still exist — see
+- `datalex_cli.py` — registers the DataLex-spec subcommand tree under
+  `datalex datalex …`: `migrate`, `validate`, `info`, `emit ddl`, `diff`,
+  `expand`, `dbt sync`, `dbt emit`, `dbt import`, `packages resolve`,
+  `packages list`. (The doubled word is transitional — the group name will
+  be flattened in a follow-up.)
+- Legacy flat commands (`datalex validate`, `datalex pull`,
+  `datalex generate sql`, `datalex doctor`, `datalex watch`,
+  `datalex apply`, `datalex migrate`) still exist — see
   [archive/yaml-spec-v2.md](./archive/yaml-spec-v2.md) for their semantics
   if you're on a legacy project.
 
@@ -144,7 +147,7 @@ See [cli.md](./cli.md) for the current cheat sheet.
                                          │   models/dbt/*.yaml  │
                                          │   (unique_id stamped)│
                                          └──────────┬───────────┘
-                                                    │  4. dm datalex dbt emit
+                                                    │  4. datalex datalex dbt emit
                                                     ▼
                                          ┌──────────────────────┐
                                          │ dbt YAML out         │
@@ -168,7 +171,7 @@ DataLex/
       connectors/   # full-schema introspection per warehouse
       …             # legacy importers/emitters/policy kept in parallel
     cli/src/dm_cli/
-      datalex_cli.py        # dm datalex … subcommand tree
+      datalex_cli.py        # datalex datalex … subcommand tree
       main.py               # legacy flat commands
     api-server/             # Node.js: UI backend
     web-app/                # React Flow studio
@@ -199,7 +202,7 @@ DataLex/
 
 - Multi-tenant / hosted SaaS. Everything is local filesystem + Git.
 - SSO / OIDC / SAML / RBAC.
-- Write-path to live warehouses (no `dm apply` auto-run in prod).
+- Write-path to live warehouses (no `datalex apply` auto-run in prod).
 
 These remain options for a future enterprise phase; the current tool is
 shaped for individual dbt users and teams who want their models in Git.

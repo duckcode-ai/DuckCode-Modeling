@@ -55,7 +55,7 @@ class MvpTests(unittest.TestCase):
 
     def test_cli_validate_all(self) -> None:
         result = subprocess.run(
-            ["./dm", "validate-all", "--glob", "model-examples/*.model.yaml"],
+            ["./datalex", "validate-all", "--glob", "model-examples/*.model.yaml"],
             cwd=ROOT,
             check=False,
             capture_output=True,
@@ -67,7 +67,7 @@ class MvpTests(unittest.TestCase):
     def test_cli_gate_blocks_breaking_changes(self) -> None:
         result = subprocess.run(
             [
-                "./dm",
+                "./datalex",
                 "gate",
                 str(self.sample_model),
                 str(self.updated_model),
@@ -83,7 +83,7 @@ class MvpTests(unittest.TestCase):
     def test_cli_gate_allow_breaking(self) -> None:
         result = subprocess.run(
             [
-                "./dm",
+                "./datalex",
                 "gate",
                 str(self.sample_model),
                 str(self.updated_model),

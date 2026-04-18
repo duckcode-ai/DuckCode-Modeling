@@ -68,7 +68,7 @@ jobs:
 
             # Validation
             if [ -f "${model_path}" ]; then
-              VAL_OUTPUT=$(./dm validate "${model_path}" --schema schemas/model.schema.json 2>&1) || true
+              VAL_OUTPUT=$(./datalex validate "${model_path}" --schema schemas/model.schema.json 2>&1) || true
               if echo "$VAL_OUTPUT" | grep -q "\[ERROR\]"; then
                 echo "❌ **Validation errors found**" >> "$REPORT_FILE"
                 echo '```' >> "$REPORT_FILE"
@@ -80,7 +80,7 @@ jobs:
               fi
 
               # Policy check
-              POLICY_OUTPUT=$(./dm policy-check "${model_path}" \
+              POLICY_OUTPUT=$(./datalex policy-check "${model_path}" \
                 --policy policies/default.policy.yaml \
                 --schema schemas/model.schema.json \
                 --output-json 2>&1) || true
@@ -101,7 +101,7 @@ jobs:
             # Diff / breaking changes
             if git cat-file -e "${BASE_REF}:${model_path}" 2>/dev/null && [ -f "${model_path}" ]; then
               git show "${BASE_REF}:${model_path}" > /tmp/base-model.yaml
-              DIFF_OUTPUT=$(./dm diff /tmp/base-model.yaml "${model_path}" 2>&1) || true
+              DIFF_OUTPUT=$(./datalex diff /tmp/base-model.yaml "${model_path}" 2>&1) || true
               BREAKING=$(echo "$DIFF_OUTPUT" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('has_breaking_changes', False))" 2>/dev/null || echo "False")
               SUMMARY=$(echo "$DIFF_OUTPUT" | python3 -c "
 import sys, json
