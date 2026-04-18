@@ -28,7 +28,7 @@ with contracts, lineage, ERDs, and clean round-trip back to dbt.
 ```bash
 git clone https://github.com/duckcode-ai/DataLex.git
 cd DataLex
-pip install -r requirements.txt
+pip install -e '.[duckdb]'
 
 # 1. Build a local DuckDB warehouse (no external credentials)
 python examples/jaffle_shop_demo/setup.py
@@ -95,12 +95,16 @@ cd DataLex
 
 python3 -m venv .venv
 source .venv/bin/activate
-pip install -r requirements.txt
+pip install -e .              # puts `datalex` on PATH
+pip install -e '.[duckdb]'    # add warehouse drivers you need
 
 # optional — only needed for the Visual Studio
 npm --prefix packages/api-server install
 npm --prefix packages/web-app install
 ```
+
+Available extras: `duckdb`, `postgres`, `mysql`, `snowflake`,
+`bigquery`, `databricks`, `sqlserver`, `redshift`, or `all`.
 
 Prereqs: Python 3.9+, Git. Node.js 18+ if you want the UI.
 

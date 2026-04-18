@@ -1,0 +1,60 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "datalex-cli"
+version = "0.1.0"
+description = "Git-native data modeling for dbt users"
+readme = "README.md"
+requires-python = ">=3.9"
+license = { text = "MIT" }
+authors = [{ name = "DuckCode AI Labs", email = "hello@duckcode.ai" }]
+keywords = ["dbt", "data-modeling", "yaml", "git-native", "erd", "data-warehouse"]
+classifiers = [
+  "Development Status :: 4 - Beta",
+  "Intended Audience :: Developers",
+  "License :: OSI Approved :: MIT License",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.9",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Topic :: Database",
+  "Topic :: Software Development :: Code Generators",
+]
+dependencies = [
+  "PyYAML>=6.0",
+  "jsonschema>=4.0",
+]
+
+[project.optional-dependencies]
+duckdb = ["duckdb>=0.9"]
+postgres = ["psycopg2-binary"]
+mysql = ["mysql-connector-python"]
+snowflake = ["snowflake-connector-python"]
+bigquery = ["google-cloud-bigquery"]
+databricks = ["databricks-sql-connector"]
+sqlserver = ["pyodbc"]
+redshift = ["redshift-connector"]
+all = [
+  "duckdb>=0.9",
+  "psycopg2-binary",
+  "mysql-connector-python",
+  "snowflake-connector-python",
+  "google-cloud-bigquery",
+  "databricks-sql-connector",
+  "pyodbc",
+  "redshift-connector",
+]
+
+[project.urls]
+Homepage = "https://duckcode.ai"
+Repository = "https://github.com/duckcode-ai/DataLex"
+Issues = "https://github.com/duckcode-ai/DataLex/issues"
+
+[project.scripts]
+datalex = "datalex_cli.main:main"
+
+[tool.setuptools.packages.find]
+where = ["packages/core_engine/src", "packages/cli/src"]

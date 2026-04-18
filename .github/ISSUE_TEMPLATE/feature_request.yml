@@ -1,0 +1,45 @@
+name: Feature request
+description: Propose a new capability or improvement
+title: "[feature] "
+labels: ["enhancement", "triage"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem are you trying to solve?
+      description: Describe the user pain, not the solution. "Currently, ... which is hard because ..."
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      description: What would the ideal behavior look like? Include CLI invocations, YAML shape, or UI flow if relevant.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Other approaches you thought about and why they don't fit.
+  - type: dropdown
+    id: surface
+    attributes:
+      label: Which surface is this about?
+      options:
+        - CLI (`datalex`)
+        - DataLex YAML spec
+        - dbt integration
+        - Web UI / Studio
+        - Dialect / warehouse support
+        - Docs
+        - Other
+    validations:
+      required: true
+  - type: checkboxes
+    id: code-of-conduct
+    attributes:
+      label: Code of Conduct
+      options:
+        - label: I agree to follow this project's [Code of Conduct](../CODE_OF_CONDUCT.md).
+          required: true
