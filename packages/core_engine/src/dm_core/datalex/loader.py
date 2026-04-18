@@ -21,6 +21,11 @@ import yaml
 from jsonschema import Draft202012Validator
 
 from dm_core.datalex.errors import DataLexError, DataLexErrorBag, SourceLocation
+from dm_core.datalex.parse_cache import (
+    ParseCache,
+    cache_enabled_from_env,
+    default_cache_dir,
+)
 
 
 KINDS = ("project", "entity", "source", "model", "term", "domain", "policy", "snippet")
@@ -196,8 +201,28 @@ def iter_yaml_files(root: Path, glob_pattern: str) -> Iterator[Path]:
             yield path
 
 
-def load_file(path: Path, schemas_root: Path, bag: DataLexErrorBag) -> Optional[Dict[str, Any]]:
-    """Load and validate a single DataLex YAML file. Returns the marked document or None."""
+def load_file(
+    path: Path,
+    schemas_root: Path,
+    bag: DataLexErrorBag,
+    cache: Optional[ParseCache] = None,
+) -> Optional[Dict[str, Any]]:
+    """Load and validate a single DataLex YAML file. Returns the marked document or None.
+
+    When `cache` is provided, a cache hit short-circuits YAML parsing and schema
+    validation — the cached document is already mark-stripped and validated. A
+    miss parses + validates + writes back. Cache keys are content-addressed so
+    stale entries are impossible.
+    """
+    if cache is not None:
+        # Cheap pre-flight: read `kind:` via a partial parse is expensive, so we
+        # just peek the content hash + try each kind-schema key. In practice we
+        # store under the real kind. Simpler: read kind from the file once via
+        # a lightweight YAML parse gated on a cache miss.
+        cached = _try_cache_get(path, cache)
+        if cached is not None:
+            return cached
+
     doc = _load_yaml_marked(path, bag)
     if doc is None:
         return None
@@ -226,13 +251,31 @@ def load_file(path: Path, schemas_root: Path, bag: DataLexErrorBag) -> Optional[
         )
         return None
     _validate_against_kind_schema(doc, kind, schemas_root, path, bag)
+    if cache is not None:
+        # Cache the mark-stripped doc — downstream callers strip marks anyway.
+        cache.put(path, kind, _strip_marks(doc))
     return doc
+
+
+def _try_cache_get(path: Path, cache: ParseCache) -> Optional[Dict[str, Any]]:
+    """Probe cache for this file's parsed doc.
+
+    The cache key includes the schema hash, which depends on `kind`. We cheat
+    by trying each known kind. File-reads are one stat + one open on hit,
+    negligible cost, and a miss returns None quickly.
+    """
+    for kind in KINDS:
+        hit = cache.get(path, kind)
+        if hit is not None and hit.get("kind") == kind:
+            return hit
+    return None
 
 
 def load_project(
     project_root: Union[str, Path],
     schemas_root: Optional[Union[str, Path]] = None,
     strict: bool = True,
+    cache_dir: Optional[Union[str, Path]] = None,
 ) -> "DataLexProject":
     """Entry point: discover, parse, validate, and aggregate a DataLex project.
 
@@ -241,6 +284,9 @@ def load_project(
                     Defaults to <repo-root>/schemas/datalex.
     strict        — when True, raise DataLexLoadError if any errors are collected.
                     When False, return the project with errors on the bag.
+    cache_dir     — optional parse cache directory. If None and DATALEX_CACHE=1
+                    is set in the environment, uses <project_root>/build/.cache.
+                    Pass an explicit path to override.
     """
     from dm_core.datalex.project import DataLexProject  # local import to avoid cycle
 
@@ -249,12 +295,18 @@ def load_project(
         schemas_root = _infer_schemas_root(root)
     schemas_root = Path(schemas_root)
 
+    cache: Optional[ParseCache] = None
+    if cache_dir is not None:
+        cache = ParseCache(Path(cache_dir), schemas_root)
+    elif cache_enabled_from_env():
+        cache = ParseCache(default_cache_dir(root), schemas_root)
+
     bag = DataLexErrorBag()
 
     manifest_path = root / "datalex.yaml"
     manifest: Optional[Dict[str, Any]] = None
     if manifest_path.exists():
-        manifest = load_file(manifest_path, schemas_root, bag)
+        manifest = load_file(manifest_path, schemas_root, bag, cache=cache)
 
     if manifest is None:
         # Missing manifest is not fatal — we can still load discovered files for migration
@@ -323,7 +375,7 @@ def load_project(
     # Walk the trees in a stable order
     for group, pattern in sorted(globs.items()):
         for p in iter_yaml_files(root, pattern):
-            doc = load_file(p, schemas_root, bag)
+            doc = load_file(p, schemas_root, bag, cache=cache)
             if doc is not None:
                 _register(doc, p)
 
@@ -341,12 +393,93 @@ def load_project(
         errors=bag,
     )
 
+    _load_imports(project, schemas_root, bag)
+
     project.resolve()  # resolves term references, snippet `use:`, logical back-refs
 
     if strict:
         bag.raise_if_errors()
 
     return project
+
+
+def _load_imports(
+    project: "DataLexProject",
+    schemas_root: Path,
+    bag: DataLexErrorBag,
+) -> None:
+    """Resolve `imports:` in the manifest and attach each as a sub-project.
+
+    Skips silently if no imports are declared. Each import is loaded in
+    non-strict mode so sub-project warnings bubble up as warnings rather than
+    aborting the whole load; fatal sub-project errors become errors on the main
+    bag.
+    """
+    manifest = project.manifest or {}
+    imports = manifest.get("imports") or []
+    if not imports:
+        return
+
+    try:
+        from dm_core.packages import load_imports_for, PackageResolveError
+    except ImportError:
+        bag.add(
+            DataLexError(
+                code="PACKAGES_MODULE_MISSING",
+                message="dm_core.packages is unavailable; cannot resolve imports.",
+                location=SourceLocation(file=str(project.root)),
+            )
+        )
+        return
+
+    try:
+        resolved = load_imports_for(project.root)
+    except PackageResolveError as e:
+        bag.add(
+            DataLexError(
+                code="PACKAGE_RESOLVE",
+                message=str(e),
+                location=SourceLocation(file=str(project.root / "datalex.yaml")),
+                suggested_fix="Run `dm datalex packages resolve` and re-validate.",
+            )
+        )
+        return
+
+    for pkg in resolved:
+        alias = pkg.spec.default_alias()
+        if alias in project.imports:
+            bag.add(
+                DataLexError(
+                    code="IMPORT_ALIAS_COLLISION",
+                    message=f"Two imports share alias '{alias}'. Add an `alias:` to one of them.",
+                    location=SourceLocation(file=str(project.root / "datalex.yaml")),
+                )
+            )
+            continue
+        try:
+            sub = load_project(pkg.root, schemas_root=schemas_root, strict=False)
+        except Exception as e:  # noqa: BLE001 — surface any loader failure as an error
+            bag.add(
+                DataLexError(
+                    code="IMPORT_LOAD_FAILED",
+                    message=f"Failed to load imported package '{pkg.spec.package}': {e}",
+                    location=SourceLocation(file=str(pkg.root)),
+                )
+            )
+            continue
+
+        # Propagate sub-project errors as warnings prefixed by the alias so
+        # it's clear which package they came from.
+        for err in sub.errors.to_list():
+            bag.add(
+                DataLexError(
+                    code=err.get("code", "IMPORT_CHILD"),
+                    severity=err.get("severity", "warn"),
+                    message=f"[import:{alias}] {err.get('message', '')}",
+                    location=SourceLocation(file=err.get("file") or str(pkg.root)),
+                )
+            )
+        project.imports[alias] = sub
 
 
 def _infer_schemas_root(project_root: Path) -> Path:

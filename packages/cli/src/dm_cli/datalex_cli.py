@@ -24,6 +24,7 @@ from dm_core.datalex.migrate_layout import migrate_project
 import dm_core.dialects  # noqa: F401  — side-effect registers built-in dialects
 from dm_core.dialects.registry import get_dialect, known_dialects
 from dm_core.dbt import emit_dbt, import_manifest, write_import_result
+from dm_core.packages import PackageResolveError, load_imports_for, resolve_imports
 
 
 def register_datalex(parent_sub: argparse._SubParsersAction) -> None:
@@ -167,6 +168,40 @@ def register_datalex(parent_sub: argparse._SubParsersAction) -> None:
         help="Print expanded entities as JSON",
     )
     expand_parser.set_defaults(func=_cmd_expand)
+
+    # packages
+    packages_parser = dsub.add_parser(
+        "packages", help="Cross-repo package resolution (Phase C)"
+    )
+    packages_sub = packages_parser.add_subparsers(dest="packages_command", required=True)
+
+    pkg_resolve = packages_sub.add_parser(
+        "resolve",
+        help="Resolve `imports:` in datalex.yaml — fetch, cache, and write .datalex/lock.yaml",
+    )
+    pkg_resolve.add_argument("root", help="Project root")
+    pkg_resolve.add_argument(
+        "--update",
+        action="store_true",
+        help="Re-fetch packages and regenerate lockfile even if entries exist",
+    )
+    pkg_resolve.add_argument(
+        "--cache-root",
+        help="Override the package cache root (default: ~/.datalex/packages)",
+    )
+    pkg_resolve.add_argument(
+        "--output-json", action="store_true", help="Print a JSON report"
+    )
+    pkg_resolve.set_defaults(func=_cmd_packages_resolve)
+
+    pkg_list = packages_sub.add_parser(
+        "list", help="Show resolved packages and their cached locations"
+    )
+    pkg_list.add_argument("root", help="Project root")
+    pkg_list.add_argument(
+        "--output-json", action="store_true", help="Print as JSON"
+    )
+    pkg_list.set_defaults(func=_cmd_packages_list)
 
 
 # ----------------- command impls -----------------
@@ -434,6 +469,79 @@ def _cmd_expand(args: argparse.Namespace) -> int:
         for key, ent in sorted(project.entities.items()):
             print(f"# {key}")
             print(_yaml.safe_dump(ent, sort_keys=False, default_flow_style=False))
+    return 0
+
+
+def _cmd_packages_resolve(args: argparse.Namespace) -> int:
+    try:
+        report = resolve_imports(
+            args.root,
+            cache_root=args.cache_root,
+            update=args.update,
+        )
+    except PackageResolveError as e:
+        print(f"error: {e}", file=sys.stderr)
+        return 1
+
+    if args.output_json:
+        print(
+            json.dumps(
+                {
+                    "lockfile": str(report.lockfile_path) if report.lockfile_path else None,
+                    "lockfile_written": report.lockfile_written,
+                    "packages": [
+                        {
+                            "package": r.spec.package,
+                            "version": r.spec.version,
+                            "ref": r.spec.ref,
+                            "alias": r.spec.default_alias(),
+                            "root": str(r.root),
+                            "resolved_sha": r.resolved_sha,
+                            "content_hash": r.content_hash,
+                        }
+                        for r in report.resolved
+                    ],
+                    "warnings": report.warnings,
+                },
+                indent=2,
+            )
+        )
+    else:
+        print(report.summary())
+    return 0
+
+
+def _cmd_packages_list(args: argparse.Namespace) -> int:
+    try:
+        resolved = load_imports_for(args.root)
+    except PackageResolveError as e:
+        print(f"error: {e}", file=sys.stderr)
+        return 1
+    if args.output_json:
+        print(
+            json.dumps(
+                [
+                    {
+                        "package": r.spec.package,
+                        "alias": r.spec.default_alias(),
+                        "version": r.spec.version,
+                        "ref": r.spec.ref,
+                        "root": str(r.root),
+                        "resolved_sha": r.resolved_sha,
+                        "content_hash": r.content_hash,
+                    }
+                    for r in resolved
+                ],
+                indent=2,
+            )
+        )
+    else:
+        if not resolved:
+            print("(no packages)")
+        for r in resolved:
+            suffix = f"@{r.spec.version}" if r.spec.version else ""
+            alias = f" [alias={r.spec.default_alias()}]"
+            print(f"{r.spec.package}{suffix}{alias} -> {r.root}")
     return 0
 
 

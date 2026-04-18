@@ -15,6 +15,7 @@ convenience, not a requirement.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
@@ -34,11 +35,39 @@ class DataLexProject:
     snippets: Dict[str, Dict[str, Any]]
     file_of: Dict[Tuple[str, str], str]
     errors: DataLexErrorBag
+    # Phase C: imported packages. Each key is the package's alias; value is a
+    # loaded sub-project. Sub-projects are validated independently.
+    imports: Dict[str, "DataLexProject"] = field(default_factory=dict)
 
     # ---------- lookups ----------
 
     def entity(self, name: str, layer: str = "physical") -> Optional[Dict[str, Any]]:
         return self.entities.get(f"{layer}:{name}")
+
+    def imported_entity(
+        self, alias: str, name: str, layer: str = "physical"
+    ) -> Optional[Dict[str, Any]]:
+        """Look up an entity inside an imported package by alias."""
+        sub = self.imports.get(alias)
+        if sub is None:
+            return None
+        return sub.entity(name, layer=layer)
+
+    def resolve_cross_package(
+        self, reference: str, layer: str = "physical"
+    ) -> Optional[Dict[str, Any]]:
+        """Resolve `@alias.entity_name` style references against imported packages.
+
+        Plain names without `@alias.` fall back to local entities so callers can
+        use a single lookup path.
+        """
+        if reference.startswith("@"):
+            try:
+                alias, name = reference[1:].split(".", 1)
+            except ValueError:
+                return None
+            return self.imported_entity(alias, name, layer=layer)
+        return self.entity(reference, layer=layer)
 
     def iter_entities(self, layer: Optional[str] = None) -> Iterable[Dict[str, Any]]:
         for key, ent in sorted(self.entities.items()):
@@ -173,5 +202,13 @@ class DataLexProject:
             "domains": self.domains,
             "policies": self.policies,
             "snippets": self.snippets,
+            "imports": {
+                alias: {
+                    "root": str(sub.root),
+                    "entities": sorted(sub.entities.keys()),
+                    "terms": sorted(sub.terms.keys()),
+                }
+                for alias, sub in self.imports.items()
+            },
             "errors": self.errors.to_list(),
         }

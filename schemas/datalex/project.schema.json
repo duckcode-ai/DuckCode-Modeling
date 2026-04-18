@@ -39,7 +39,7 @@
     },
     "imports": {
       "type": "array",
-      "description": "Cross-repo package imports. Resolver fetches packages into build/.cache/packages/.",
+      "description": "Cross-repo package imports. Resolver fetches packages into ~/.datalex/packages/ and pins them in .datalex/lock.yaml.",
       "items": {
         "type": "object",
         "additionalProperties": false,
@@ -47,12 +47,29 @@
         "properties": {
           "package": {
             "type": "string",
-            "description": "Package identifier, e.g. 'acme/warehouse-core@1.4.0' or a Git URL."
+            "description": "Package identifier. Forms: 'org/name', 'org/name@version', or any Git-URL-like string when paired with git:."
           },
           "alias": { "type": "string", "pattern": "^[a-z][a-z0-9_]*$" },
+          "path": {
+            "type": "string",
+            "description": "Local directory (relative to project root or absolute). Mutually exclusive with git:."
+          },
+          "git": {
+            "type": "string",
+            "description": "Git URL (https or ssh) to clone for resolution."
+          },
+          "ref": {
+            "type": "string",
+            "description": "Git ref — tag, branch, or commit SHA."
+          },
+          "version": {
+            "type": "string",
+            "description": "Version override (falls back to parsing 'org/name@version' from package:)."
+          },
           "entities": {
             "type": "array",
-            "items": { "type": "string", "pattern": "^[a-z][a-z0-9_]*$" }
+            "items": { "type": "string", "pattern": "^[a-z][a-z0-9_]*$" },
+            "description": "Optional allowlist of entity names to import (default: all)."
           }
         }
       }
