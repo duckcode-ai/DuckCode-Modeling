@@ -1,0 +1,25 @@
+kind: entity
+layer: physical
+dialect: postgres
+name: order
+schema: sales
+columns:
+  - name: id
+    type: bigint
+    nullable: false
+    primary_key: true
+  - name: customer_id
+    type: bigint
+    nullable: false
+    references:
+      entity: customer
+      column: id
+      on_delete: cascade
+      relationship: many_to_one
+  - name: total_amount
+    type: decimal(12,2)
+    nullable: false
+  - name: status
+    type: string(32)
+    nullable: false
+    default: pending

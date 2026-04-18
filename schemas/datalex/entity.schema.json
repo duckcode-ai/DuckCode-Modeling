@@ -1,0 +1,158 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://duckcode.dev/schemas/datalex/entity.schema.json",
+  "title": "DataLex entity",
+  "type": "object",
+  "required": ["kind", "name", "columns"],
+  "additionalProperties": false,
+  "properties": {
+    "kind": { "const": "entity" },
+    "name": { "type": "string", "pattern": "^[a-z][a-z0-9_]*$" },
+    "previous_name": { "type": "string", "pattern": "^[a-z][a-z0-9_]*$" },
+    "layer": {
+      "type": "string",
+      "enum": ["conceptual", "logical", "physical"],
+      "description": "Required. Conceptual: business view. Logical: attributes/types. Physical: DBMS-specific DDL target."
+    },
+    "logical": {
+      "type": "string",
+      "description": "At physical layer: back-reference to the logical entity name this physical implements.",
+      "pattern": "^[a-z][a-z0-9_]*$"
+    },
+    "dialect": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_]*$",
+      "description": "Required at physical layer. Names the dialect plugin that owns emission."
+    },
+    "database": { "type": "string" },
+    "schema": { "type": "string" },
+    "physical_name": { "type": "string" },
+    "description": { "type": "string" },
+    "owner": { "type": "string" },
+    "domain": { "type": "string", "pattern": "^[a-z][a-z0-9_]*$" },
+    "subject_area": { "type": "string" },
+    "tags": {
+      "type": "array",
+      "items": { "type": "string", "pattern": "^[a-z][a-z0-9-]*$" }
+    },
+    "terms": {
+      "type": "array",
+      "items": { "type": "string", "pattern": "^(term:)?[a-z][a-z0-9_]*$" }
+    },
+    "raw_ddl": { "type": "string" },
+    "columns": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/column" }
+    },
+    "indexes": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["name", "columns"],
+        "additionalProperties": false,
+        "properties": {
+          "name": { "type": "string", "pattern": "^[a-z][a-z0-9_]*$" },
+          "previous_name": { "type": "string", "pattern": "^[a-z][a-z0-9_]*$" },
+          "columns": {
+            "type": "array",
+            "minItems": 1,
+            "items": { "type": "string", "pattern": "^[a-z][a-z0-9_]*$" }
+          },
+          "unique": { "type": "boolean" },
+          "type": { "type": "string", "enum": ["btree", "hash", "gin", "gist", "brin"] }
+        }
+      }
+    },
+    "partition_by": {
+      "type": "array",
+      "items": { "type": "string", "pattern": "^[a-z][a-z0-9_]*$" }
+    },
+    "cluster_by": {
+      "type": "array",
+      "items": { "type": "string", "pattern": "^[a-z][a-z0-9_]*$" }
+    },
+    "meta": {
+      "type": "object",
+      "additionalProperties": true
+    }
+  },
+  "$defs": {
+    "column": {
+      "type": "object",
+      "required": ["name", "type"],
+      "additionalProperties": false,
+      "properties": {
+        "name": { "type": "string", "pattern": "^[a-z][a-z0-9_]*$" },
+        "previous_name": { "type": "string", "pattern": "^[a-z][a-z0-9_]*$" },
+        "type": { "type": "string", "minLength": 1 },
+        "physical": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "type": { "type": "string" },
+              "raw_ddl": { "type": "string" }
+            }
+          }
+        },
+        "logical": { "type": "string" },
+        "description": { "type": "string" },
+        "nullable": { "type": "boolean" },
+        "primary_key": { "type": "boolean" },
+        "unique": { "type": "boolean" },
+        "default": { "type": ["string", "number", "boolean", "null"] },
+        "references": {
+          "type": "object",
+          "required": ["entity", "column"],
+          "additionalProperties": false,
+          "properties": {
+            "entity": { "type": "string", "pattern": "^[a-z][a-z0-9_]*$" },
+            "column": { "type": "string", "pattern": "^[a-z][a-z0-9_]*$" },
+            "on_delete": { "type": "string", "enum": ["restrict", "cascade", "set_null", "no_action"] },
+            "on_update": { "type": "string", "enum": ["restrict", "cascade", "set_null", "no_action"] },
+            "relationship": { "type": "string", "enum": ["many_to_one", "one_to_one", "many_to_many"] }
+          }
+        },
+        "constraints": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["type"],
+            "additionalProperties": true,
+            "properties": {
+              "type": { "type": "string", "enum": ["check", "not_null", "unique", "primary_key", "foreign_key"] },
+              "expression": { "type": "string" }
+            }
+          }
+        },
+        "sensitivity": { "type": "string" },
+        "terms": {
+          "type": "array",
+          "items": { "type": "string", "pattern": "^(term:)?[a-z][a-z0-9_]*$" }
+        },
+        "tags": {
+          "type": "array",
+          "items": { "type": "string", "pattern": "^[a-z][a-z0-9-]*$" }
+        },
+        "use": { "type": "string", "pattern": "^[a-z][a-z0-9_]*$" },
+        "examples": {
+          "type": "array",
+          "items": { "type": ["string", "number", "boolean", "null"] }
+        },
+        "deprecated": { "type": "boolean" },
+        "meta": {
+          "type": "object",
+          "additionalProperties": true
+        }
+      }
+    }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "layer": { "const": "physical" } }, "required": ["layer"] },
+      "then": { "required": ["dialect"] }
+    }
+  ]
+}

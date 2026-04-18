@@ -1,0 +1,24 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://duckcode.dev/schemas/datalex/snippet.schema.json",
+  "title": "DataLex snippet (reusable YAML fragment)",
+  "type": "object",
+  "required": ["kind", "name", "apply"],
+  "additionalProperties": false,
+  "properties": {
+    "kind": { "const": "snippet" },
+    "name": { "type": "string", "pattern": "^[a-z][a-z0-9_]*$" },
+    "description": { "type": "string" },
+    "targets": {
+      "type": "array",
+      "description": "Which object kinds this snippet is valid on. Default: column.",
+      "items": { "type": "string", "enum": ["entity", "column", "source_column", "model_column"] }
+    },
+    "apply": {
+      "type": "object",
+      "description": "Keys merged into the target. Target keys win on conflict unless override=true is set on a key.",
+      "additionalProperties": true
+    },
+    "meta": { "type": "object", "additionalProperties": true }
+  }
+}

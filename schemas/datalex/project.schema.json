@@ -1,0 +1,61 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://duckcode.dev/schemas/datalex/project.schema.json",
+  "title": "DataLex project manifest",
+  "type": "object",
+  "required": ["kind", "name", "version"],
+  "additionalProperties": false,
+  "properties": {
+    "kind": { "const": "project" },
+    "name": { "type": "string", "minLength": 1 },
+    "version": { "type": ["string", "integer"] },
+    "description": { "type": "string" },
+    "owner": { "type": "string" },
+    "dialects": {
+      "type": "array",
+      "items": { "type": "string", "pattern": "^[a-z][a-z0-9_]*$" },
+      "description": "Enabled dialect plugins. Must correspond to modules under dm_core/dialects/."
+    },
+    "default_dialect": { "type": "string", "pattern": "^[a-z][a-z0-9_]*$" },
+    "glossary": {
+      "type": "string",
+      "description": "Glob for glossary files, e.g. 'glossary/**/*.yaml'."
+    },
+    "models": {
+      "type": "string",
+      "description": "Glob for entity/source/model files, e.g. 'models/**/*.yaml'."
+    },
+    "snippets": {
+      "type": "string",
+      "description": "Glob for snippet files, default '.datalex/snippets/**/*.yaml'."
+    },
+    "policies": {
+      "type": "string",
+      "description": "Glob for policy files."
+    },
+    "imports": {
+      "type": "array",
+      "description": "Cross-repo package imports. Resolver fetches packages into build/.cache/packages/.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["package"],
+        "properties": {
+          "package": {
+            "type": "string",
+            "description": "Package identifier, e.g. 'acme/warehouse-core@1.4.0' or a Git URL."
+          },
+          "alias": { "type": "string", "pattern": "^[a-z][a-z0-9_]*$" },
+          "entities": {
+            "type": "array",
+            "items": { "type": "string", "pattern": "^[a-z][a-z0-9_]*$" }
+          }
+        }
+      }
+    },
+    "meta": {
+      "type": "object",
+      "additionalProperties": true
+    }
+  }
+}

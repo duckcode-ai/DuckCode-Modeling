@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://duckcode.dev/schemas/datalex/term.schema.json",
+  "title": "DataLex glossary term",
+  "type": "object",
+  "required": ["kind", "name", "definition"],
+  "additionalProperties": false,
+  "properties": {
+    "kind": { "const": "term" },
+    "name": { "type": "string", "pattern": "^[a-z][a-z0-9_]*$" },
+    "previous_name": { "type": "string", "pattern": "^[a-z][a-z0-9_]*$" },
+    "definition": { "type": "string", "minLength": 1 },
+    "abbreviation": { "type": "string" },
+    "synonyms": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 }
+    },
+    "steward": { "type": "string" },
+    "owner": { "type": "string" },
+    "tags": {
+      "type": "array",
+      "items": { "type": "string", "pattern": "^[a-z][a-z0-9-]*$" }
+    },
+    "related_terms": {
+      "type": "array",
+      "items": { "type": "string", "pattern": "^(term:)?[a-z][a-z0-9_]*$" }
+    },
+    "meta": { "type": "object", "additionalProperties": true }
+  }
+}

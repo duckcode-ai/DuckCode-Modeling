@@ -1,0 +1,104 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://duckcode.dev/schemas/datalex/source.schema.json",
+  "title": "DataLex source (dbt-style external data source)",
+  "type": "object",
+  "required": ["kind", "name", "tables"],
+  "additionalProperties": false,
+  "properties": {
+    "kind": { "const": "source" },
+    "name": { "type": "string", "pattern": "^[a-z][a-z0-9_]*$" },
+    "previous_name": { "type": "string", "pattern": "^[a-z][a-z0-9_]*$" },
+    "description": { "type": "string" },
+    "database": { "type": "string" },
+    "schema": { "type": "string" },
+    "loader": { "type": "string" },
+    "loaded_at_field": { "type": "string" },
+    "freshness": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "warn_after": { "$ref": "#/$defs/duration" },
+        "error_after": { "$ref": "#/$defs/duration" },
+        "filter": { "type": "string" }
+      }
+    },
+    "owner": { "type": "string" },
+    "tags": {
+      "type": "array",
+      "items": { "type": "string", "pattern": "^[a-z][a-z0-9-]*$" }
+    },
+    "tables": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["name"],
+        "additionalProperties": false,
+        "properties": {
+          "name": { "type": "string", "pattern": "^[a-z][a-z0-9_]*$" },
+          "previous_name": { "type": "string", "pattern": "^[a-z][a-z0-9_]*$" },
+          "description": { "type": "string" },
+          "identifier": { "type": "string" },
+          "loaded_at_field": { "type": "string" },
+          "freshness": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "warn_after": { "$ref": "#/$defs/duration" },
+              "error_after": { "$ref": "#/$defs/duration" },
+              "filter": { "type": "string" }
+            }
+          },
+          "columns": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["name"],
+              "additionalProperties": false,
+              "properties": {
+                "name": { "type": "string", "pattern": "^[a-z][a-z0-9_]*$" },
+                "type": { "type": "string" },
+                "description": { "type": "string" },
+                "tests": { "$ref": "#/$defs/tests" },
+                "tags": {
+                  "type": "array",
+                  "items": { "type": "string", "pattern": "^[a-z][a-z0-9-]*$" }
+                },
+                "sensitivity": { "type": "string" },
+                "meta": { "type": "object", "additionalProperties": true }
+              }
+            }
+          },
+          "meta": { "type": "object", "additionalProperties": true }
+        }
+      }
+    },
+    "meta": { "type": "object", "additionalProperties": true }
+  },
+  "$defs": {
+    "duration": {
+      "type": "object",
+      "required": ["count", "period"],
+      "additionalProperties": false,
+      "properties": {
+        "count": { "type": "integer", "minimum": 1 },
+        "period": { "type": "string", "enum": ["minute", "hour", "day"] }
+      }
+    },
+    "tests": {
+      "type": "array",
+      "items": {
+        "oneOf": [
+          { "type": "string", "enum": ["unique", "not_null"] },
+          {
+            "type": "object",
+            "maxProperties": 1,
+            "minProperties": 1,
+            "additionalProperties": true
+          }
+        ]
+      }
+    }
+  }
+}

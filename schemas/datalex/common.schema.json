@@ -1,0 +1,127 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://duckcode.dev/schemas/datalex/common.schema.json",
+  "title": "DataLex common definitions",
+  "$defs": {
+    "snake_name": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_]*$"
+    },
+    "kebab_tag": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9-]*$"
+    },
+    "meta": {
+      "type": "object",
+      "description": "User-owned metadata. DataLex generators MUST NOT write outside the meta.datalex.* subtree.",
+      "additionalProperties": true
+    },
+    "tags": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/kebab_tag" }
+    },
+    "owner": {
+      "type": "string",
+      "minLength": 1
+    },
+    "description": {
+      "type": "string"
+    },
+    "previous_name": {
+      "description": "Explicit rename tracking. If present, diff treats (previous_name -> name) as a rename, not drop+add.",
+      "$ref": "#/$defs/snake_name"
+    },
+    "logical_type": {
+      "type": "string",
+      "description": "Logical type: primitive (string, integer, bigint, decimal(p,s), float, boolean, date, timestamp, timestamp_tz, interval, uuid, json, binary, text) or composite (array<T>, map<K,V>, struct<a:T,b:U>).",
+      "minLength": 1
+    },
+    "physical_override": {
+      "type": "object",
+      "description": "Per-dialect physical type override for a column.",
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "type": { "type": "string" },
+          "raw_ddl": { "type": "string" }
+        }
+      }
+    },
+    "constraint": {
+      "type": "object",
+      "required": ["type"],
+      "additionalProperties": true,
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": ["check", "not_null", "unique", "primary_key", "foreign_key"]
+        },
+        "expression": { "type": "string" }
+      }
+    },
+    "reference": {
+      "type": "object",
+      "required": ["entity", "column"],
+      "additionalProperties": false,
+      "properties": {
+        "entity": { "$ref": "#/$defs/snake_name" },
+        "column": { "$ref": "#/$defs/snake_name" },
+        "on_delete": { "type": "string", "enum": ["restrict", "cascade", "set_null", "no_action"] },
+        "on_update": { "type": "string", "enum": ["restrict", "cascade", "set_null", "no_action"] },
+        "relationship": { "type": "string", "enum": ["many_to_one", "one_to_one", "many_to_many"] }
+      }
+    },
+    "column": {
+      "type": "object",
+      "required": ["name", "type"],
+      "additionalProperties": false,
+      "properties": {
+        "name": { "$ref": "#/$defs/snake_name" },
+        "previous_name": { "$ref": "#/$defs/previous_name" },
+        "type": { "$ref": "#/$defs/logical_type" },
+        "physical": { "$ref": "#/$defs/physical_override" },
+        "logical": {
+          "type": "string",
+          "description": "Back-reference to the logical column this physical column implements, e.g. 'order.id'."
+        },
+        "description": { "$ref": "#/$defs/description" },
+        "nullable": { "type": "boolean", "default": true },
+        "primary_key": { "type": "boolean", "default": false },
+        "unique": { "type": "boolean", "default": false },
+        "default": { "type": ["string", "number", "boolean", "null"] },
+        "references": { "$ref": "#/$defs/reference" },
+        "constraints": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/constraint" }
+        },
+        "sensitivity": {
+          "type": "string",
+          "description": "Sensitivity tag. Must be defined in .datalex/sensitivity.yaml (free-form; validator checks membership if the file exists)."
+        },
+        "terms": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^(term:)?[a-z][a-z0-9_]*$"
+          }
+        },
+        "tags": { "$ref": "#/$defs/tags" },
+        "use": {
+          "description": "Name of a snippet under .datalex/snippets/ to merge into this column (merge semantics: snippet fields fill in missing keys; column keys win on conflict).",
+          "$ref": "#/$defs/snake_name"
+        },
+        "examples": {
+          "type": "array",
+          "items": { "type": ["string", "number", "boolean", "null"] }
+        },
+        "deprecated": { "type": "boolean" },
+        "meta": { "$ref": "#/$defs/meta" }
+      }
+    },
+    "raw_ddl": {
+      "type": "string",
+      "description": "Original DDL preserved from reverse engineering when a feature couldn't be mapped cleanly. Forward engineering replays this verbatim."
+    }
+  }
+}

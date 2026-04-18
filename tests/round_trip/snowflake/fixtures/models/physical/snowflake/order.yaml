@@ -1,0 +1,23 @@
+kind: entity
+layer: physical
+dialect: snowflake
+name: order
+database: retail_analytics
+schema: sales
+columns:
+  - name: id
+    type: bigint
+    nullable: false
+    primary_key: true
+  - name: customer_id
+    type: bigint
+    nullable: false
+    references:
+      entity: customer
+      column: id
+      relationship: many_to_one
+  - name: total_amount
+    type: decimal(18,4)
+    nullable: false
+  - name: items
+    type: array<struct<sku:string,qty:integer>>

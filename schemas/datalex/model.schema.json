@@ -1,0 +1,141 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://duckcode.dev/schemas/datalex/model.schema.json",
+  "title": "DataLex model (dbt-style transformation / derived table)",
+  "type": "object",
+  "required": ["kind", "name"],
+  "additionalProperties": false,
+  "properties": {
+    "kind": { "const": "model" },
+    "name": { "type": "string", "pattern": "^[a-z][a-z0-9_]*$" },
+    "previous_name": { "type": "string", "pattern": "^[a-z][a-z0-9_]*$" },
+    "description": { "type": "string" },
+    "materialization": {
+      "type": "string",
+      "enum": ["view", "table", "incremental", "ephemeral", "materialized_view", "snapshot"]
+    },
+    "database": { "type": "string" },
+    "schema": { "type": "string" },
+    "tags": {
+      "type": "array",
+      "items": { "type": "string", "pattern": "^[a-z][a-z0-9-]*$" }
+    },
+    "owner": { "type": "string" },
+    "domain": { "type": "string", "pattern": "^[a-z][a-z0-9_]*$" },
+    "derived_sql": {
+      "type": "string",
+      "description": "Inline SQL for the transformation. Used for column-level lineage extraction."
+    },
+    "sql_path": {
+      "type": "string",
+      "description": "Path to a .sql file (relative to the YAML file) containing the transformation."
+    },
+    "depends_on": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "maxProperties": 1,
+        "minProperties": 1,
+        "additionalProperties": false,
+        "properties": {
+          "ref": { "type": "string", "pattern": "^[a-z][a-z0-9_]*$" },
+          "source": {
+            "type": "object",
+            "required": ["source", "name"],
+            "additionalProperties": false,
+            "properties": {
+              "source": { "type": "string", "pattern": "^[a-z][a-z0-9_]*$" },
+              "name": { "type": "string", "pattern": "^[a-z][a-z0-9_]*$" }
+            }
+          }
+        }
+      }
+    },
+    "contract": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enforced": { "type": "boolean" }
+      }
+    },
+    "columns": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["name"],
+        "additionalProperties": false,
+        "properties": {
+          "name": { "type": "string", "pattern": "^[a-z][a-z0-9_]*$" },
+          "previous_name": { "type": "string", "pattern": "^[a-z][a-z0-9_]*$" },
+          "type": { "type": "string" },
+          "description": { "type": "string" },
+          "tests": {
+            "type": "array",
+            "items": {
+              "oneOf": [
+                { "type": "string", "enum": ["unique", "not_null"] },
+                {
+                  "type": "object",
+                  "maxProperties": 1,
+                  "minProperties": 1,
+                  "additionalProperties": true
+                }
+              ]
+            }
+          },
+          "constraints": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["type"],
+              "additionalProperties": true,
+              "properties": {
+                "type": { "type": "string", "enum": ["primary_key", "not_null", "unique", "foreign_key", "check"] }
+              }
+            }
+          },
+          "contract": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": { "enforced": { "type": "boolean" } }
+          },
+          "sensitivity": { "type": "string" },
+          "terms": {
+            "type": "array",
+            "items": { "type": "string", "pattern": "^(term:)?[a-z][a-z0-9_]*$" }
+          },
+          "tags": {
+            "type": "array",
+            "items": { "type": "string", "pattern": "^[a-z][a-z0-9-]*$" }
+          },
+          "meta": { "type": "object", "additionalProperties": true }
+        }
+      }
+    },
+    "freshness": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "warn_after": {
+          "type": "object",
+          "required": ["count", "period"],
+          "additionalProperties": false,
+          "properties": {
+            "count": { "type": "integer", "minimum": 1 },
+            "period": { "type": "string", "enum": ["minute", "hour", "day"] }
+          }
+        },
+        "error_after": {
+          "type": "object",
+          "required": ["count", "period"],
+          "additionalProperties": false,
+          "properties": {
+            "count": { "type": "integer", "minimum": 1 },
+            "period": { "type": "string", "enum": ["minute", "hour", "day"] }
+          }
+        }
+      }
+    },
+    "meta": { "type": "object", "additionalProperties": true }
+  }
+}

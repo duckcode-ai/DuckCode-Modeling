@@ -1,0 +1,21 @@
+kind: entity
+layer: physical
+dialect: snowflake
+name: customer
+database: retail_analytics
+schema: crm
+columns:
+  - name: id
+    type: bigint
+    nullable: false
+    primary_key: true
+  - name: email
+    type: string(320)
+    nullable: false
+  - name: profile
+    type: struct<first_name:string,last_name:string>
+  - name: preferences
+    type: map<string,string>
+  - name: created_at
+    type: timestamp
+    nullable: false

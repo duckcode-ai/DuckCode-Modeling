@@ -2909,6 +2909,9 @@ def build_parser() -> argparse.ArgumentParser:
     watch_parser.add_argument("--schema", default=_default_schema_path(), help="Path to JSON schema")
     watch_parser.set_defaults(func=cmd_watch)
 
+    from dm_cli.datalex_cli import register_datalex
+    register_datalex(sub)
+
     return parser
 
 

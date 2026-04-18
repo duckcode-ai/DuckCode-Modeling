@@ -1,0 +1,26 @@
+kind: entity
+layer: physical
+dialect: postgres
+name: customer
+schema: sales
+columns:
+  - name: id
+    type: bigint
+    nullable: false
+    primary_key: true
+  - name: email
+    type: string(320)
+    nullable: false
+    unique: true
+  - name: display_name
+    type: string(120)
+  - name: created_at
+    type: timestamp_tz
+    nullable: false
+    default: CURRENT_TIMESTAMP
+  - name: tags
+    type: array<string>
+indexes:
+  - name: idx_customer_email
+    columns: [email]
+    unique: true
