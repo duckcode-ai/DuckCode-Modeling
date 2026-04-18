@@ -9,7 +9,7 @@ packages/web-app/dist/
 # Virtual environment
 .venv/
 
-# DuckCodeModeling local runtime files
+# DataLex local runtime files
 .dm-connections.json
 .dm-projects.json
 

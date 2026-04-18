@@ -322,7 +322,7 @@ class TestDoctor(unittest.TestCase):
     def test_format_diagnostics(self):
         results = run_diagnostics(str(ROOT))
         output = format_diagnostics(results)
-        self.assertIn("DuckCodeModeling Doctor", output)
+        self.assertIn("DataLex Doctor", output)
         self.assertIn("Summary:", output)
 
     def test_diagnostics_as_json(self):
@@ -546,7 +546,7 @@ class TestCLIIntegration(unittest.TestCase):
             capture_output=True, text=True, cwd=str(ROOT),
             env={**os.environ, "PYTHONPATH": str(ROOT / "packages" / "core_engine" / "src") + ":" + str(ROOT / "packages" / "cli" / "src")},
         )
-        self.assertIn("DuckCodeModeling Doctor", result.stdout)
+        self.assertIn("DataLex Doctor", result.stdout)
 
     def test_doctor_json_runs(self):
         import subprocess

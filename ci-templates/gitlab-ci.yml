@@ -1,9 +1,9 @@
-# DuckCodeModeling Model Quality — GitLab CI
+# DataLex Model Quality — GitLab CI
 # Copy this file to .gitlab-ci.yml in your repository (or include it).
 #
 # Prerequisites:
 #   - Python 3.9+ available in the CI image
-#   - DuckCodeModeling CLI available (pip install -r requirements.txt)
+#   - DataLex CLI available (pip install -r requirements.txt)
 #   - Model files in **/*.model.yaml
 #   - Policy pack in policies/default.policy.yaml
 
@@ -16,20 +16,20 @@ variables:
   SCHEMA_PATH: schemas/model.schema.json
   POLICY_PATH: policies/default.policy.yaml
 
-.duckcodemodeling-setup: &duckcodemodeling-setup
+.datalex-setup: &datalex-setup
   image: python:3.11-slim
   before_script:
     - pip install --upgrade pip
     - pip install -r requirements.txt
 
 validate-models:
-  <<: *duckcodemodeling-setup
+  <<: *datalex-setup
   stage: validate
   script:
     - ./dm validate-all --schema "$SCHEMA_PATH"
 
 policy-check:
-  <<: *duckcodemodeling-setup
+  <<: *datalex-setup
   stage: policy
   script:
     - |
@@ -41,7 +41,7 @@ policy-check:
       done
 
 breaking-change-gate:
-  <<: *duckcodemodeling-setup
+  <<: *datalex-setup
   stage: gate
   rules:
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"

@@ -18,8 +18,8 @@ Total time: about five minutes.
 ## 0. Install
 
 ```bash
-git clone https://github.com/duckcode-ai/DuckCode-Modeling.git
-cd DuckCode-Modeling
+git clone https://github.com/duckcode-ai/DataLex.git
+cd DataLex
 
 python3 -m venv .venv
 source .venv/bin/activate

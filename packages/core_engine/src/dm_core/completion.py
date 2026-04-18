@@ -27,7 +27,7 @@ def generate_bash_completion() -> str:
     sync_subs = " ".join(_SYNC_SUBCOMMANDS)
     dialects = " ".join(_DIALECTS)
 
-    return f'''# bash completion for dm (DuckCodeModeling CLI)
+    return f'''# bash completion for dm (DataLex CLI)
 # Add to ~/.bashrc: eval "$(dm completion bash)"
 
 _dm_completions() {{
@@ -112,7 +112,7 @@ def generate_zsh_completion() -> str:
     dialects = " ".join(_DIALECTS)
 
     return f'''#compdef dm
-# zsh completion for dm (DuckCodeModeling CLI)
+# zsh completion for dm (DataLex CLI)
 # Add to ~/.zshrc: eval "$(dm completion zsh)"
 
 _dm() {{
@@ -176,7 +176,7 @@ _dm "$@"
 
 def generate_fish_completion() -> str:
     lines = [
-        "# fish completion for dm (DuckCodeModeling CLI)",
+        "# fish completion for dm (DataLex CLI)",
         "# Add to ~/.config/fish/completions/dm.fish",
         "",
     ]

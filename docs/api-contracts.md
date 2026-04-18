@@ -66,7 +66,7 @@ dm apply snowflake --sql-file migration.sql --dry-run
 ```
 Output:
 - execution summary (statement count, migration name, checksum)
-- optional migration ledger entry in `duckcodemodeling_migrations`
+- optional migration ledger entry in `datalex_migrations`
 - in product mode, apply is expected through Git-hosted CI/CD pipelines
 
 ## 5. Local API Contracts (Forward Engineering)

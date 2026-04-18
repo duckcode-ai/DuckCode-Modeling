@@ -1,8 +1,8 @@
-# DuckCodeModeling Architecture
+# DataLex Architecture
 
 ## 1. System overview
 
-DuckCodeModeling is a Git-native data modeling platform with three runtime
+DataLex is a Git-native data modeling platform with three runtime
 surfaces:
 
 1. **CLI (`dm`)** — validation, dbt sync, DDL emission, diff, package
@@ -159,7 +159,7 @@ Full walkthrough: [tutorial-dbt-sync.md](./tutorial-dbt-sync.md).
 ## 6. Repository layout
 
 ```text
-DuckCodeModeling/
+DataLex/
   packages/
     core_engine/src/dm_core/
       datalex/      # loader, project, migrator, diff, parse cache

@@ -26,13 +26,13 @@ function parseYamlObjectSafe(text) {
   }
 }
 
-function isDuckCodeModelingModelObject(doc) {
+function isDataLexModelObject(doc) {
   return !!doc && typeof doc === "object" && !Array.isArray(doc) && !!doc.model && Array.isArray(doc.entities);
 }
 
 function ensurePlaceholderEntityForEmptyModel(yamlText) {
   const doc = parseYamlObjectSafe(yamlText);
-  if (!isDuckCodeModelingModelObject(doc)) return { content: yamlText, changed: false };
+  if (!isDataLexModelObject(doc)) return { content: yamlText, changed: false };
   if ((doc.entities || []).length > 0) return { content: yamlText, changed: false };
   doc.entities = [
     {

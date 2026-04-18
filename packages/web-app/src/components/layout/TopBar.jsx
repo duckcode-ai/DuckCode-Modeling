@@ -59,7 +59,7 @@ export default function TopBar() {
       toPng(el, { backgroundColor: "#ffffff", pixelRatio: 2 }).then((dataUrl) => {
         const a = document.createElement("a");
         a.href = dataUrl;
-        a.download = "duckcodemodeling-diagram.png";
+        a.download = "datalex-diagram.png";
         a.click();
       });
     });

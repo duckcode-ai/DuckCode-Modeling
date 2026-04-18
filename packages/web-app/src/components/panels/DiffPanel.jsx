@@ -66,7 +66,7 @@ export default function DiffPanel() {
 
   const [prTitle, setPrTitle] = useState("chore: model updates");
   const [prBase, setPrBase] = useState("main");
-  const [prBody, setPrBody] = useState("Automated changes generated/managed in DuckCodeModeling.");
+  const [prBody, setPrBody] = useState("Automated changes generated/managed in DataLex.");
   const [prToken, setPrToken] = useState("");
   const [prCreating, setPrCreating] = useState(false);
   const [prUrl, setPrUrl] = useState("");

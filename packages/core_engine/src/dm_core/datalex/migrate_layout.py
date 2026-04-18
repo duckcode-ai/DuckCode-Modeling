@@ -1,6 +1,6 @@
 """One-shot migrator: v3 single-model YAML → DataLex file-per-entity layout.
 
-Translates a DuckCodeModeling v3 `*.model.yaml` file (the current "one big
+Translates a DataLex v3 `*.model.yaml` file (the current "one big
 model" shape) into the DataLex spec layout:
 
     datalex.yaml                # project manifest (created if missing)

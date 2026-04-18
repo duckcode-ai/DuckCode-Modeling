@@ -2445,7 +2445,7 @@ def cmd_watch(args: argparse.Namespace) -> int:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="dm", description="DuckCodeModeling CLI")
+    parser = argparse.ArgumentParser(prog="dm", description="DataLex CLI")
     sub = parser.add_subparsers(dest="command", required=True)
 
     init_parser = sub.add_parser("init", help="Initialize a new workspace")
@@ -2638,7 +2638,7 @@ def build_parser() -> argparse.ArgumentParser:
     dbt_push_parser.add_argument("--dbt-project", required=True, help="Root path of the dbt project to scan for schema.yml files")
     dbt_push_parser.set_defaults(func=cmd_dbt_push)
 
-    pull_parser = sub.add_parser("pull", help="Pull schema from a live database into a DuckCodeModeling model")
+    pull_parser = sub.add_parser("pull", help="Pull schema from a live database into a DataLex model")
     pull_parser.add_argument("connector", help="Connector type (postgres, mysql, snowflake, bigquery, databricks, sqlserver, azure_sql, azure_fabric, redshift)")
     pull_parser.add_argument("--host", help="Database host (or Snowflake account, Databricks server hostname)")
     pull_parser.add_argument("--port", type=int, help="Database port")
@@ -2888,7 +2888,7 @@ def build_parser() -> argparse.ArgumentParser:
     apply_parser.add_argument("--http-path", help="Databricks SQL Warehouse/Cluster HTTP path")
     apply_parser.add_argument("--private-key-path", help="Path to RSA private key PEM file (Snowflake key-pair auth)")
     apply_parser.add_argument("--migration-name", help="Migration name override")
-    apply_parser.add_argument("--ledger-table", default="duckcodemodeling_migrations", help="Migration ledger table name")
+    apply_parser.add_argument("--ledger-table", default="datalex_migrations", help="Migration ledger table name")
     apply_parser.add_argument("--skip-ledger", action="store_true", help="Skip writing migration ledger record")
     apply_parser.add_argument("--policy-pack", default=_default_policy_path(), help="Policy pack for model-diff preflight checks")
     apply_parser.add_argument("--skip-policy-check", action="store_true", help="Skip policy preflight checks for model-diff apply")

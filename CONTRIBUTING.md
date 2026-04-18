@@ -1,4 +1,4 @@
-# Contributing to DuckCodeModeling
+# Contributing to DataLex
 
 Thanks for contributing. This project includes a React web app, a Node API server, and a Python core/CLI.
 

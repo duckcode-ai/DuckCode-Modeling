@@ -32,14 +32,14 @@ export default function LoginPage() {
             <div className="flex justify-center mb-4">
               <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-blue-500 to-indigo-600 flex items-center justify-center shadow-lg">
                 <img
-                  src="/DuckCodeModeling.png"
-                  alt="DuckCodeModeling"
+                  src="/DataLex.png"
+                  alt="DataLex"
                   className="w-10 h-10 object-contain"
                   onError={(e) => { e.target.style.display = "none"; }}
                 />
               </div>
             </div>
-            <h1 className="text-xl font-bold text-slate-900">DuckCodeModeling</h1>
+            <h1 className="text-xl font-bold text-slate-900">DataLex</h1>
             <p className="text-sm text-slate-500 mt-1">Sign in to your workspace</p>
           </div>
 
@@ -131,7 +131,7 @@ export default function LoginPage() {
         </div>
 
         <p className="text-center text-[11px] text-slate-400 mt-4">
-          DuckCodeModeling · Data Modeling Platform
+          DataLex · Data Modeling Platform
         </p>
       </div>
     </div>

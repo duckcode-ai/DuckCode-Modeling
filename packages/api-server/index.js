@@ -18,7 +18,7 @@ app.use(express.json({ limit: "10mb" }));
 
 // Request logging
 app.use((req, _res, next) => {
-  console.log(`[duckcodemodeling] ${req.method} ${req.url}`);
+  console.log(`[datalex] ${req.method} ${req.url}`);
   next();
 });
 
@@ -58,7 +58,7 @@ async function ensureDefaultUsers() {
     { id: "u1", username: "admin",  salt: s1, passwordHash: hashPassword("admin123",  s1), role: "admin",  name: "Admin"  },
     { id: "u2", username: "viewer", salt: s2, passwordHash: hashPassword("viewer123", s2), role: "viewer", name: "Viewer" },
   ]);
-  console.log("[duckcodemodeling] Default users created — admin/admin123 and viewer/viewer123");
+  console.log("[datalex] Default users created — admin/admin123 and viewer/viewer123");
 }
 function requireAuth(req, res, next) {
   const token = req.headers["x-dm-token"];
@@ -84,9 +84,9 @@ const VENV_PYTHON = join(REPO_ROOT, ".venv", "bin", "python3");
 const PYTHON = existsSync(VENV_PYTHON) ? VENV_PYTHON : "python3";
 const IS_DOCKER_RUNTIME = existsSync("/.dockerenv");
 const DIRECT_APPLY_ENABLED = ["1", "true", "yes", "on"].includes(String(process.env.DM_ENABLE_DIRECT_APPLY || "").toLowerCase());
-const DUCKCODE_CONFIG_DIRNAME = ".duckcodemodeling";
-const DUCKCODE_PROJECT_CONFIG = join(DUCKCODE_CONFIG_DIRNAME, "project.json");
-const DUCKCODE_DEFAULT_STRUCTURE = {
+const DATALEX_CONFIG_DIRNAME = ".datalex";
+const DATALEX_PROJECT_CONFIG = join(DATALEX_CONFIG_DIRNAME, "project.json");
+const DATALEX_DEFAULT_STRUCTURE = {
   version: 1,
   // Default to snowflake so baseline DDL generation works for new projects without extra config.
   // Connector pulls can still set this explicitly based on the chosen connector.
@@ -303,7 +303,7 @@ function toPosixPath(value) {
   return String(value || "").replace(/\\/g, "/");
 }
 
-function sanitizeFolderName(value, fallback = "duckcodemodeling-project") {
+function sanitizeFolderName(value, fallback = "datalex-project") {
   const raw = String(value || "").trim();
   const cleaned = raw
     .replace(/[\\/]+/g, "-")
@@ -355,7 +355,7 @@ async function bootstrapProjectStructure(projectPath, { initializeGit = false } 
     "guides/setup",
     "guides/gitops",
     "guides/testing",
-    DUCKCODE_CONFIG_DIRNAME,
+    DATALEX_CONFIG_DIRNAME,
   ];
   for (const relDir of dirs) {
     await mkdir(join(absoluteProjectPath, relDir), { recursive: true });
@@ -364,7 +364,7 @@ async function bootstrapProjectStructure(projectPath, { initializeGit = false } 
   const readme = [
     `# ${basename(absoluteProjectPath)}` ,
     "",
-    "Programmable data modeling repository managed by DuckCodeModeling.",
+    "Programmable data modeling repository managed by DataLex.",
     "",
     "## Structure",
     "",
@@ -376,7 +376,7 @@ async function bootstrapProjectStructure(projectPath, { initializeGit = false } 
   ].join("\n");
 
   const gitignore = [
-    "# DuckCodeModeling",
+    "# DataLex",
     ".secrets/",
     "*.pem",
     "*.p8",
@@ -414,8 +414,8 @@ async function bootstrapProjectStructure(projectPath, { initializeGit = false } 
   await writeFileIfMissing(join(absoluteProjectPath, "README.md"), readme);
   await writeFileIfMissing(join(absoluteProjectPath, ".gitignore"), gitignore);
   await writeFileIfMissing(
-    join(absoluteProjectPath, DUCKCODE_PROJECT_CONFIG),
-    `${JSON.stringify(DUCKCODE_DEFAULT_STRUCTURE, null, 2)}\n`
+    join(absoluteProjectPath, DATALEX_PROJECT_CONFIG),
+    `${JSON.stringify(DATALEX_DEFAULT_STRUCTURE, null, 2)}\n`
   );
   await writeFileIfMissing(join(absoluteProjectPath, "models", ".gitkeep"), "");
   await writeFileIfMissing(
@@ -448,7 +448,7 @@ async function bootstrapProjectStructure(projectPath, { initializeGit = false } 
 
 async function loadProjectStructure(projectPath) {
   const absoluteProjectPath = resolve(projectPath);
-  const configPath = join(absoluteProjectPath, DUCKCODE_PROJECT_CONFIG);
+  const configPath = join(absoluteProjectPath, DATALEX_PROJECT_CONFIG);
 
   let projectConfig = null;
   if (existsSync(configPath)) {
@@ -503,7 +503,7 @@ function parseDbtDocSummary(text, relPath) {
   }
   if (!loaded || typeof loaded !== "object" || Array.isArray(loaded)) return null;
 
-  // Skip files already in DuckCodeModeling model format
+  // Skip files already in DataLex model format
   if (loaded.model && typeof loaded.model === "object" && Array.isArray(loaded.entities)) {
     return null;
   }
@@ -822,7 +822,7 @@ app.get("/api/projects/:id/files", async (req, res) => {
     const pathErr = await assertReadableDirectory(project.path);
     if (pathErr) {
       const dockerHint = IS_DOCKER_RUNTIME
-        ? " Running in Docker: mount the host parent path (for example -v /Users/<you>:/workspace/host) and use /workspace/host/... in DuckCodeModeling."
+        ? " Running in Docker: mount the host parent path (for example -v /Users/<you>:/workspace/host) and use /workspace/host/... in DataLex."
         : "";
       return res.status(400).json({
         error:
@@ -1689,7 +1689,7 @@ app.get("/api/projects/:id/model-graph", async (req, res) => {
     const pathErr = await assertReadableDirectory(project.path);
     if (pathErr) {
       const dockerHint = IS_DOCKER_RUNTIME
-        ? " Running in Docker: mount the host parent path (for example -v /Users/<you>:/workspace/host) and use /workspace/host/... in DuckCodeModeling."
+        ? " Running in Docker: mount the host parent path (for example -v /Users/<you>:/workspace/host) and use /workspace/host/... in DataLex."
         : "";
       return res.status(400).json({
         error:
@@ -2440,7 +2440,7 @@ app.post("/api/connectors/dbt-repo/scan", requireAdmin, express.json(), async (r
     const pathErr = await assertReadableDirectory(repoPath);
     if (pathErr) {
       const dockerHint = IS_DOCKER_RUNTIME
-        ? " Running in Docker: mount the host parent path (for example -v /Users/<you>:/workspace/host) and use /workspace/host/... in DuckCodeModeling."
+        ? " Running in Docker: mount the host parent path (for example -v /Users/<you>:/workspace/host) and use /workspace/host/... in DataLex."
         : "";
       return res.status(400).json({
         error:
@@ -2493,9 +2493,9 @@ app.post("/api/connectors/dbt-repo/scan", requireAdmin, express.json(), async (r
       dbtFiles,
       dbtFileCount: dbtFiles.length,
       totals: totalSections,
-      suggestedSubfolder: "duckcodemodeling-models",
-      suggestedTargetPath: join(repoPath, "duckcodemodeling-models"),
-      suggestedProjectName: `${repoName}-duckcodemodeling`,
+      suggestedSubfolder: "datalex-models",
+      suggestedTargetPath: join(repoPath, "datalex-models"),
+      suggestedProjectName: `${repoName}-datalex`,
       suggestedModelName: sanitizeModelStem(`${repoName}_dbt`, "dbt_model"),
       warnings: dbtFiles.length === 0
         ? ["No dbt schema/source/semantic/metrics YAML files found under this path."]
@@ -2864,11 +2864,11 @@ app.delete("/api/auth/users/:id", requireAdmin, async (req, res) => {
 ensureDefaultUsers().catch(console.error);
 
 app.listen(PORT, () => {
-  console.log(`[duckcodemodeling] Local file server running on http://localhost:${PORT}`);
-  console.log(`[duckcodemodeling] Repo root: ${REPO_ROOT}`);
+  console.log(`[datalex] Local file server running on http://localhost:${PORT}`);
+  console.log(`[datalex] Repo root: ${REPO_ROOT}`);
   if (existsSync(WEB_DIST)) {
-    console.log(`[duckcodemodeling] Serving web app from: ${WEB_DIST}`);
+    console.log(`[datalex] Serving web app from: ${WEB_DIST}`);
   } else {
-    console.log(`[duckcodemodeling] Web dist not found at: ${WEB_DIST}`);
+    console.log(`[datalex] Web dist not found at: ${WEB_DIST}`);
   }
 });

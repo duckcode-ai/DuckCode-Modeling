@@ -1523,7 +1523,7 @@ export function runModelChecks(yamlText) {
     const dbtIssue = issue(
       "warn",
       "DBT_SCHEMA_DETECTED",
-      "This file looks like a dbt schema file (.yml/.yaml). Import it as dbt to generate a DuckCodeModeling model.",
+      "This file looks like a dbt schema file (.yml/.yaml). Import it as dbt to generate a DataLex model.",
       "/"
     );
     return {

@@ -30,7 +30,7 @@ export default function ViewerWelcome() {
         <div className="text-center mb-10">
           <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-white border border-slate-200 text-[11px] font-semibold text-slate-600 shadow-sm mb-4">
             <Sparkles size={12} className="text-blue-600" />
-            DuckCodeModeling
+            DataLex
           </div>
           <h1 className="text-3xl font-bold text-slate-900 mb-2">
             Welcome back, {firstName}

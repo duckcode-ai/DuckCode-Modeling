@@ -1,4 +1,4 @@
-"""Tests for importers used by local/open-source DuckCodeModeling workflows."""
+"""Tests for importers used by local/open-source DataLex workflows."""
 
 import json
 import subprocess

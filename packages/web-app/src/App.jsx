@@ -84,7 +84,7 @@ function AddProjectModal() {
       .replace(/[^A-Za-z0-9._-]+/g, "-")
       .replace(/-+/g, "-")
       .replace(/^[-.]+|[-.]+$/g, "");
-    return cleaned || "duckcodemodeling-project";
+    return cleaned || "datalex-project";
   };
 
   const joinPath = (basePath, childPath) => {
@@ -150,7 +150,7 @@ function AddProjectModal() {
               className="w-full bg-bg-primary border border-border-primary rounded-md px-3 py-2 text-sm text-text-primary placeholder:text-text-muted outline-none focus:border-accent-blue font-mono text-xs"
             />
             <p className="mt-1 text-[11px] text-text-muted">
-              Recommended: run DuckCodeModeling locally for full file access. In Docker, use mounted container paths like
+              Recommended: run DataLex locally for full file access. In Docker, use mounted container paths like
               {" "}<code>/workspace/host/...</code>.
             </p>
             <p className="mt-1 text-[11px] text-text-muted">
@@ -184,7 +184,7 @@ function AddProjectModal() {
               checked={scaffoldRepo}
               onChange={(e) => setScaffoldRepo(e.target.checked)}
             />
-            Initialize DuckCodeModeling repo structure (models, migrations, guides, CI template)
+            Initialize DataLex repo structure (models, migrations, guides, CI template)
           </label>
           <label className="flex items-center gap-2 text-xs text-text-muted">
             <input
@@ -286,7 +286,7 @@ function EditProjectModal() {
       .replace(/[^A-Za-z0-9._-]+/g, "-")
       .replace(/-+/g, "-")
       .replace(/^[-.]+|[-.]+$/g, "");
-    return cleaned || "duckcodemodeling-project";
+    return cleaned || "datalex-project";
   };
 
   const joinPath = (basePath, childPath) => {
@@ -410,7 +410,7 @@ function EditProjectModal() {
               checked={scaffoldRepo}
               onChange={(e) => setScaffoldRepo(e.target.checked)}
             />
-            Add/repair DuckCodeModeling repo structure
+            Add/repair DataLex repo structure
           </label>
           <label className="flex items-center gap-2 text-xs text-text-muted">
             <input
@@ -562,7 +562,7 @@ function ConnectView() {
         </span>
         <div className="min-w-0">
           <div className="text-sm font-semibold text-text-primary">Database Connectors</div>
-          <div className="text-[11px] text-text-muted">Connect, preview, and pull physical schemas into versioned DuckCodeModeling models</div>
+          <div className="text-[11px] text-text-muted">Connect, preview, and pull physical schemas into versioned DataLex models</div>
         </div>
       </div>
       <div className="flex-1 overflow-hidden">
