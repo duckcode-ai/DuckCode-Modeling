@@ -69,6 +69,7 @@
           "previous_name": { "type": "string", "pattern": "^[a-z][a-z0-9_]*$" },
           "type": { "type": "string" },
           "description": { "type": "string" },
+          "nullable": { "type": "boolean" },
           "tests": {
             "type": "array",
             "items": {

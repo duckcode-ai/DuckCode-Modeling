@@ -60,6 +60,7 @@
                 "name": { "type": "string", "pattern": "^[a-z][a-z0-9_]*$" },
                 "type": { "type": "string" },
                 "description": { "type": "string" },
+                "nullable": { "type": "boolean" },
                 "tests": { "$ref": "#/$defs/tests" },
                 "tags": {
                   "type": "array",

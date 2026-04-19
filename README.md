@@ -11,6 +11,9 @@ Point us at your dbt project and warehouse — we produce versioned, reviewable 
 with contracts, lineage, ERDs, and clean round-trip back to dbt.
 
 <p align="center">
+  <a href="https://pypi.org/project/datalex-cli/">
+    <img src="https://img.shields.io/pypi/v/datalex-cli?style=for-the-badge&color=3b82f6&label=PyPI" alt="PyPI" />
+  </a>
   <a href="https://github.com/duckcode-ai/DataLex/blob/main/LICENSE">
     <img src="https://img.shields.io/github/license/duckcode-ai/DataLex?style=for-the-badge&color=22c55e" alt="MIT License" />
   </a>
@@ -29,20 +32,24 @@ with contracts, lineage, ERDs, and clean round-trip back to dbt.
 
 ## 60-second demo
 
+<p align="center">
+  <img src="demo/demo.gif" alt="DataLex dbt sync demo — build a DuckDB warehouse, sync into DataLex YAML, emit back to dbt with contracts enforced" width="100%" />
+</p>
+
 ```bash
+pip install 'datalex-cli[duckdb]'
 git clone https://github.com/duckcode-ai/DataLex.git
 cd DataLex
-pip install -e '.[duckdb]'
 
 # 1. Build a local DuckDB warehouse (no external credentials)
 python examples/jaffle_shop_demo/setup.py
 
 # 2. Sync the dbt project into DataLex YAML
-./datalex datalex dbt sync examples/jaffle_shop_demo \
+datalex datalex dbt sync examples/jaffle_shop_demo \
     --out-root examples/jaffle_shop_demo/datalex-out
 
 # 3. Emit dbt-parseable YAML back, with contracts enforced
-./datalex datalex dbt emit examples/jaffle_shop_demo/datalex-out \
+datalex datalex dbt emit examples/jaffle_shop_demo/datalex-out \
     --out-dir examples/jaffle_shop_demo/dbt-out
 ```
 
@@ -93,14 +100,21 @@ per-dialect over time).
 
 ## Install
 
+From [PyPI](https://pypi.org/project/datalex-cli/):
+
+```bash
+pip install datalex-cli               # puts `datalex` on PATH
+pip install 'datalex-cli[duckdb]'     # add warehouse drivers you need
+```
+
+From source (for contributors or editable installs):
+
 ```bash
 git clone https://github.com/duckcode-ai/DataLex.git
 cd DataLex
-
 python3 -m venv .venv
 source .venv/bin/activate
-pip install -e .              # puts `datalex` on PATH
-pip install -e '.[duckdb]'    # add warehouse drivers you need
+pip install -e '.[duckdb]'
 
 # optional — only needed for the Visual Studio
 npm --prefix packages/api-server install
