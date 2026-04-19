@@ -15,6 +15,9 @@ import {
   Sun,
   FileCode2,
   Code2,
+  Table2,
+  ListTree,
+  Link2,
   Settings,
   GitBranch,
   GitCommit,
@@ -261,6 +264,36 @@ export default function TopBar() {
 
         <Divider />
 
+        {/* Create group — Luna-style creation tools */}
+        {editable && (
+          <>
+            <Group>
+              <TBButton
+                icon={Table2}
+                label="Table"
+                title="New table (entity)"
+                onClick={() => openModal("newEntity", { type: "table" })}
+                disabled={!onCanvas || !activeFile}
+              />
+              <TBButton
+                icon={ListTree}
+                label="Enum"
+                title="New enum"
+                onClick={() => openModal("newEntity", { type: "enum" })}
+                disabled={!onCanvas || !activeFile}
+              />
+              <TBButton
+                icon={Link2}
+                label="Relationship"
+                title="New relationship"
+                onClick={() => openModal("newRelationship")}
+                disabled={!onCanvas || !activeFile}
+              />
+            </Group>
+            <Divider />
+          </>
+        )}
+
         {/* Project tabs — multiple open projects, Cmd+Tab to cycle */}
         <ProjectTabs />
 
@@ -271,7 +304,6 @@ export default function TopBar() {
           <TBButton
             icon={Maximize2}
             label="Fit"
-            iconOnly
             title="Fit to view"
             onClick={() => window.dispatchEvent(new CustomEvent("dl:diagram:fit"))}
             disabled={!onCanvas}
@@ -279,7 +311,6 @@ export default function TopBar() {
           <TBButton
             icon={Grid3x3}
             label="Grid"
-            iconOnly
             title="Toggle grid"
             onClick={() => window.dispatchEvent(new CustomEvent("dl:diagram:toggle-grid"))}
             disabled={!onCanvas}
@@ -287,7 +318,6 @@ export default function TopBar() {
           <TBButton
             icon={Code2}
             label="Code"
-            iconOnly
             title={yamlPanelOpen ? "Hide YAML editor" : "Show YAML editor"}
             onClick={toggleYamlPanel}
             active={yamlPanelOpen}
@@ -381,21 +411,21 @@ export default function TopBar() {
             )}
             <TBButton
               icon={GitCommit}
-              iconOnly
+              label="Commit"
               title="Commit changes…"
               onClick={() => openModal("commit")}
               disabled={!editable || gitBusy}
             />
             <TBButton
               icon={DownloadCloud}
-              iconOnly
+              label="Pull"
               title="Pull"
               onClick={handleGitPull}
               disabled={!editable || gitBusy}
             />
             <TBButton
               icon={UploadCloud}
-              iconOnly
+              label="Push"
               title="Push"
               onClick={handleGitPush}
               disabled={!editable || gitBusy}

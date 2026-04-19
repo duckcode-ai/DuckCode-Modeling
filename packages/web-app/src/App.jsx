@@ -10,6 +10,8 @@ import SettingsDialog from "./components/dialogs/SettingsDialog";
 import ConnectionsManager from "./components/dialogs/ConnectionsManager";
 import CommitDialog from "./components/dialogs/CommitDialog";
 import CommandPalette from "./components/dialogs/CommandPalette";
+import NewEntityDialog from "./components/dialogs/NewEntityDialog";
+import NewRelationshipDialog from "./components/dialogs/NewRelationshipDialog";
 import YamlEditor from "./components/editor/YamlEditor";
 import DiagramCanvas from "./components/diagram/DiagramCanvas";
 import DiagramTabs from "./components/layout/DiagramTabs";
@@ -829,6 +831,8 @@ export default function App() {
       {activeModal === "connectionsManager" && <ConnectionsManager />}
       {activeModal === "commit" && <CommitDialog />}
       {activeModal === "commandPalette" && <CommandPalette />}
+      {activeModal === "newEntity" && <NewEntityDialog />}
+      {activeModal === "newRelationship" && <NewRelationshipDialog />}
       {showShortcuts && <KeyboardShortcutsPanel onClose={() => setShowShortcuts(false)} />}
 
       {/* Toasts */}
