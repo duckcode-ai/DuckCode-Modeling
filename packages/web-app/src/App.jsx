@@ -14,15 +14,9 @@ import YamlEditor from "./components/editor/YamlEditor";
 import DiagramCanvas from "./components/diagram/DiagramCanvas";
 import DiagramTabs from "./components/layout/DiagramTabs";
 import EntityPanel from "./components/panels/EntityPanel";
-import ModelerPanel from "./components/panels/ModelerPanel";
-import LibrariesPanel from "./components/panels/LibrariesPanel";
-import SubjectAreasPanel from "./components/panels/SubjectAreasPanel";
 import ValidationPanel from "./components/panels/ValidationPanel";
 import DiffPanel from "./components/panels/DiffPanel";
 import ImpactPanel from "./components/panels/ImpactPanel";
-import HistoryPanel from "./components/panels/HistoryPanel";
-import ModelGraphPanel from "./components/panels/ModelGraphPanel";
-import DictionaryPanel from "./components/panels/DictionaryPanel";
 import ImportPanel from "./components/panels/ImportPanel";
 import ConnectorsPanel from "./components/panels/ConnectorsPanel";
 import GlobalSearchPanel from "./components/panels/GlobalSearchPanel";
@@ -31,17 +25,12 @@ import KeyboardShortcutsPanel from "./components/panels/KeyboardShortcutsPanel";
 import useUiStore from "./stores/uiStore";
 import useWorkspaceStore from "./stores/workspaceStore";
 import useDiagramStore from "./stores/diagramStore";
-import useAuthStore from "./stores/authStore";
-import LoginPage from "./components/auth/LoginPage";
-import ViewerWelcome from "./components/viewer/ViewerWelcome";
 
 import {
   Columns3,
   ShieldCheck,
   GitCompare,
   Activity,
-  Network,
-  Clock,
   X,
   FolderPlus,
   Plus,
@@ -49,27 +38,17 @@ import {
   AlertCircle,
   Search,
   Database,
-  BookOpen,
   Import,
   GitBranch,
   RefreshCw,
-  Wand2,
-  LibraryBig,
-  Map,
 } from "lucide-react";
 import { fetchGitBranches, fetchGitRemote } from "./lib/api";
 
 const ALL_BOTTOM_TABS = [
-  { id: "modeler",     label: "Modeler",     icon: Wand2 },
   { id: "properties",  label: "Properties",  icon: Columns3 },
-  { id: "libraries",   label: "Libraries",   icon: LibraryBig },
-  { id: "subject-areas", label: "Subject Areas", icon: Map },
   { id: "validation",  label: "Validation",  icon: ShieldCheck, adminOnly: true },
   { id: "diff",        label: "Diff & Gate", icon: GitCompare,  adminOnly: true },
   { id: "impact",      label: "Impact",      icon: Activity,    adminOnly: true },
-  { id: "model-graph", label: "Model Graph", icon: Network },
-  { id: "dictionary",  label: "Dictionary",  icon: BookOpen },
-  { id: "history",     label: "History",     icon: Clock },
 ];
 
 function AddProjectModal() {
@@ -506,26 +485,14 @@ function EditProjectModal() {
 
 function BottomPanelContent({ tab }) {
   switch (tab) {
-    case "modeler":
-      return <ModelerPanel />;
     case "properties":
       return <EntityPanel />;
-    case "libraries":
-      return <LibrariesPanel />;
-    case "subject-areas":
-      return <SubjectAreasPanel />;
     case "validation":
       return <ValidationPanel />;
     case "diff":
       return <DiffPanel />;
     case "impact":
       return <ImpactPanel />;
-    case "model-graph":
-      return <ModelGraphPanel />;
-    case "dictionary":
-      return <DictionaryPanel />;
-    case "history":
-      return <HistoryPanel />;
     default:
       return <EntityPanel />;
   }
@@ -601,23 +568,25 @@ function SearchView() {
 }
 
 // ── Primary content area for "model" activity (editor + diagram) ──
-function ModelView({ bottomPanelOpen, bottomPanelTab, setBottomPanelTab, toggleBottomPanel, bottomTabs, readOnly, rightPanelOpen }) {
+function ModelView({ bottomPanelOpen, bottomPanelTab, setBottomPanelTab, toggleBottomPanel, bottomTabs, readOnly, rightPanelOpen, yamlPanelOpen }) {
   return (
     <Allotment vertical style={{ height: "100%" }}>
-      {/* Top: Editor + Diagram (+ Right Inspector) split */}
+      {/* Top: (YAML) + Diagram (+ Right Inspector) split */}
       <Allotment.Pane>
         <Allotment style={{ height: "100%" }}>
-          {/* YAML Editor */}
-          <Allotment.Pane minSize={readOnly ? 0 : 250} preferredSize={readOnly ? 180 : 500}>
-            <div className="h-full flex flex-col bg-bg-surface">
-              <div className="flex items-center px-3 py-1 border-b border-border-primary bg-bg-secondary/50">
-                <span className="text-[10px] text-text-muted uppercase tracking-wider font-semibold">YAML Editor</span>
+          {/* YAML Editor — hidden by default; toggle via Code icon in top bar */}
+          {yamlPanelOpen && (
+            <Allotment.Pane minSize={250} preferredSize={480} maxSize={800}>
+              <div className="h-full flex flex-col bg-bg-surface">
+                <div className="flex items-center px-3 py-1 border-b border-border-primary bg-bg-secondary/50">
+                  <span className="text-[10px] text-text-muted uppercase tracking-wider font-semibold">YAML Editor</span>
+                </div>
+                <YamlEditor readOnly={readOnly} />
               </div>
-              <YamlEditor readOnly={readOnly} />
-            </div>
-          </Allotment.Pane>
+            </Allotment.Pane>
+          )}
 
-          {/* Diagram */}
+          {/* Diagram — full width by default */}
           <Allotment.Pane minSize={300}>
             <div className="h-full flex flex-col bg-bg-surface">
               <div className="flex-1 min-h-0">
@@ -627,7 +596,7 @@ function ModelView({ bottomPanelOpen, bottomPanelTab, setBottomPanelTab, toggleB
             </div>
           </Allotment.Pane>
 
-          {/* Right Inspector */}
+          {/* Right Inspector — appears automatically on entity/column selection */}
           {rightPanelOpen && (
             <Allotment.Pane minSize={260} preferredSize={320} maxSize={520}>
               <RightInspector />
@@ -676,21 +645,22 @@ function ModelView({ bottomPanelOpen, bottomPanelTab, setBottomPanelTab, toggleB
 }
 
 export default function App() {
-  const { activeModal, activeActivity, bottomPanelOpen, bottomPanelTab, setBottomPanelTab, toggleBottomPanel, rightPanelOpen } = useUiStore();
+  const {
+    activeModal, activeActivity, bottomPanelOpen, bottomPanelTab,
+    setBottomPanelTab, toggleBottomPanel, rightPanelOpen, yamlPanelOpen,
+    setRightPanelOpen, selection,
+  } = useUiStore();
   const { error, clearError, loadProjects } = useWorkspaceStore();
   const { selectedEntityId } = useDiagramStore();
-  const { isAuthenticated, isLoading, restoreSession, canEdit, isViewer } = useAuthStore();
+
+  // Auto-open Inspector on selection; auto-close when nothing is selected
+  useEffect(() => {
+    const hasSelection = Boolean(selection?.kind || selectedEntityId);
+    setRightPanelOpen(hasSelection);
+  }, [selection, selectedEntityId, setRightPanelOpen]);
   const [showShortcuts, setShowShortcuts] = useState(false);
 
-  // Restore auth session on mount
-  useEffect(() => { restoreSession(); }, []);
-
-  // Load workspace whenever user becomes authenticated
-  useEffect(() => {
-    if (isAuthenticated) {
-      loadProjects();
-    }
-  }, [isAuthenticated]);
+  useEffect(() => { loadProjects(); }, []);
 
   // Initialize theme on mount
   useEffect(() => {
@@ -820,32 +790,13 @@ export default function App() {
     }
   }, [error, clearError]);
 
-  // Auth loading screen
-  if (isLoading) {
-    return (
-      <div className="h-screen flex items-center justify-center bg-slate-50">
-        <div className="flex flex-col items-center gap-3">
-          <div className="w-10 h-10 rounded-xl bg-blue-600 flex items-center justify-center">
-            <RefreshCw size={18} className="text-white animate-spin" />
-          </div>
-          <p className="text-sm text-slate-500">Loading…</p>
-        </div>
-      </div>
-    );
-  }
-
-  // Login gate
-  if (!isAuthenticated) return <LoginPage />;
-
-  // Role-based bottom tabs
-  const BOTTOM_TABS = ALL_BOTTOM_TABS.filter((t) => !t.adminOnly || canEdit());
+  const BOTTOM_TABS = ALL_BOTTOM_TABS;
 
   // Determine which primary view to show
   const showModelView = activeActivity === "model" || activeActivity === "settings";
   const showConnectView = activeActivity === "connect";
   const showImportView = activeActivity === "import";
   const showSearchView = activeActivity === "search";
-  const showViewerWelcome = activeActivity === "home";  // viewer landing page via logo click
 
   return (
     <div className="h-screen flex flex-col overflow-hidden bg-[linear-gradient(180deg,#f8fbff_0%,#ffffff_45%)]">
@@ -862,7 +813,6 @@ export default function App() {
           <div className="flex-1 min-h-0">
             {showConnectView && <ConnectView />}
             {showImportView && <ImportView />}
-            {showViewerWelcome && <ViewerWelcome />}
             {showSearchView && <SearchView />}
             {showModelView && (
               <ModelView
@@ -871,8 +821,9 @@ export default function App() {
                 setBottomPanelTab={setBottomPanelTab}
                 toggleBottomPanel={toggleBottomPanel}
                 bottomTabs={BOTTOM_TABS}
-                readOnly={!canEdit()}
+                readOnly={false}
                 rightPanelOpen={rightPanelOpen}
+                yamlPanelOpen={yamlPanelOpen}
               />
             )}
           </div>

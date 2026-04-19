@@ -13,8 +13,6 @@ import {
 import "@xyflow/react/dist/style.css";
 
 import EntityNode from "./EntityNode";
-import AnnotationNode from "./AnnotationNode";
-import SchemaOverviewNode from "./SchemaOverviewNode";
 import SubjectAreaGroup from "./SubjectAreaGroup";
 import EnumNode from "./EnumNode";
 import CanvasContextMenu from "./CanvasContextMenu";
@@ -31,7 +29,7 @@ import { removeEntity, removeRelationship, addEntityWithOptions } from "../../li
 
 const SCHEMA_COLORS_HEX = SCHEMA_COLORS.map((c) => c.hex);
 
-const nodeTypes = { entityNode: EntityNode, annotation: AnnotationNode, group: SubjectAreaGroup, schemaOverview: SchemaOverviewNode, enumNode: EnumNode };
+const nodeTypes = { entityNode: EntityNode, group: SubjectAreaGroup, enumNode: EnumNode };
 
 const LARGE_MODEL_THRESHOLD = 100;
 const COMPACT_MODE_THRESHOLD = 200;
@@ -291,25 +289,6 @@ function applyVisualEffects(nodes, edges, vizSettings, selectedEntityId, entityS
   return { nodes: styledNodes, edges: styledEdges };
 }
 
-// Build schema overview nodes from the store's schema options
-function buildSchemaOverviewNodes(schemaOptions, onDrillIn) {
-  const cols = Math.max(1, Math.ceil(Math.sqrt(schemaOptions.length)));
-  return schemaOptions.map((s, i) => ({
-    id: `__schema_${s.name}`,
-    type: "schemaOverview",
-    position: { x: 60 + (i % cols) * 280, y: 60 + Math.floor(i / cols) * 200 },
-    data: {
-      schemaName: s.name,
-      entityCount: s.entityCount,
-      tableCount: s.tableCount,
-      viewCount: s.viewCount,
-      relCount: s.relCount,
-      colorIndex: i,
-      onDrillIn,
-    },
-  }));
-}
-
 function FlowCanvas() {
   const rf = useReactFlow();
   const {
@@ -364,27 +343,11 @@ function FlowCanvas() {
     }
   }, [storeNodes.length, setVisibleLimit, setVizSettings, setLargeModelBanner]);
 
-  // Schema overview drill-in handler
-  const handleSchemaOverviewDrillIn = useCallback((schemaName) => {
-    setActiveSchemaFilter(schemaName);
-    setViewMode("all");
-  }, [setActiveSchemaFilter, setViewMode]);
-
   // Pipeline: filter → schema filter → limit → layout → compact → visual effects
   useEffect(() => {
     if (storeNodes.length === 0) {
       setRfNodes([]);
       setRfEdges([]);
-      return;
-    }
-
-    // Schema overview mode: show schema summary cards instead of entities
-    if (viewMode === "overview") {
-      const schemaOptions = getSchemaOptions();
-      const overviewNodes = buildSchemaOverviewNodes(schemaOptions, handleSchemaOverviewDrillIn);
-      setRfNodes(overviewNodes);
-      setRfEdges([]);
-      setLayoutDone(true);
       return;
     }
 
@@ -493,7 +456,7 @@ function FlowCanvas() {
     };
 
     doLayout();
-  }, [storeNodes, storeEdges, vizSettings, selectedEntityId, entitySearch, viewMode, visibleLimit, activeSchemaFilter, layoutRefreshTick, modelingViewMode, collapsedSubjectAreas, diagrams, activeDiagramId, setRfNodes, setRfEdges, getSchemaOptions, handleSchemaOverviewDrillIn]);
+  }, [storeNodes, storeEdges, vizSettings, selectedEntityId, entitySearch, viewMode, visibleLimit, activeSchemaFilter, layoutRefreshTick, modelingViewMode, collapsedSubjectAreas, diagrams, activeDiagramId, setRfNodes, setRfEdges]);
 
   // Fit view after layout
   useEffect(() => {
@@ -527,8 +490,7 @@ function FlowCanvas() {
   }, [centerEntityId, rfNodes, rf, setCenterEntityId]);
 
   const onNodeClick = useCallback((_event, node) => {
-    // Schema overview nodes handle their own click
-    if (node.type === "schemaOverview" || node.type === "group") return;
+    if (node.type === "group") return;
     selectEntity(node.id);
   }, [selectEntity]);
 
@@ -538,7 +500,7 @@ function FlowCanvas() {
 
   const [contextMenu, setContextMenu] = useState(null);
   const onNodeContextMenu = useCallback((event, node) => {
-    if (node.type === "schemaOverview" || node.type === "group" || node.type === "annotation") return;
+    if (node.type === "group") return;
     event.preventDefault();
     setContextMenu({
       target: node.type === "enumNode" ? "enum" : "entity",
@@ -594,30 +556,6 @@ function FlowCanvas() {
       else if (actionId === "add-entity") ui.openModal?.("newEntity");
     }
   }, []);
-
-  // Annotation management
-  const addAnnotation = useCallback((position) => {
-    const id = `__annotation_${Date.now()}`;
-    const newNode = {
-      id,
-      type: "annotation",
-      position: position || { x: 100, y: 100 },
-      data: {
-        text: "",
-        colorIndex: Math.floor(Math.random() * 5),
-        onDelete: (nid) => setRfNodes((nds) => nds.filter((n) => n.id !== nid)),
-        onUpdate: (nid, text) => setRfNodes((nds) => nds.map((n) => n.id === nid ? { ...n, data: { ...n.data, text } } : n)),
-      },
-      draggable: true,
-    };
-    setRfNodes((nds) => [...nds, newNode]);
-  }, [setRfNodes]);
-
-  // Expose addAnnotation via window for toolbar access
-  React.useEffect(() => {
-    window.__dlAddAnnotation = addAnnotation;
-    return () => { delete window.__dlAddAnnotation; };
-  }, [addAnnotation]);
 
   return (
     <ReactFlow
@@ -794,19 +732,13 @@ export default function DiagramCanvas() {
       {largeModelBanner && (
         <div className="flex items-center gap-2 px-3 py-1.5 bg-amber-50 border-b border-amber-200 text-[11px] text-amber-800">
           <span className="font-semibold">Large model ({largeModelBanner.total} entities)</span>
-          <span className="text-amber-600">— Showing top {largeModelBanner.showing} by connectivity. Use search, filters, or Overview to explore.</span>
+          <span className="text-amber-600">— Showing top {largeModelBanner.showing} by connectivity. Use search or filters to explore.</span>
           <div className="flex items-center gap-1.5 ml-auto">
             <button
               onClick={() => { setVisibleLimit(0); setLargeModelBanner(null); }}
               className="px-2 py-0.5 rounded text-[10px] font-medium bg-amber-100 hover:bg-amber-200 text-amber-700 transition-colors"
             >
               Show All
-            </button>
-            <button
-              onClick={() => setViewMode("overview")}
-              className="px-2 py-0.5 rounded text-[10px] font-medium bg-blue-100 hover:bg-blue-200 text-blue-700 transition-colors"
-            >
-              Overview
             </button>
             <button
               onClick={() => setLargeModelBanner(null)}

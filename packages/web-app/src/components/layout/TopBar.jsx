@@ -4,10 +4,6 @@ import {
   FilePlus,
   Save,
   Download,
-  Undo2,
-  Redo2,
-  ZoomIn,
-  ZoomOut,
   Maximize2,
   Grid3x3,
   Sparkles,
@@ -17,11 +13,8 @@ import {
   X,
   Moon,
   Sun,
-  LifeBuoy,
-  LayoutDashboard,
-  Plug,
   FileCode2,
-  Search,
+  Code2,
   Settings,
   GitBranch,
   GitCommit,
@@ -34,7 +27,6 @@ import useWorkspaceStore from "../../stores/workspaceStore";
 import useDiagramStore from "../../stores/diagramStore";
 import useUiStore from "../../stores/uiStore";
 import useAuthStore from "../../stores/authStore";
-import UserMenu from "../auth/UserMenu";
 import ProjectTabs from "./ProjectTabs";
 import {
   standardsFixModel,
@@ -43,14 +35,6 @@ import {
   pushGitBranch,
   pullGitBranch,
 } from "../../lib/api";
-
-const ACTIVITY_LABELS = {
-  model:    { label: "Model",    icon: LayoutDashboard, color: "text-accent-blue" },
-  connect:  { label: "Connect",  icon: Plug,            color: "text-cyan-500" },
-  import:   { label: "Import",   icon: FileCode2,       color: "text-green-500" },
-  search:   { label: "Search",   icon: Search,          color: "text-amber-500" },
-  settings: { label: "Settings", icon: Settings,        color: "text-slate-500" },
-};
 
 /* ── Reusable primitives ──────────────────────────────────────────────── */
 
@@ -73,13 +57,15 @@ function TBButton({
   variant = "default",
   iconOnly = false,
   loading = false,
+  active = false,
 }) {
-  const cls =
+  const base =
     variant === "primary"
       ? "dl-toolbar-btn dl-toolbar-btn--primary"
       : iconOnly
       ? "dl-toolbar-btn dl-toolbar-btn--ghost-icon"
       : "dl-toolbar-btn";
+  const cls = active ? `${base} is-active` : base;
   const IconComp = loading ? Loader2 : Icon;
   return (
     <button
@@ -116,7 +102,7 @@ export default function TopBar() {
   } = useWorkspaceStore();
 
   const { model } = useDiagramStore();
-  const { theme, toggleTheme, activeActivity, openModal, addToast } = useUiStore();
+  const { theme, toggleTheme, activeActivity, openModal, addToast, yamlPanelOpen, toggleYamlPanel } = useUiStore();
   const { canEdit } = useAuthStore();
   const [modelOpLoading, setModelOpLoading] = React.useState(false);
   const [gitStatus, setGitStatus] = React.useState(null);
@@ -177,8 +163,6 @@ export default function TopBar() {
       : modelKind === "logical"
       ? { command: "logical-to-physical", label: "To Physical" }
       : null;
-  const activityInfo = ACTIVITY_LABELS[activeActivity] || ACTIVITY_LABELS.model;
-  const ActivityIcon = activityInfo.icon;
 
   const handleQuickExport = React.useCallback(() => {
     const el = document.querySelector(".react-flow");
@@ -237,17 +221,6 @@ export default function TopBar() {
     <div className="bg-bg-toolbar border-b border-border-primary/90 shadow-xs">
       {/* Row 1 — Grouped toolbar */}
       <div className="h-11 px-2 flex items-center gap-1">
-        {/* Activity chip */}
-        <div
-          className={`flex items-center gap-1.5 px-2.5 h-7 rounded-md text-xs font-semibold shrink-0 border border-border-primary bg-bg-surface shadow-xs ${activityInfo.color}`}
-          title={`${activityInfo.label} workspace`}
-        >
-          <ActivityIcon size={13} strokeWidth={1.9} />
-          {activityInfo.label}
-        </div>
-
-        <Divider />
-
         {/* File group */}
         <Group>
           {editable && (
@@ -293,32 +266,8 @@ export default function TopBar() {
 
         <Divider />
 
-        {/* Edit group — undo/redo wiring tracked separately from Luna-class UI work */}
+        {/* View group — Fit / Grid / Code. Zoom in/out via scroll or canvas controls. */}
         <Group>
-          <TBButton icon={Undo2} label="Undo" iconOnly disabled title="Undo (coming soon)" />
-          <TBButton icon={Redo2} label="Redo" iconOnly disabled title="Redo (coming soon)" />
-        </Group>
-
-        <Divider />
-
-        {/* View group — diagram zoom/grid (proxies DiagramToolbar actions via DOM events) */}
-        <Group>
-          <TBButton
-            icon={ZoomIn}
-            label="Zoom in"
-            iconOnly
-            title="Zoom in"
-            onClick={() => window.dispatchEvent(new CustomEvent("dl:diagram:zoom-in"))}
-            disabled={!onCanvas}
-          />
-          <TBButton
-            icon={ZoomOut}
-            label="Zoom out"
-            iconOnly
-            title="Zoom out"
-            onClick={() => window.dispatchEvent(new CustomEvent("dl:diagram:zoom-out"))}
-            disabled={!onCanvas}
-          />
           <TBButton
             icon={Maximize2}
             label="Fit"
@@ -333,6 +282,15 @@ export default function TopBar() {
             iconOnly
             title="Toggle grid"
             onClick={() => window.dispatchEvent(new CustomEvent("dl:diagram:toggle-grid"))}
+            disabled={!onCanvas}
+          />
+          <TBButton
+            icon={Code2}
+            label="Code"
+            iconOnly
+            title={yamlPanelOpen ? "Hide YAML editor" : "Show YAML editor"}
+            onClick={toggleYamlPanel}
+            active={yamlPanelOpen}
             disabled={!onCanvas}
           />
         </Group>
@@ -366,35 +324,20 @@ export default function TopBar() {
         {/* Spacer */}
         <div className="flex-1" />
 
-        {/* Model meta chips */}
+        {/* Model meta — single chip; full details in tooltip + Inspector */}
         {modelMeta.name && onCanvas && (
           <Group className="mr-1">
-            <span className="dl-chip dl-chip--accent">{modelMeta.name}</span>
-            {modelMeta.version && (
-              <span className="dl-chip">v{modelMeta.version}</span>
-            )}
             <span
-              className="dl-chip"
-              style={{
-                background: "var(--color-accent-green-soft)",
-                color: "var(--color-accent-green)",
-                border: "none",
-              }}
+              className="dl-chip dl-chip--accent"
+              title={[
+                modelMeta.name,
+                modelMeta.version && `v${modelMeta.version}`,
+                modelKind,
+                modelMeta.domain,
+              ].filter(Boolean).join(" · ")}
             >
-              {modelKind}
+              {modelMeta.name}
             </span>
-            {modelMeta.domain && (
-              <span
-                className="dl-chip"
-                style={{
-                  background: "var(--color-accent-purple-soft)",
-                  color: "var(--color-accent-purple)",
-                  border: "none",
-                }}
-              >
-                {modelMeta.domain}
-              </span>
-            )}
           </Group>
         )}
 
@@ -468,33 +411,17 @@ export default function TopBar() {
         {/* Right cluster */}
         <Group>
           <TBButton
-            icon={Plug}
-            iconOnly
-            title="Connections"
-            onClick={() => openModal("connectionsManager")}
-          />
-          <TBButton
             icon={Settings}
             iconOnly
             title="Settings"
             onClick={() => openModal("settings")}
           />
-          <a
-            href="https://discord.gg/Dnm6bUvk"
-            target="_blank"
-            rel="noopener noreferrer"
-            className="dl-toolbar-btn dl-toolbar-btn--ghost-icon"
-            title="Community (Discord)"
-          >
-            <LifeBuoy size={14} strokeWidth={1.75} />
-          </a>
           <TBButton
             icon={theme === "light" ? Moon : Sun}
             iconOnly
             title={`Switch to ${theme === "light" ? "dark" : "light"} mode (⌘D)`}
             onClick={toggleTheme}
           />
-          <UserMenu />
         </Group>
       </div>
 

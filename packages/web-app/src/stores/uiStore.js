@@ -20,8 +20,11 @@ const useUiStore = create((set, get) => ({
   bottomPanelOpen: true,
   bottomPanelTab: "properties", // "properties" | "validation" | "history"
 
-  // ── Right panel (entity properties) ──
-  rightPanelOpen: true,
+  // ── YAML editor pane (hidden by default; toggle via Code icon) ──
+  yamlPanelOpen: false,
+
+  // ── Right panel (entity properties) — auto-driven by selection, user can force-close ──
+  rightPanelOpen: false,
 
   // ── Unified selection (drives the Right Inspector) ──
   // `kind`: "entity" | "column" | "relationship" | "enum" | "subject_area" | "diagram" | null
@@ -80,6 +83,9 @@ const useUiStore = create((set, get) => ({
     }),
   clearSelection: () =>
     set({ selection: { kind: null, entityName: null, fieldName: null, relId: null } }),
+
+  toggleYamlPanel: () => set((s) => ({ yamlPanelOpen: !s.yamlPanelOpen })),
+  setYamlPanelOpen: (open) => set({ yamlPanelOpen: open }),
 
   toggleRightPanel: () => set((s) => ({ rightPanelOpen: !s.rightPanelOpen })),
   toggleDiagramFullscreen: () => set((s) => ({ diagramFullscreen: !s.diagramFullscreen })),

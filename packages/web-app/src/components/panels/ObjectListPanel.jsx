@@ -15,8 +15,6 @@ import { addEntity, parseYamlSafe } from "../../lib/yamlRoundTrip";
  * active model, organized by DataLex kind (Tables, Views, Enums, ...). Single
  * click selects + centers on canvas; the tree drives selection state shared
  * with the Inspector and right-click menus.
- *
- * Replaces the flat EntityListPanel inside the Model activity.
  */
 export default function ObjectListPanel() {
   const {

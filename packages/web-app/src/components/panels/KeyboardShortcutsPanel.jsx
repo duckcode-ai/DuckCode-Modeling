@@ -21,7 +21,6 @@ const SHORTCUT_GROUPS = [
       { keys: ["⌘", "E"], description: "Export diagram as PNG" },
       { keys: ["⌘", "Shift", "E"], description: "Export diagram as SVG" },
       { keys: ["F"], description: "Fit diagram to view" },
-      { keys: ["N"], description: "Add annotation note" },
       { keys: ["G"], description: "Toggle subject area groups" },
     ],
   },

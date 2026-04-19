@@ -8,7 +8,6 @@ import {
   Minus,
   Plus,
   Layers,
-  LayoutGrid,
   ChevronDown,
   Tag,
   Eye,
@@ -90,8 +89,6 @@ export default function DiagramToolbar() {
     getEntityNames,
     getSchemaOptions,
     nodes,
-    viewMode,
-    setViewMode,
     visibleLimit,
     setVisibleLimit,
     activeSchemaFilter,
@@ -169,14 +166,6 @@ export default function DiagramToolbar() {
 
         <ToolbarDivider />
 
-        {/* View Mode */}
-        <ToolbarButton active={viewMode === "overview"} onClick={() => { setViewMode("overview"); setActiveSchemaFilter(null); }} title="Schema overview">
-          <LayoutGrid size={11} /> Overview
-        </ToolbarButton>
-        <ToolbarButton active={viewMode === "all"} onClick={() => setViewMode("all")} title="Show all entities">
-          <Layers size={11} /> All
-        </ToolbarButton>
-
         {/* Schema filter */}
         {activeSchemaFilter && (
           <button onClick={() => setActiveSchemaFilter(null)}
@@ -185,7 +174,7 @@ export default function DiagramToolbar() {
             <X size={9} /> {activeSchemaFilter}
           </button>
         )}
-        {schemaOptions.length > 1 && viewMode !== "overview" && (
+        {schemaOptions.length > 1 && (
           <select value={activeSchemaFilter || ""} onChange={(e) => setActiveSchemaFilter(e.target.value || null)}
             className="bg-white border border-slate-200 rounded-md px-1 py-0.5 text-[10px] text-slate-600 outline-none hover:border-slate-300 cursor-pointer max-w-[110px]"
             title="Filter by schema">

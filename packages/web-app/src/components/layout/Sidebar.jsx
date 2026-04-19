@@ -30,7 +30,6 @@ import useUiStore from "../../stores/uiStore";
 import useAuthStore from "../../stores/authStore";
 import ObjectListPanel from "../panels/ObjectListPanel";
 import ConnectorLogo from "../icons/ConnectorLogo";
-import BookmarksPanel from "../viewer/BookmarksPanel";
 import { fetchConnections, cloneGitRepo } from "../../lib/api";
 
 const ALL_ACTIVITIES = [
@@ -980,7 +979,6 @@ function SidePanel({ activity }) {
             <ProjectSection />
             <FileSection />
             <ObjectListSection />
-            {!canEdit && <BookmarksPanel />}
           </>
         )}
         {activity === "connect" && (
