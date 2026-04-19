@@ -873,102 +873,53 @@ function SettingsThemeToggle() {
   );
 }
 
-// ── Activity Bar (thin icon rail on the far left) ──
-function ActivityBar({ activeActivity, onSelect, onHome }) {
+// ── Activity Tabs (horizontal strip at top of left pane) ──
+function ActivityTabs({ activeActivity, onSelect }) {
   const { canEdit: canEditFn } = useAuthStore();
   const canEdit = canEditFn();
   const ACTIVITIES = ALL_ACTIVITIES.filter((a) => !a.adminOnly || canEdit);
-  const topItems = ACTIVITIES.filter((a) => a.group === "top");
-  const bottomItems = ACTIVITIES.filter((a) => a.group === "bottom");
-  const homeActive = activeActivity === "search" || activeActivity === "home";
 
   return (
-    <div className="w-14 min-w-[56px] bg-bg-secondary border-r border-border-primary flex flex-col items-center py-2 shrink-0">
-      {/* Home / Logo */}
-      <button
-        onClick={onHome}
-        title="Home"
-        className={`relative w-11 h-11 flex items-center justify-center rounded-xl mb-3 shrink-0 transition-all ${
-          homeActive
-            ? "bg-accent-blue/10 ring-1 ring-accent-blue/30 shadow-sm"
-            : "bg-bg-surface border border-border-primary hover:bg-bg-hover"
-        }`}
-      >
-        {homeActive && (
-          <div className="absolute left-0 top-2 bottom-2 w-[3px] rounded-r-full bg-accent-blue" />
-        )}
-        <img src="/DataLex.png" alt="DataLex" className="w-7 h-7 object-contain" />
-      </button>
-
-      {/* Top activities */}
-      <div className="flex flex-col items-center gap-0.5 flex-1">
-        {topItems.map(({ id, label, icon: Icon }) => {
-          const isActive = activeActivity === id;
-          return (
-            <button
-              key={id}
-              onClick={() => onSelect(id)}
-              title={label}
-              className={`relative w-11 h-11 flex flex-col items-center justify-center rounded-xl transition-all ${
-                isActive
-                  ? "bg-accent-blue/10 text-accent-blue shadow-sm"
-                  : "text-text-muted hover:bg-bg-hover hover:text-text-primary"
-              }`}
-            >
-              {isActive && (
-                <div className="absolute left-0 top-2 bottom-2 w-[3px] rounded-r-full bg-accent-blue" />
-              )}
-              <Icon size={18} strokeWidth={isActive ? 2.2 : 1.8} />
-              <span className="text-[8px] mt-0.5 font-semibold leading-none">{label}</span>
-            </button>
-          );
-        })}
-      </div>
-
-      {/* Bottom activities */}
-      <div className="flex flex-col items-center gap-0.5 shrink-0">
-        {bottomItems.map(({ id, label, icon: Icon }) => {
-          const isActive = activeActivity === id;
-          return (
-            <button
-              key={id}
-              onClick={() => onSelect(id)}
-              title={label}
-              className={`relative w-11 h-11 flex flex-col items-center justify-center rounded-xl transition-all ${
-                isActive
-                  ? "bg-accent-blue/10 text-accent-blue shadow-sm"
-                  : "text-text-muted hover:bg-bg-hover hover:text-text-primary"
-              }`}
-            >
-              <Icon size={18} strokeWidth={isActive ? 2.2 : 1.8} />
-              <span className="text-[8px] mt-0.5 font-medium leading-none">{label}</span>
-            </button>
-          );
-        })}
-      </div>
+    <div className="flex items-center px-1 pt-1.5 pb-1 gap-0.5 bg-bg-secondary border-b border-border-primary shrink-0">
+      {ACTIVITIES.map(({ id, label, icon: Icon }) => {
+        const isActive = activeActivity === id;
+        return (
+          <button
+            key={id}
+            onClick={() => onSelect(id)}
+            title={label}
+            className={`flex-1 flex items-center justify-center gap-1.5 h-8 rounded-md text-xs font-medium transition-colors ${
+              isActive
+                ? "bg-bg-active text-text-accent shadow-sm"
+                : "text-text-muted hover:bg-bg-hover hover:text-text-primary"
+            }`}
+          >
+            <Icon size={13} strokeWidth={isActive ? 2.2 : 1.8} />
+            <span>{label}</span>
+          </button>
+        );
+      })}
     </div>
   );
 }
 
 // ── Side Panel (contextual content based on active activity) ──
-function SidePanel({ activity }) {
-  const { canEdit: canEditFn } = useAuthStore();
-  const canEdit = canEditFn();
-  const ACTIVITIES = ALL_ACTIVITIES.filter((a) => !a.adminOnly || canEdit);
-  const panelTitle = ACTIVITIES.find((a) => a.id === activity)?.label || "Panel";
+function SidePanel({ activity, setActivity }) {
   const { setSidePanelOpen } = useUiStore();
 
   return (
     <div className="w-[260px] min-w-[260px] bg-bg-surface border-r border-border-primary flex flex-col overflow-hidden">
-      {/* Panel header */}
-      <div className="flex items-center justify-between px-3 py-3 border-b border-border-primary shrink-0 bg-bg-secondary">
-        <span className="text-xs font-semibold text-text-primary uppercase tracking-wider">{panelTitle}</span>
+      {/* Activity tabs (horizontal) */}
+      <ActivityTabs activeActivity={activity} onSelect={setActivity} />
+
+      {/* Close affordance */}
+      <div className="flex items-center justify-end px-2 py-1 border-b border-border-subtle shrink-0">
         <button
           onClick={() => setSidePanelOpen(false)}
           className="p-1 rounded-md hover:bg-bg-hover text-text-muted hover:text-text-primary transition-colors"
-          title="Close panel"
+          title="Close panel (⌘\\)"
         >
-          <PanelLeftClose size={14} />
+          <PanelLeftClose size={13} />
         </button>
       </div>
 
@@ -1042,17 +993,11 @@ export default function Sidebar() {
     }
   };
 
-  const { canEdit: canEditFn } = useAuthStore();
-  const handleHomeSelect = () => {
-    // Viewers get the welcome/landing page; admins go straight to global search
-    setActiveActivity(canEditFn() ? "search" : "home");
-    setSidePanelOpen(false);
-  };
-
   return (
     <div className="flex h-full">
-      <ActivityBar activeActivity={activeActivity} onSelect={handleActivitySelect} onHome={handleHomeSelect} />
-      {sidePanelOpen && activeActivity !== "search" && <SidePanel activity={activeActivity} />}
+      {sidePanelOpen && activeActivity !== "search" && (
+        <SidePanel activity={activeActivity} setActivity={setActiveActivity} />
+      )}
     </div>
   );
 }
