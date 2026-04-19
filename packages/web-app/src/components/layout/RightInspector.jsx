@@ -5,6 +5,7 @@ import useDiagramStore from "../../stores/diagramStore";
 import EntityInspector from "../inspectors/EntityInspector";
 import ColumnInspector from "../inspectors/ColumnInspector";
 import RelationshipInspector from "../inspectors/RelationshipInspector";
+import EnumInspector from "../inspectors/EnumInspector";
 import { getObjectTypeMeta } from "../../lib/objectTypeMeta";
 
 /**
@@ -43,6 +44,9 @@ export default function RightInspector() {
   } else if (selection.kind === "relationship" && selection.relId) {
     title = selection.relId;
     subtitle = "Relationship";
+  } else if (selection.kind === "enum" && selection.enumName) {
+    title = selection.enumName;
+    subtitle = "Enum";
   } else if (activeEntity) {
     title = activeEntity.name;
     subtitle = meta?.label || "Entity";
@@ -78,6 +82,8 @@ export default function RightInspector() {
           <ColumnInspector entityName={selection.entityName} fieldName={selection.fieldName} />
         ) : selection.kind === "relationship" && selection.relId ? (
           <RelationshipInspector relId={selection.relId} />
+        ) : selection.kind === "enum" && selection.enumName ? (
+          <EnumInspector enumName={selection.enumName} />
         ) : activeEntity ? (
           <EntityInspector entity={activeEntity} />
         ) : (

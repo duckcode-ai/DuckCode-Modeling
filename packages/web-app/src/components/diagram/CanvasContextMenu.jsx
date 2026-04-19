@@ -39,6 +39,11 @@ export default function CanvasContextMenu({ menu, onClose, onAction }) {
         { id: "edit", label: "Edit relationship", icon: Edit3 },
         { id: "delete", label: "Delete relationship", icon: Trash2, danger: true },
       ]
+    : menu.target === "enum"
+    ? [
+        { id: "edit", label: "Edit enum", icon: Edit3 },
+        { id: "delete", label: "Delete enum", icon: Trash2, danger: true },
+      ]
     : [
         { id: "add-entity", label: "New entity…", icon: Plus },
         { id: "fit", label: "Fit diagram", icon: Crosshair },

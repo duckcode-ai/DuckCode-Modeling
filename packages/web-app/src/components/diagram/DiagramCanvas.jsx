@@ -25,7 +25,7 @@ import { modelToFlow, CARDINALITY_COLOR } from "../../modelToFlow";
 import { runModelChecks, computeModelCompleteness } from "../../modelQuality";
 import { layoutWithElk, fallbackGridLayout } from "../../lib/elkLayout";
 import { buildSchemaColorMap, SCHEMA_COLORS } from "../../lib/schemaColors";
-import { removeEntity, removeRelationship, addEntityWithOptions } from "../../lib/yamlRoundTrip";
+import { removeEntity, removeRelationship, removeEnum, addEntityWithOptions } from "../../lib/yamlRoundTrip";
 
 const SCHEMA_COLORS_HEX = SCHEMA_COLORS.map((c) => c.hex);
 
@@ -491,6 +491,13 @@ function FlowCanvas() {
 
   const onNodeClick = useCallback((_event, node) => {
     if (node.type === "group") return;
+    if (node.type === "enumNode") {
+      const name = node.id.startsWith("enum:") ? node.id.slice(5) : node.id;
+      const ui = useUiStore.getState();
+      ui.setSelection?.({ kind: "enum", enumName: name });
+      if (!ui.rightPanelOpen) ui.toggleRightPanel?.();
+      return;
+    }
     selectEntity(node.id);
   }, [selectEntity]);
 
@@ -550,6 +557,16 @@ function FlowCanvas() {
         window.dispatchEvent(new CustomEvent("dl:entity:duplicate", { detail: { name: menu.nodeId } }));
       } else if (actionId === "toggle-diagram") {
         diagram.toggleEntityInActiveDiagram?.(menu.nodeId);
+      }
+    } else if (menu.target === "enum") {
+      const enumName = menu.nodeId?.startsWith("enum:") ? menu.nodeId.slice(5) : menu.nodeId;
+      if (actionId === "edit") {
+        ui.setSelection?.({ kind: "enum", enumName });
+        if (!ui.rightPanelOpen) ui.toggleRightPanel?.();
+      } else if (actionId === "delete") {
+        if (window.confirm(`Delete enum "${enumName}"?`)) {
+          window.dispatchEvent(new CustomEvent("dl:enum:delete", { detail: { name: enumName } }));
+        }
       }
     } else if (menu.target === "relationship") {
       if (actionId === "edit") {
@@ -653,13 +670,21 @@ export default function DiagramCanvas() {
       const relName = id.startsWith("rel-") ? id.slice(4) : id;
       applyMutation(removeRelationship(yaml, relName));
     };
+    const onDeleteEnum = (e) => {
+      const name = e.detail?.name;
+      const yaml = useWorkspaceStore.getState().activeFileContent;
+      if (!name || !yaml) return;
+      applyMutation(removeEnum(yaml, name));
+    };
     window.addEventListener("dl:entity:delete", onDeleteEntity);
     window.addEventListener("dl:entity:duplicate", onDuplicateEntity);
     window.addEventListener("dl:relationship:delete", onDeleteRelationship);
+    window.addEventListener("dl:enum:delete", onDeleteEnum);
     return () => {
       window.removeEventListener("dl:entity:delete", onDeleteEntity);
       window.removeEventListener("dl:entity:duplicate", onDuplicateEntity);
       window.removeEventListener("dl:relationship:delete", onDeleteRelationship);
+      window.removeEventListener("dl:enum:delete", onDeleteEnum);
     };
   }, []);
 

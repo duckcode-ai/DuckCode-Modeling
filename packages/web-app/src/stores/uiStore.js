@@ -29,7 +29,7 @@ const useUiStore = create((set, get) => ({
   // ── Unified selection (drives the Right Inspector) ──
   // `kind`: "entity" | "column" | "relationship" | "enum" | "subject_area" | "diagram" | null
   // `entityName` is set for entity + column contexts; `fieldName` for columns; `relId` for rels.
-  selection: { kind: null, entityName: null, fieldName: null, relId: null },
+  selection: { kind: null, entityName: null, fieldName: null, relId: null, enumName: null },
 
   // ── Diagram fullscreen ──
   diagramFullscreen: false,
@@ -79,10 +79,11 @@ const useUiStore = create((set, get) => ({
         entityName: next?.entityName ?? null,
         fieldName: next?.fieldName ?? null,
         relId: next?.relId ?? null,
+        enumName: next?.enumName ?? null,
       },
     }),
   clearSelection: () =>
-    set({ selection: { kind: null, entityName: null, fieldName: null, relId: null } }),
+    set({ selection: { kind: null, entityName: null, fieldName: null, relId: null, enumName: null } }),
 
   toggleYamlPanel: () => set((s) => ({ yamlPanelOpen: !s.yamlPanelOpen })),
   setYamlPanelOpen: (open) => set({ yamlPanelOpen: open }),

@@ -542,6 +542,37 @@ export function addEnum(yamlText, name, values) {
   });
 }
 
+export function updateEnum(yamlText, enumName, patch) {
+  return mutateModel(yamlText, (model) => {
+    if (!Array.isArray(model.enums)) return;
+    const target = model.enums.find((item) => item?.name === enumName);
+    if (!target) return;
+    if (patch && typeof patch === "object") {
+      if ("name" in patch) {
+        const next = String(patch.name || "").trim();
+        if (next && !model.enums.some((i) => i !== target && i?.name === next)) {
+          target.name = next;
+        }
+      }
+      if ("description" in patch) {
+        const desc = String(patch.description || "").trim();
+        if (desc) target.description = desc;
+        else delete target.description;
+      }
+      if ("values" in patch) {
+        target.values = coerceStringList(patch.values);
+      }
+    }
+  });
+}
+
+export function removeEnum(yamlText, name) {
+  return mutateModel(yamlText, (model) => {
+    if (!Array.isArray(model.enums)) return;
+    model.enums = model.enums.filter((e) => e?.name !== name);
+  });
+}
+
 export function addSubjectArea(yamlText, name, description = "") {
   return mutateModel(yamlText, (model) => {
     if (!Array.isArray(model.subject_areas)) model.subject_areas = [];
