@@ -7,11 +7,22 @@ from `v0.1.0` onward.
 
 ## [Unreleased]
 
+## [0.1.1] — 2026-04-18
+
+First PyPI release. `pip install datalex-cli` now works end-to-end.
+
 ### Added
 
-- JSON Schemas are now bundled with the `datalex_core` Python package under
+- JSON Schemas are bundled with the `datalex_core` Python package under
   `datalex_core/_schemas/datalex/`. `pip install datalex-cli` from any
-  working directory can validate projects without needing the repo on disk.
+  working directory can validate projects without needing the repo on
+  disk.
+- Tag-triggered PyPI publish workflow (`.github/workflows/publish.yml`)
+  using OIDC trusted publishing — no long-lived API tokens stored.
+- `RELEASING.md` — one-time PyPI setup plus the release checklist.
+- README hero screenshot (`Assets/Overview.png`) showing the Visual
+  Studio: file tree, schema-aware YAML editor, and React Flow ERD
+  side-by-side on the same entity.
 
 ## [0.1.0] — 2026-04-18
 
@@ -67,5 +78,6 @@ Labs** (company).
   root; a `pip install`ed package run outside the repo needs
   `--schemas-root` or the repo on disk.
 
-[Unreleased]: https://github.com/duckcode-ai/DataLex/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/duckcode-ai/DataLex/compare/v0.1.1...HEAD
+[0.1.1]: https://github.com/duckcode-ai/DataLex/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/duckcode-ai/DataLex/releases/tag/v0.1.0
