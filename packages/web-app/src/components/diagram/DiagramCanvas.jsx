@@ -16,7 +16,10 @@ import EntityNode from "./EntityNode";
 import AnnotationNode from "./AnnotationNode";
 import SchemaOverviewNode from "./SchemaOverviewNode";
 import SubjectAreaGroup from "./SubjectAreaGroup";
+import EnumNode from "./EnumNode";
+import CanvasContextMenu from "./CanvasContextMenu";
 import DiagramToolbar from "./DiagramToolbar";
+import CrowsFootMarkers from "./CrowsFootMarkers";
 import useDiagramStore from "../../stores/diagramStore";
 import useUiStore from "../../stores/uiStore";
 import useWorkspaceStore from "../../stores/workspaceStore";
@@ -24,10 +27,11 @@ import { modelToFlow, CARDINALITY_COLOR } from "../../modelToFlow";
 import { runModelChecks, computeModelCompleteness } from "../../modelQuality";
 import { layoutWithElk, fallbackGridLayout } from "../../lib/elkLayout";
 import { buildSchemaColorMap, SCHEMA_COLORS } from "../../lib/schemaColors";
+import { removeEntity, removeRelationship, addEntityWithOptions } from "../../lib/yamlRoundTrip";
 
 const SCHEMA_COLORS_HEX = SCHEMA_COLORS.map((c) => c.hex);
 
-const nodeTypes = { entityNode: EntityNode, annotation: AnnotationNode, group: SubjectAreaGroup, schemaOverview: SchemaOverviewNode };
+const nodeTypes = { entityNode: EntityNode, annotation: AnnotationNode, group: SubjectAreaGroup, schemaOverview: SchemaOverviewNode, enumNode: EnumNode };
 
 const LARGE_MODEL_THRESHOLD = 100;
 const COMPACT_MODE_THRESHOLD = 200;
@@ -267,7 +271,10 @@ function applyVisualEffects(nodes, edges, vizSettings, selectedEntityId, entityS
         opacity: dim ? 0.08 : 0.85,
         transition: "opacity 200ms ease",
       },
-      markerEnd: {
+      // Preserve crow's-foot markers from modelToFlow. Dim-ref edges (no markers
+      // set upstream) and self-references fall back to an arrow head.
+      markerStart: edge.markerStart ?? undefined,
+      markerEnd: edge.markerEnd ?? {
         type: MarkerType.ArrowClosed,
         color: edgeColor,
         width: isFocus ? 18 : 15,
@@ -327,6 +334,10 @@ function FlowCanvas() {
     getSchemaOptions,
     setVizSettings,
     _lastAutoTuneCount,
+    collapsedSubjectAreas,
+    diagrams,
+    activeDiagramId,
+    fitDiagramTick,
   } = useDiagramStore();
 
   const [rfNodes, setRfNodes, onNodesChange] = useNodesState([]);
@@ -380,6 +391,15 @@ function FlowCanvas() {
     // Step 1: type/tag filters
     let { nodes: filtered, edges: filteredEdges } = applyFilters(storeNodes, storeEdges, vizSettings);
 
+    // Step 1a: active-diagram filter (subset of entities for the current tab)
+    const activeDiagram = (diagrams || []).find((d) => d.id === activeDiagramId);
+    if (activeDiagram && Array.isArray(activeDiagram.entityNames) && activeDiagram.entityNames.length > 0) {
+      const keep = new Set(activeDiagram.entityNames);
+      filtered = filtered.filter((n) => n.type !== "entityNode" || keep.has(n.id));
+      const ids = new Set(filtered.map((n) => n.id));
+      filteredEdges = filteredEdges.filter((e) => ids.has(e.source) && ids.has(e.target));
+    }
+
     // Step 1b: schema/subject_area filter
     if (activeSchemaFilter) {
       filtered = filtered.filter((n) => {
@@ -432,14 +452,40 @@ function FlowCanvas() {
         modelingViewMode
       );
 
-      // Apply compact mode flag
-      const finalNodes = useCompact
+      // Count entities per subject area (for collapsed-chip display)
+      const subjectAreaCounts = new Map();
+      for (const n of visualNodes) {
+        if (n.type !== "entityNode") continue;
+        const sa = n.data?.subject_area || n.data?.schema || "(default)";
+        subjectAreaCounts.set(sa, (subjectAreaCounts.get(sa) || 0) + 1);
+      }
+      const collapsed = collapsedSubjectAreas || {};
+
+      // Apply compact mode flag; hide entities inside collapsed subject areas
+      let finalNodes = useCompact
         ? visualNodes.map((n) => ({ ...n, data: { ...n.data, compactMode: true }, zIndex: 10 }))
         : visualNodes.map((n) => ({ ...n, zIndex: 10 }));
-      const groupNodes = (layoutResult.groupNodes || []).map((node) => ({
-        ...node,
-        zIndex: -1,
-      }));
+      finalNodes = finalNodes.filter((n) => {
+        if (n.type !== "entityNode") return true;
+        const sa = n.data?.subject_area || n.data?.schema || "(default)";
+        return !collapsed[sa];
+      });
+
+      const groupNodes = (layoutResult.groupNodes || []).map((node) => {
+        const sa = node.data?.label;
+        const isCollapsed = Boolean(sa && collapsed[sa]);
+        const entityCount = sa ? subjectAreaCounts.get(sa) || 0 : 0;
+        const baseStyle = node.style || {};
+        const nextStyle = isCollapsed
+          ? { ...baseStyle, height: 40, width: Math.max(180, Math.min(260, baseStyle.width || 220)) }
+          : baseStyle;
+        return {
+          ...node,
+          zIndex: -1,
+          style: nextStyle,
+          data: { ...(node.data || {}), collapsed: isCollapsed, entityCount },
+        };
+      });
 
       setRfNodes([...groupNodes, ...finalNodes]);
       setRfEdges(visualEdges);
@@ -447,7 +493,7 @@ function FlowCanvas() {
     };
 
     doLayout();
-  }, [storeNodes, storeEdges, vizSettings, selectedEntityId, entitySearch, viewMode, visibleLimit, activeSchemaFilter, layoutRefreshTick, modelingViewMode, setRfNodes, setRfEdges, getSchemaOptions, handleSchemaOverviewDrillIn]);
+  }, [storeNodes, storeEdges, vizSettings, selectedEntityId, entitySearch, viewMode, visibleLimit, activeSchemaFilter, layoutRefreshTick, modelingViewMode, collapsedSubjectAreas, diagrams, activeDiagramId, setRfNodes, setRfEdges, getSchemaOptions, handleSchemaOverviewDrillIn]);
 
   // Fit view after layout
   useEffect(() => {
@@ -458,6 +504,14 @@ function FlowCanvas() {
       setLayoutDone(false);
     }
   }, [layoutDone, rfNodes.length, rf]);
+
+  // Fit-to-diagram (Shift+F / toolbar / diagram tab click)
+  useEffect(() => {
+    if (!fitDiagramTick) return;
+    requestAnimationFrame(() => {
+      rf.fitView({ padding: 0.15, duration: 350 });
+    });
+  }, [fitDiagramTick, rf]);
 
   // Center on entity when requested from entity list panel
   useEffect(() => {
@@ -481,6 +535,65 @@ function FlowCanvas() {
   const onPaneClick = useCallback(() => {
     clearSelection();
   }, [clearSelection]);
+
+  const [contextMenu, setContextMenu] = useState(null);
+  const onNodeContextMenu = useCallback((event, node) => {
+    if (node.type === "schemaOverview" || node.type === "group" || node.type === "annotation") return;
+    event.preventDefault();
+    setContextMenu({
+      target: node.type === "enumNode" ? "enum" : "entity",
+      x: event.clientX,
+      y: event.clientY,
+      nodeId: node.id,
+    });
+  }, []);
+  const onEdgeContextMenu = useCallback((event, edge) => {
+    event.preventDefault();
+    setContextMenu({
+      target: "relationship",
+      x: event.clientX,
+      y: event.clientY,
+      edgeId: edge.id,
+    });
+  }, []);
+  const onPaneContextMenu = useCallback((event) => {
+    event.preventDefault();
+    setContextMenu({
+      target: "pane",
+      x: event.clientX,
+      y: event.clientY,
+    });
+  }, []);
+
+  const handleContextAction = useCallback((actionId, menu) => {
+    const ui = useUiStore.getState();
+    const diagram = useDiagramStore.getState();
+    if (menu.target === "entity") {
+      if (actionId === "edit") {
+        diagram.selectEntity(menu.nodeId);
+        ui.setSelection?.({ kind: "entity", entityName: menu.nodeId });
+        if (!ui.rightPanelOpen) ui.toggleRightPanel?.();
+      } else if (actionId === "locate") {
+        diagram.setCenterEntityId(menu.nodeId);
+      } else if (actionId === "delete") {
+        if (window.confirm(`Delete entity "${menu.nodeId}"?`)) {
+          window.dispatchEvent(new CustomEvent("dl:entity:delete", { detail: { name: menu.nodeId } }));
+        }
+      } else if (actionId === "duplicate") {
+        window.dispatchEvent(new CustomEvent("dl:entity:duplicate", { detail: { name: menu.nodeId } }));
+      }
+    } else if (menu.target === "relationship") {
+      if (actionId === "edit") {
+        ui.setSelection?.({ kind: "relationship", relId: menu.edgeId });
+        if (!ui.rightPanelOpen) ui.toggleRightPanel?.();
+      } else if (actionId === "delete") {
+        window.dispatchEvent(new CustomEvent("dl:relationship:delete", { detail: { id: menu.edgeId } }));
+      }
+    } else if (menu.target === "pane") {
+      if (actionId === "fit") diagram.requestFitDiagram();
+      else if (actionId === "add-entity") ui.openModal?.("newEntity");
+    }
+  }, []);
 
   // Annotation management
   const addAnnotation = useCallback((position) => {
@@ -515,6 +628,9 @@ function FlowCanvas() {
       nodeTypes={nodeTypes}
       onNodeClick={onNodeClick}
       onPaneClick={onPaneClick}
+      onNodeContextMenu={onNodeContextMenu}
+      onEdgeContextMenu={onEdgeContextMenu}
+      onPaneContextMenu={onPaneContextMenu}
       fitView
       onlyRenderVisibleElements={rfNodes.length > 100}
       proOptions={{ hideAttribution: true }}
@@ -538,6 +654,11 @@ function FlowCanvas() {
         showInteractive={false}
         style={{ borderRadius: 8, border: "1px solid #e2e8f0", overflow: "hidden" }}
       />
+      <CanvasContextMenu
+        menu={contextMenu}
+        onClose={() => setContextMenu(null)}
+        onAction={handleContextAction}
+      />
     </ReactFlow>
   );
 }
@@ -546,6 +667,56 @@ export default function DiagramCanvas() {
   const { setGraph, largeModelBanner, setLargeModelBanner, setVisibleLimit, setViewMode, setVizSettings } = useDiagramStore();
   const { activeFileContent } = useWorkspaceStore();
   const { diagramFullscreen, setDiagramFullscreen } = useUiStore();
+
+  // Context-menu → YAML mutations (delete entity/relationship, duplicate)
+  useEffect(() => {
+    const applyMutation = (mutated) => {
+      if (mutated && typeof mutated.yaml === "string" && !mutated.error) {
+        useWorkspaceStore.getState().updateContent(mutated.yaml);
+      } else if (mutated?.error) {
+        useUiStore.getState().addToast?.({ type: "error", message: mutated.error });
+      }
+    };
+    const onDeleteEntity = (e) => {
+      const name = e.detail?.name;
+      const yaml = useWorkspaceStore.getState().activeFileContent;
+      if (!name || !yaml) return;
+      applyMutation(removeEntity(yaml, name));
+    };
+    const onDuplicateEntity = (e) => {
+      const name = e.detail?.name;
+      const yaml = useWorkspaceStore.getState().activeFileContent;
+      if (!name || !yaml) return;
+      const model = useDiagramStore.getState().model;
+      const entity = (model?.entities || []).find((x) => x.name === name);
+      if (!entity) return;
+      applyMutation(
+        addEntityWithOptions(yaml, {
+          name: `${name}_copy`,
+          type: entity.type,
+          description: entity.description,
+          subjectArea: entity.subject_area,
+          schema: entity.schema,
+        })
+      );
+    };
+    const onDeleteRelationship = (e) => {
+      const id = e.detail?.id;
+      const yaml = useWorkspaceStore.getState().activeFileContent;
+      if (!id || !yaml) return;
+      // edge ids have shape "rel-<relName>"
+      const relName = id.startsWith("rel-") ? id.slice(4) : id;
+      applyMutation(removeRelationship(yaml, relName));
+    };
+    window.addEventListener("dl:entity:delete", onDeleteEntity);
+    window.addEventListener("dl:entity:duplicate", onDuplicateEntity);
+    window.addEventListener("dl:relationship:delete", onDeleteRelationship);
+    return () => {
+      window.removeEventListener("dl:entity:delete", onDeleteEntity);
+      window.removeEventListener("dl:entity:duplicate", onDuplicateEntity);
+      window.removeEventListener("dl:relationship:delete", onDeleteRelationship);
+    };
+  }, []);
 
   // Parse model → graph
   useEffect(() => {
@@ -648,7 +819,8 @@ export default function DiagramCanvas() {
         </div>
       )}
 
-      <div className="flex-1 min-h-0 min-w-0 w-full h-full">
+      <div className="flex-1 min-h-0 min-w-0 w-full h-full relative">
+        <CrowsFootMarkers />
         <ReactFlowProvider>
           <FlowCanvas />
         </ReactFlowProvider>

@@ -1,0 +1,171 @@
+import {
+  // File / project
+  FolderOpen,
+  FolderPlus,
+  FilePlus,
+  Save,
+  Download,
+  Upload,
+  Plus,
+  Pencil,
+  Trash2,
+  Copy,
+  // Edit
+  Undo2,
+  Redo2,
+  Scissors,
+  ClipboardPaste,
+  // View
+  ZoomIn,
+  ZoomOut,
+  Maximize2,
+  Minimize2,
+  Grid3x3,
+  Eye,
+  EyeOff,
+  // Diagram
+  LayoutGrid,
+  Workflow as WorkflowIcon,
+  ListTree,
+  Sparkles,
+  ArrowRightLeft,
+  // Nav / status
+  LayoutDashboard,
+  Database,
+  Plug,
+  Import as ImportIcon,
+  Search,
+  Settings,
+  User,
+  LogOut,
+  LifeBuoy,
+  // Git
+  GitBranch,
+  GitPullRequest,
+  GitCommit,
+  GitCompare,
+  RefreshCw,
+  CloudUpload,
+  CloudDownload,
+  // Misc
+  ChevronRight,
+  ChevronDown,
+  ChevronLeft,
+  ChevronUp,
+  X,
+  Check,
+  AlertTriangle,
+  AlertCircle,
+  Info,
+  Sun,
+  Moon,
+  Loader2,
+  MoreHorizontal,
+  MoreVertical,
+  Link,
+  FileCode2,
+  BookOpen,
+  Activity,
+  Network,
+  Clock,
+  Wand2,
+  LibraryBig,
+  Map as MapIcon,
+  Columns3,
+  ShieldCheck,
+} from "lucide-react";
+
+/**
+ * Central icon registry. Components import from here instead of lucide-react
+ * directly so icon sizing/stroke stays consistent and we can swap an icon in
+ * one place. Keeps the lucide-react import surface narrow + auditable.
+ */
+export const Icons = {
+  // File / project
+  FolderOpen,
+  FolderPlus,
+  FilePlus,
+  Save,
+  Download,
+  Upload,
+  Plus,
+  Pencil,
+  Trash2,
+  Copy,
+  // Edit
+  Undo: Undo2,
+  Redo: Redo2,
+  Cut: Scissors,
+  Paste: ClipboardPaste,
+  // View
+  ZoomIn,
+  ZoomOut,
+  FitScreen: Maximize2,
+  Shrink: Minimize2,
+  Grid: Grid3x3,
+  Show: Eye,
+  Hide: EyeOff,
+  // Diagram
+  Layout: LayoutGrid,
+  AutoLayout: WorkflowIcon,
+  Tree: ListTree,
+  Sparkles,
+  Transform: ArrowRightLeft,
+  // Nav / status
+  Dashboard: LayoutDashboard,
+  Database,
+  Connect: Plug,
+  Import: ImportIcon,
+  Search,
+  Settings,
+  User,
+  LogOut,
+  Support: LifeBuoy,
+  // Git
+  Branch: GitBranch,
+  PullRequest: GitPullRequest,
+  Commit: GitCommit,
+  Compare: GitCompare,
+  Refresh: RefreshCw,
+  Push: CloudUpload,
+  Pull: CloudDownload,
+  // Misc
+  ChevronRight,
+  ChevronDown,
+  ChevronLeft,
+  ChevronUp,
+  Close: X,
+  Check,
+  Warning: AlertTriangle,
+  Error: AlertCircle,
+  Info,
+  Sun,
+  Moon,
+  Spinner: Loader2,
+  MoreH: MoreHorizontal,
+  MoreV: MoreVertical,
+  Link,
+  FileCode: FileCode2,
+  Docs: BookOpen,
+  Activity,
+  Network,
+  Clock,
+  Wand: Wand2,
+  Library: LibraryBig,
+  Map: MapIcon,
+  Columns: Columns3,
+  Shield: ShieldCheck,
+};
+
+/** Canonical icon sizes (px). Use these instead of ad-hoc numbers. */
+export const ICON_SIZE = {
+  xs: 12,
+  sm: 14,
+  md: 16, // default toolbar
+  lg: 18, // default panel/tree
+  xl: 20,
+  "2xl": 24,
+};
+
+/** Canonical stroke width — slightly thinner than lucide's default 2px. */
+export const ICON_STROKE = 1.75;

@@ -5,8 +5,14 @@ import "allotment/dist/style.css";
 import Sidebar from "./components/layout/Sidebar";
 import TopBar from "./components/layout/TopBar";
 import StatusBar from "./components/layout/StatusBar";
+import RightInspector from "./components/layout/RightInspector";
+import SettingsDialog from "./components/dialogs/SettingsDialog";
+import ConnectionsManager from "./components/dialogs/ConnectionsManager";
+import CommitDialog from "./components/dialogs/CommitDialog";
+import CommandPalette from "./components/dialogs/CommandPalette";
 import YamlEditor from "./components/editor/YamlEditor";
 import DiagramCanvas from "./components/diagram/DiagramCanvas";
+import DiagramTabs from "./components/layout/DiagramTabs";
 import EntityPanel from "./components/panels/EntityPanel";
 import ModelerPanel from "./components/panels/ModelerPanel";
 import LibrariesPanel from "./components/panels/LibrariesPanel";
@@ -595,10 +601,10 @@ function SearchView() {
 }
 
 // ── Primary content area for "model" activity (editor + diagram) ──
-function ModelView({ bottomPanelOpen, bottomPanelTab, setBottomPanelTab, toggleBottomPanel, bottomTabs, readOnly }) {
+function ModelView({ bottomPanelOpen, bottomPanelTab, setBottomPanelTab, toggleBottomPanel, bottomTabs, readOnly, rightPanelOpen }) {
   return (
     <Allotment vertical style={{ height: "100%" }}>
-      {/* Top: Editor + Diagram split */}
+      {/* Top: Editor + Diagram (+ Right Inspector) split */}
       <Allotment.Pane>
         <Allotment style={{ height: "100%" }}>
           {/* YAML Editor */}
@@ -613,10 +619,20 @@ function ModelView({ bottomPanelOpen, bottomPanelTab, setBottomPanelTab, toggleB
 
           {/* Diagram */}
           <Allotment.Pane minSize={300}>
-            <div className="h-full bg-bg-surface">
-              <DiagramCanvas />
+            <div className="h-full flex flex-col bg-bg-surface">
+              <div className="flex-1 min-h-0">
+                <DiagramCanvas />
+              </div>
+              <DiagramTabs />
             </div>
           </Allotment.Pane>
+
+          {/* Right Inspector */}
+          {rightPanelOpen && (
+            <Allotment.Pane minSize={260} preferredSize={320} maxSize={520}>
+              <RightInspector />
+            </Allotment.Pane>
+          )}
         </Allotment>
       </Allotment.Pane>
 
@@ -660,7 +676,7 @@ function ModelView({ bottomPanelOpen, bottomPanelTab, setBottomPanelTab, toggleB
 }
 
 export default function App() {
-  const { activeModal, activeActivity, bottomPanelOpen, bottomPanelTab, setBottomPanelTab, toggleBottomPanel } = useUiStore();
+  const { activeModal, activeActivity, bottomPanelOpen, bottomPanelTab, setBottomPanelTab, toggleBottomPanel, rightPanelOpen } = useUiStore();
   const { error, clearError, loadProjects } = useWorkspaceStore();
   const { selectedEntityId } = useDiagramStore();
   const { isAuthenticated, isLoading, restoreSession, canEdit, isViewer } = useAuthStore();
@@ -711,10 +727,10 @@ export default function App() {
         })();
         return;
       }
-      // ⌘+K — Global search
+      // ⌘+K — Command palette
       if (meta && e.key === "k") {
         e.preventDefault();
-        useUiStore.getState().setActiveActivity("search");
+        useUiStore.getState().openModal("commandPalette");
         return;
       }
       // ⌘+\ — Toggle sidebar
@@ -735,6 +751,29 @@ export default function App() {
         useUiStore.getState().toggleTheme();
         return;
       }
+      // ⌘+Tab — Cycle project tabs (shift reverses direction)
+      if (meta && e.key === "Tab") {
+        const { openProjects, cycleProject } = useWorkspaceStore.getState();
+        if (openProjects.length > 1) {
+          e.preventDefault();
+          cycleProject(e.shiftKey ? -1 : 1);
+          return;
+        }
+      }
+      // ⌘+W — Close active project tab
+      if (meta && e.key === "w") {
+        const ws = useWorkspaceStore.getState();
+        if (ws.activeProjectId && ws.openProjects.length > 0) {
+          e.preventDefault();
+          if (ws.isDirty) {
+            const project = ws.projects.find((p) => p.id === ws.activeProjectId);
+            const name = project?.name || ws.activeProjectId;
+            if (!window.confirm(`${name} has unsaved changes. Close without saving?`)) return;
+          }
+          ws.closeProject(ws.activeProjectId);
+          return;
+        }
+      }
       // ⌘+1..5 — Switch activities
       if (meta && e.key >= "1" && e.key <= "5") {
         e.preventDefault();
@@ -743,6 +782,12 @@ export default function App() {
         if (idx < activities.length) {
           useUiStore.getState().setActiveActivity(activities[idx]);
         }
+        return;
+      }
+      // Shift+F — Fit active diagram
+      if (!isInput && e.shiftKey && (e.key === "F" || e.key === "f")) {
+        e.preventDefault();
+        useDiagramStore.getState().requestFitDiagram();
         return;
       }
       // ? — Show shortcuts (only when not in input)
@@ -827,6 +872,7 @@ export default function App() {
                 toggleBottomPanel={toggleBottomPanel}
                 bottomTabs={BOTTOM_TABS}
                 readOnly={!canEdit()}
+                rightPanelOpen={rightPanelOpen}
               />
             )}
           </div>
@@ -840,6 +886,10 @@ export default function App() {
       {activeModal === "addProject" && <AddProjectModal />}
       {activeModal === "editProject" && <EditProjectModal />}
       {activeModal === "newFile" && <NewFileModal />}
+      {activeModal === "settings" && <SettingsDialog />}
+      {activeModal === "connectionsManager" && <ConnectionsManager />}
+      {activeModal === "commit" && <CommitDialog />}
+      {activeModal === "commandPalette" && <CommandPalette />}
       {showShortcuts && <KeyboardShortcutsPanel onClose={() => setShowShortcuts(false)} />}
 
       {/* Toasts */}

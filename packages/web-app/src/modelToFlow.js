@@ -1,4 +1,5 @@
 import yaml from "js-yaml";
+import { pickCrowsFootMarkers } from "./components/diagram/CrowsFootMarkers";
 
 export const CARDINALITY_COLOR = {
   one_to_one: "#2f7d32",
@@ -120,6 +121,7 @@ export function modelToFlow(doc) {
   const warnings = [];
 
   const entities = doc.entities;
+  const enums = Array.isArray(doc.enums) ? doc.enums : [];
   const relationships = Array.isArray(doc.relationships) ? doc.relationships : [];
   const indexes = Array.isArray(doc.indexes) ? doc.indexes : [];
   const classifications = toClassificationMap(doc.governance?.classification);
@@ -245,6 +247,24 @@ export function modelToFlow(doc) {
     };
   });
 
+  const totalNodes = normalizedEntities.length + enums.length;
+  enums.forEach((enumDef, idx) => {
+    const name = toDisplayText(enumDef?.name, "").trim();
+    if (!name) return;
+    const values = toStringList(enumDef?.values);
+    const position = buildLayoutPosition(normalizedEntities.length + idx, Math.max(totalNodes, 1));
+    nodes.push({
+      id: `enum:${name}`,
+      type: "enumNode",
+      position,
+      data: {
+        name,
+        values,
+        description: toDisplayText(enumDef?.description, ""),
+      },
+    });
+  });
+
   const relationshipCandidates = [];
 
   for (const rel of relationships) {
@@ -316,6 +336,22 @@ export function modelToFlow(doc) {
       fkToPk ? "#8b5cf6" :
       CARDINALITY_COLOR[cardinality] || "#455a64";
 
+    // Optionality: explicit relationship flags win; otherwise infer from field
+    // nullability (nullable FK => optional on that end). Relationships default
+    // to mandatory-mandatory when nothing is specified.
+    const sourceOptional = rel?.source_optional === true
+      || rel?.optional === true
+      || Boolean(sourceField?.nullable);
+    const targetOptional = rel?.target_optional === true
+      || rel?.optional === true
+      || Boolean(targetField?.nullable);
+
+    const { markerStart, markerEnd } = pickCrowsFootMarkers({
+      cardinality,
+      sourceOptional,
+      targetOptional,
+    });
+
     edges.push({
       id: `rel-${toDisplayText(relName, "relationship")}`,
       source: sourceEntity,
@@ -334,8 +370,12 @@ export function modelToFlow(doc) {
         isSelf,
         sharedTarget,
         sharedTargetCount,
+        sourceOptional,
+        targetOptional,
         description: toDisplayText(rel?.description, "")
       },
+      markerStart,
+      markerEnd,
       style: {
         stroke: edgeColor,
         strokeWidth: (isSelf || pkToFk || fkToPk) ? 2.4 : 2,

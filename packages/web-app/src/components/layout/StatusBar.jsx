@@ -7,6 +7,8 @@ import {
   Boxes,
   ArrowRightLeft,
   Gauge,
+  LayoutGrid,
+  MousePointerClick,
 } from "lucide-react";
 import useWorkspaceStore from "../../stores/workspaceStore";
 import useDiagramStore from "../../stores/diagramStore";
@@ -21,7 +23,8 @@ function completenessStatusCls(score) {
 
 export default function StatusBar() {
   const { activeFile, activeFileContent, offlineMode } = useWorkspaceStore();
-  const { model, nodes, edges } = useDiagramStore();
+  const { model, nodes, edges, diagrams, activeDiagramId, selectedEntityId } = useDiagramStore();
+  const activeDiagram = (diagrams || []).find((d) => d.id === activeDiagramId);
   const { activeActivity, bottomPanelOpen, toggleBottomPanel } = useUiStore();
 
   const check = activeFileContent ? runModelChecks(activeFileContent) : null;
@@ -69,6 +72,22 @@ export default function StatusBar() {
             {edges.length} relationships
           </span>
         </>
+      )}
+
+      {/* Active diagram */}
+      {activeDiagram && (
+        <span className="flex items-center gap-1" title="Active diagram">
+          <LayoutGrid size={11} />
+          {activeDiagram.name}
+        </span>
+      )}
+
+      {/* Selection */}
+      {selectedEntityId && (
+        <span className="flex items-center gap-1 text-text-secondary" title="Selected object">
+          <MousePointerClick size={11} />
+          {selectedEntityId}
+        </span>
       )}
 
       {/* Validation + completeness status */}
