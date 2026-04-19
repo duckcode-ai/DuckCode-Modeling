@@ -23,6 +23,9 @@ import {
   CheckCircle2,
   AlertCircle,
   Link,
+  ListTree,
+  Folder,
+  Palette,
 } from "lucide-react";
 import useWorkspaceStore from "../../stores/workspaceStore";
 import useDiagramStore from "../../stores/diagramStore";
@@ -873,6 +876,123 @@ function SettingsThemeToggle() {
   );
 }
 
+// ── Themes tab content (theme + density) ──
+function ThemesPanelContent() {
+  const { theme, toggleTheme, userSettings, updateUserSetting } = useUiStore();
+  const canvas = userSettings?.canvas || {};
+
+  const SwatchButton = ({ value, label, colors, active, onClick }) => (
+    <button
+      onClick={onClick}
+      className={`flex flex-col items-start gap-1.5 p-2 rounded-lg border transition-all ${
+        active
+          ? "border-accent-blue ring-1 ring-accent-blue/40 shadow-sm"
+          : "border-border-primary hover:border-border-strong"
+      }`}
+    >
+      <div className="flex gap-1">
+        {colors.map((c, i) => (
+          <span key={i} className="w-5 h-5 rounded" style={{ backgroundColor: c }} />
+        ))}
+      </div>
+      <span className="text-[11px] font-medium text-text-primary">{label}</span>
+    </button>
+  );
+
+  return (
+    <div className="mx-2 my-1 space-y-3">
+      <div className="px-2 py-2 rounded-lg border border-border-primary/80 bg-bg-surface">
+        <div className="px-1 py-1 text-[10px] text-text-muted uppercase tracking-wider font-semibold mb-2">
+          Color theme
+        </div>
+        <div className="grid grid-cols-2 gap-2 px-1">
+          <SwatchButton
+            value="light"
+            label="Light"
+            colors={["#ffffff", "#e2e8f0", "#2563eb"]}
+            active={theme === "light"}
+            onClick={() => theme !== "light" && toggleTheme()}
+          />
+          <SwatchButton
+            value="dark"
+            label="Dark"
+            colors={["#0f172a", "#1e293b", "#38bdf8"]}
+            active={theme === "dark"}
+            onClick={() => theme !== "dark" && toggleTheme()}
+          />
+        </div>
+      </div>
+
+      <div className="px-2 py-2 rounded-lg border border-border-primary/80 bg-bg-surface">
+        <div className="px-1 py-1 text-[10px] text-text-muted uppercase tracking-wider font-semibold mb-1.5">
+          Canvas
+        </div>
+        <label className="flex items-center justify-between px-1 py-1.5 text-xs text-text-secondary">
+          <span>Show minimap</span>
+          <input
+            type="checkbox"
+            checked={canvas.showMinimap !== false}
+            onChange={(e) => updateUserSetting?.("canvas", "showMinimap", e.target.checked)}
+          />
+        </label>
+        <label className="flex items-center justify-between px-1 py-1.5 text-xs text-text-secondary">
+          <span>Snap to grid</span>
+          <input
+            type="checkbox"
+            checked={!!canvas.snapToGrid}
+            onChange={(e) => updateUserSetting?.("canvas", "snapToGrid", e.target.checked)}
+          />
+        </label>
+      </div>
+    </div>
+  );
+}
+
+// ── Left-pane tabs for the Model activity (Luna-style) ──
+const MODEL_TABS = [
+  { id: "objects", label: "Object List", icon: ListTree },
+  { id: "explorer", label: "Explorer", icon: Folder },
+  { id: "themes", label: "Themes", icon: Palette },
+];
+
+function ModelLeftPane() {
+  const [tab, setTab] = useState("objects");
+  return (
+    <div className="flex flex-col h-full">
+      <div className="flex items-center px-1 pt-1 pb-1 gap-0.5 border-b border-border-subtle shrink-0 bg-bg-secondary/60">
+        {MODEL_TABS.map(({ id, label, icon: Icon }) => {
+          const active = tab === id;
+          return (
+            <button
+              key={id}
+              onClick={() => setTab(id)}
+              title={label}
+              className={`flex-1 flex items-center justify-center gap-1 h-7 rounded-md text-[11px] font-medium transition-colors ${
+                active
+                  ? "bg-bg-active text-text-accent"
+                  : "text-text-muted hover:bg-bg-hover hover:text-text-primary"
+              }`}
+            >
+              <Icon size={12} strokeWidth={active ? 2.2 : 1.8} />
+              <span>{label}</span>
+            </button>
+          );
+        })}
+      </div>
+      <div className="flex-1 overflow-y-auto py-2 space-y-1.5">
+        {tab === "objects" && <ObjectListSection />}
+        {tab === "explorer" && (
+          <>
+            <ProjectSection />
+            <FileSection />
+          </>
+        )}
+        {tab === "themes" && <ThemesPanelContent />}
+      </div>
+    </div>
+  );
+}
+
 // ── Activity Tabs (horizontal strip at top of left pane) ──
 function ActivityTabs({ activeActivity, onSelect }) {
   const { canEdit: canEditFn } = useAuthStore();
@@ -924,14 +1044,10 @@ function SidePanel({ activity, setActivity }) {
       </div>
 
       {/* Panel content */}
-      <div className="flex-1 overflow-y-auto py-2 space-y-1.5">
-        {activity === "model" && (
-          <>
-            <ProjectSection />
-            <FileSection />
-            <ObjectListSection />
-          </>
-        )}
+      <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
+        {activity === "model" && <ModelLeftPane />}
+        {activity !== "model" && (
+        <div className="flex-1 overflow-y-auto py-2 space-y-1.5">
         {activity === "connect" && (
           <GitConnectSection />
         )}
@@ -968,6 +1084,8 @@ function SidePanel({ activity, setActivity }) {
               </div>
             </div>
           </div>
+        )}
+        </div>
         )}
       </div>
     </div>
