@@ -43,7 +43,15 @@ import {
 
 /* ── Reusable primitives ──────────────────────────────────────────────── */
 
-function Group({ children, className = "" }) {
+function Group({ children, className = "", caption }) {
+  if (caption) {
+    return (
+      <div className={`dl-toolbar-group ${className}`}>
+        <div className="dl-toolbar-group__caption">{caption}</div>
+        <div className="dl-toolbar-group__row">{children}</div>
+      </div>
+    );
+  }
   return (
     <div className={`flex items-center gap-0.5 ${className}`}>{children}</div>
   );
@@ -236,7 +244,7 @@ export default function TopBar() {
   return (
     <div className="bg-bg-toolbar border-b border-border-primary/90 shadow-xs">
       {/* Row 1 — Grouped toolbar */}
-      <div className="h-11 px-2 flex items-center gap-1">
+      <div className="h-[52px] px-2 flex items-end gap-1 pb-1.5">
         {/* Logo */}
         <button
           onClick={() => setActiveActivity("model")}
@@ -276,7 +284,7 @@ export default function TopBar() {
         <Divider />
 
         {/* File group */}
-        <Group>
+        <Group caption="File">
           {editable && (
             <TBButton
               icon={FolderPlus}
@@ -318,7 +326,7 @@ export default function TopBar() {
         {/* Create group — Luna-style creation tools */}
         {editable && (
           <>
-            <Group>
+            <Group caption="Create">
               <TBButton
                 icon={Table2}
                 label="Table"
@@ -351,7 +359,7 @@ export default function TopBar() {
         <Divider />
 
         {/* View group — Fit / Grid / Code. Zoom in/out via scroll or canvas controls. */}
-        <Group>
+        <Group caption="View">
           <TBButton
             icon={Maximize2}
             label="Fit"
@@ -380,7 +388,7 @@ export default function TopBar() {
         {editable && modelMeta.name && onCanvas && (
           <>
             <Divider />
-            <Group>
+            <Group caption="Model">
               <TBButton
                 icon={Sparkles}
                 label="Standards"
@@ -436,7 +444,7 @@ export default function TopBar() {
 
         {/* Git section */}
         {gitStatus ? (
-          <Group>
+          <Group caption="Git">
             <TBButton
               icon={GitBranch}
               label={gitStatus.branch || "HEAD"}

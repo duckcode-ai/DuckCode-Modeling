@@ -376,6 +376,39 @@
   background: var(--color-bg-active);
 }
 
+/* Toolbar group with caption above */
+.dl-toolbar-group {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0;
+  padding: 0 2px;
+}
+
+.dl-toolbar-group__caption {
+  font-size: 9px;
+  font-weight: var(--weight-semibold);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--color-text-muted);
+  line-height: 1;
+  padding: 0 4px 2px;
+  user-select: none;
+}
+
+.dl-toolbar-group__row {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.dl-toolbar-btn.is-active {
+  background: var(--color-accent-blue-soft);
+  color: var(--color-text-accent);
+  border-color: transparent;
+  box-shadow: inset 0 -2px 0 var(--color-accent-blue);
+}
+
 .dl-toolbar-btn[disabled],
 .dl-toolbar-btn:disabled {
   opacity: 0.4;
@@ -402,9 +435,15 @@
 /* Toolbar group divider */
 .dl-toolbar-divider {
   width: 1px;
-  height: 18px;
-  background: var(--color-border-primary);
-  margin: 0 4px;
+  height: 22px;
+  background: linear-gradient(
+    to bottom,
+    transparent 0%,
+    var(--color-border-secondary) 25%,
+    var(--color-border-secondary) 75%,
+    transparent 100%
+  );
+  margin: 0 6px;
   flex-shrink: 0;
 }
 
@@ -513,6 +552,25 @@
 
 .react-flow__background {
   background: var(--color-bg-canvas) !important;
+}
+
+/* Subtle dot-grid pattern on the canvas pane */
+.react-flow__pane {
+  background-color: var(--color-bg-canvas);
+  background-image: radial-gradient(
+    circle at 1px 1px,
+    var(--color-border-primary) 1px,
+    transparent 0
+  );
+  background-size: 20px 20px;
+}
+
+[data-theme="dark"] .react-flow__pane {
+  background-image: radial-gradient(
+    circle at 1px 1px,
+    rgba(255, 255, 255, 0.04) 1px,
+    transparent 0
+  );
 }
 
 .react-flow__minimap {
