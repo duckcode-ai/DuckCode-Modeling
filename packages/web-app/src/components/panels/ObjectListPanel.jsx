@@ -8,6 +8,7 @@ import {
   getObjectTypeMeta,
   groupEntitiesByType,
 } from "../../lib/objectTypeMeta";
+import { Link2 as RelIcon } from "lucide-react";
 import { addEntity, parseYamlSafe } from "../../lib/yamlRoundTrip";
 
 /**
@@ -25,7 +26,7 @@ export default function ObjectListPanel() {
     setCenterEntityId,
   } = useDiagramStore();
   const { activeFileContent, updateContent } = useWorkspaceStore();
-  const { addToast } = useUiStore();
+  const { addToast, setSelection } = useUiStore();
   const { canEdit: canEditFn } = useAuthStore();
   const canEdit = canEditFn();
 
@@ -35,6 +36,10 @@ export default function ObjectListPanel() {
   const [requestedName, setRequestedName] = useState("NewEntity");
 
   const entities = model?.entities || [];
+  const enums = model?.enums || [];
+  const domains = model?.domains || [];
+  const rules = model?.rules || [];
+  const relationships = model?.relationships || [];
 
   const relCounts = useMemo(() => {
     const counts = {};
@@ -45,28 +50,57 @@ export default function ObjectListPanel() {
     return counts;
   }, [edges]);
 
+  const matchesQuery = (obj, query) => {
+    if (!query) return true;
+    const name = String(obj?.name || "").toLowerCase();
+    if (name.includes(query)) return true;
+    const desc = String(obj?.description || "").toLowerCase();
+    return desc.includes(query);
+  };
+
   const filteredGroups = useMemo(() => {
     const query = search.trim().toLowerCase();
-    const filtered = query
+    const filteredEntities = query
       ? entities.filter((entity) => {
-          const name = String(entity?.name || "").toLowerCase();
-          if (name.includes(query)) return true;
-          const description = String(entity?.description || "").toLowerCase();
-          if (description.includes(query)) return true;
+          if (matchesQuery(entity, query)) return true;
           return (entity?.fields || []).some((field) =>
             String(field?.name || "").toLowerCase().includes(query)
           );
         })
       : entities;
-    return groupEntitiesByType(filtered);
-  }, [entities, search]);
+    const entityGroups = groupEntitiesByType(filteredEntities);
+
+    const extra = [];
+    const maybeAdd = (kind, items, icon) => {
+      const filtered = items.filter((i) => matchesQuery(i, query));
+      if (filtered.length === 0) return;
+      const meta = kind === "relationship"
+        ? { kind, plural: "Relationships", icon: icon, color: "var(--color-accent-blue)" }
+        : getObjectTypeMeta(kind);
+      extra.push({ meta, items: filtered });
+    };
+    maybeAdd("enum", enums);
+    maybeAdd("domain", domains);
+    maybeAdd("relationship", relationships, RelIcon);
+    maybeAdd("rule", rules);
+
+    return [...entityGroups, ...extra];
+  }, [entities, enums, domains, rules, relationships, search]);
 
   const toggleGroup = (kind) =>
     setCollapsedGroups((prev) => ({ ...prev, [kind]: !prev[kind] }));
 
-  const handleSelect = (name) => {
-    selectEntity(name);
-    setCenterEntityId(name);
+  const handleSelect = (name, kind = "entity") => {
+    if (kind === "entity") {
+      selectEntity(name);
+      setCenterEntityId(name);
+      return;
+    }
+    if (kind === "relationship") {
+      setSelection({ kind: "relationship", relId: name });
+      return;
+    }
+    setSelection({ kind, entityName: name });
   };
 
   const handleAddTable = () => {
@@ -99,7 +133,8 @@ export default function ObjectListPanel() {
     setCreateDialogOpen(false);
   };
 
-  if (entities.length === 0) {
+  const hasAnyObject = entities.length + enums.length + domains.length + relationships.length + rules.length > 0;
+  if (!hasAnyObject) {
     return (
       <>
         <div className="flex flex-col items-center justify-center text-center px-6 py-10">
@@ -132,6 +167,7 @@ export default function ObjectListPanel() {
   }
 
   const totalVisible = filteredGroups.reduce((n, g) => n + g.items.length, 0);
+  const totalAll = entities.length + enums.length + domains.length + relationships.length + rules.length;
 
   return (
     <>
@@ -167,8 +203,8 @@ export default function ObjectListPanel() {
           </div>
           <div className="px-1 pt-1.5 t-caption text-text-muted">
             {search
-              ? `${totalVisible} of ${entities.length} objects`
-              : `${entities.length} objects`}
+              ? `${totalVisible} of ${totalAll} objects`
+              : `${totalAll} objects`}
           </div>
         </div>
 
@@ -257,13 +293,27 @@ function ObjectGroup({ meta, items, relCounts, collapsed, onToggle, selectedId, 
 
 function ObjectRow({ entity, meta, relCount, selected, onSelect }) {
   const Icon = meta.icon;
-  const fieldCount = (entity.fields || []).length;
+  const kind = meta.kind;
+  let rightMeta = null;
+  if (kind === "enum") {
+    rightMeta = `${(entity.values || []).length}v`;
+  } else if (kind === "relationship") {
+    rightMeta = entity.cardinality || "";
+  } else if (kind === "domain" || kind === "rule") {
+    rightMeta = null;
+  } else {
+    const fieldCount = (entity.fields || []).length;
+    rightMeta = `${fieldCount}${relCount > 0 ? ` · ${relCount}` : ""}`;
+  }
+  const label = kind === "relationship"
+    ? (entity.name || `${entity.from || "?"} → ${entity.to || "?"}`)
+    : entity.name;
   return (
     <div
-      onClick={() => onSelect(entity.name)}
-      onDoubleClick={() => onSelect(entity.name)}
+      onClick={() => onSelect(label, kind)}
+      onDoubleClick={() => onSelect(label, kind)}
       className={`dl-tree-row pl-5 ${selected ? "dl-tree-row--active" : ""}`}
-      title={entity.description || entity.name}
+      title={entity.description || label}
     >
       <Icon
         size={13}
@@ -271,11 +321,10 @@ function ObjectRow({ entity, meta, relCount, selected, onSelect }) {
         style={{ color: meta.color }}
         className="shrink-0"
       />
-      <span className="truncate flex-1">{entity.name}</span>
-      <span className="t-caption text-text-muted shrink-0">
-        {fieldCount}
-        {relCount > 0 ? ` · ${relCount}` : ""}
-      </span>
+      <span className="truncate flex-1">{label}</span>
+      {rightMeta && (
+        <span className="t-caption text-text-muted shrink-0">{rightMeta}</span>
+      )}
     </div>
   );
 }
