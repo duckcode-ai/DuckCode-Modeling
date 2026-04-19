@@ -25,6 +25,8 @@ import {
   DownloadCloud,
   ArrowUp,
   ArrowDown,
+  Database,
+  Search as SearchIcon,
 } from "lucide-react";
 import useWorkspaceStore from "../../stores/workspaceStore";
 import useDiagramStore from "../../stores/diagramStore";
@@ -220,10 +222,59 @@ export default function TopBar() {
   const onCanvas = activeActivity === "model" || activeActivity === "settings";
   const editable = canEdit();
 
+  const { setActiveActivity, setSidePanelOpen, sidePanelOpen } = useUiStore();
+
+  const handleActivitySelect = (id) => {
+    if (activeActivity === id) {
+      setSidePanelOpen(!sidePanelOpen);
+    } else {
+      setActiveActivity(id);
+      setSidePanelOpen(true);
+    }
+  };
+
   return (
     <div className="bg-bg-toolbar border-b border-border-primary/90 shadow-xs">
       {/* Row 1 — Grouped toolbar */}
       <div className="h-11 px-2 flex items-center gap-1">
+        {/* Logo */}
+        <button
+          onClick={() => setActiveActivity("model")}
+          className="flex items-center justify-center w-8 h-8 rounded-lg hover:bg-bg-hover transition-colors shrink-0"
+          title="DataLex"
+        >
+          <img src="/DataLex.png" alt="DataLex" className="w-6 h-6 object-contain" />
+        </button>
+
+        {/* Activity cluster — Model / Connect / Settings / Search */}
+        <Group>
+          <TBButton
+            icon={Table2}
+            iconOnly
+            title="Model (⌘1)"
+            onClick={() => handleActivitySelect("model")}
+            active={activeActivity === "model"}
+          />
+          {editable && (
+            <TBButton
+              icon={Database}
+              iconOnly
+              title="Connect (⌘2)"
+              onClick={() => handleActivitySelect("connect")}
+              active={activeActivity === "connect"}
+            />
+          )}
+          <TBButton
+            icon={SearchIcon}
+            iconOnly
+            title="Search (⌘4)"
+            onClick={() => setActiveActivity("search")}
+            active={activeActivity === "search"}
+          />
+        </Group>
+
+        <Divider />
+
         {/* File group */}
         <Group>
           {editable && (
