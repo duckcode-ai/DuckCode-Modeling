@@ -418,10 +418,21 @@ function FlowCanvas() {
 
       // Count entities per subject area (for collapsed-chip display)
       const subjectAreaCounts = new Map();
+      const entityToSa = new Map();
       for (const n of visualNodes) {
         if (n.type !== "entityNode") continue;
         const sa = n.data?.subject_area || n.data?.schema || "(default)";
         subjectAreaCounts.set(sa, (subjectAreaCounts.get(sa) || 0) + 1);
+        entityToSa.set(n.id, sa);
+      }
+      // Count relationships per subject area (same-SA edges)
+      const subjectAreaRelCounts = new Map();
+      for (const edge of visualEdges) {
+        const src = entityToSa.get(edge.source);
+        const tgt = entityToSa.get(edge.target);
+        if (src && src === tgt) {
+          subjectAreaRelCounts.set(src, (subjectAreaRelCounts.get(src) || 0) + 1);
+        }
       }
       const collapsed = collapsedSubjectAreas || {};
 
@@ -439,15 +450,16 @@ function FlowCanvas() {
         const sa = node.data?.label;
         const isCollapsed = Boolean(sa && collapsed[sa]);
         const entityCount = sa ? subjectAreaCounts.get(sa) || 0 : 0;
+        const relCount = sa ? subjectAreaRelCounts.get(sa) || 0 : 0;
         const baseStyle = node.style || {};
         const nextStyle = isCollapsed
-          ? { ...baseStyle, height: 40, width: Math.max(180, Math.min(260, baseStyle.width || 220)) }
+          ? { ...baseStyle, height: 56, width: Math.max(220, Math.min(300, baseStyle.width || 240)) }
           : baseStyle;
         return {
           ...node,
           zIndex: -1,
           style: nextStyle,
-          data: { ...(node.data || {}), collapsed: isCollapsed, entityCount },
+          data: { ...(node.data || {}), collapsed: isCollapsed, entityCount, relCount },
         };
       });
 
