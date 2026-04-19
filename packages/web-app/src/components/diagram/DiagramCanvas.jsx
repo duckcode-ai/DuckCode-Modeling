@@ -291,6 +291,7 @@ function applyVisualEffects(nodes, edges, vizSettings, selectedEntityId, entityS
 
 function FlowCanvas() {
   const rf = useReactFlow();
+  const canvasSettings = useUiStore((s) => s.userSettings.canvas);
   const {
     nodes: storeNodes,
     edges: storeEdges,
@@ -598,20 +599,24 @@ function FlowCanvas() {
       proOptions={{ hideAttribution: true }}
       minZoom={0.05}
       maxZoom={3}
-      defaultEdgeOptions={{ type: vizSettings.edgeType }}
+      defaultEdgeOptions={{ type: canvasSettings?.edgeType || vizSettings.edgeType }}
+      snapToGrid={!!canvasSettings?.snapToGrid}
+      snapGrid={[16, 16]}
       style={{ width: "100%", height: "100%" }}
     >
       <Background gap={24} color="#e2e8f0" size={1} />
-      <MiniMap
-        zoomable
-        pannable
-        nodeColor={(node) => {
-          const idx = node.data?.schemaColorIndex;
-          return idx != null ? SCHEMA_COLORS_HEX[idx % SCHEMA_COLORS_HEX.length] : "#3b82f6";
-        }}
-        maskColor="rgba(248, 250, 252, 0.8)"
-        style={{ borderRadius: 8, border: "1px solid #e2e8f0" }}
-      />
+      {canvasSettings?.showMinimap !== false && (
+        <MiniMap
+          zoomable
+          pannable
+          nodeColor={(node) => {
+            const idx = node.data?.schemaColorIndex;
+            return idx != null ? SCHEMA_COLORS_HEX[idx % SCHEMA_COLORS_HEX.length] : "#3b82f6";
+          }}
+          maskColor="rgba(248, 250, 252, 0.8)"
+          style={{ borderRadius: 8, border: "1px solid #e2e8f0" }}
+        />
+      )}
       <Controls
         showInteractive={false}
         style={{ borderRadius: 8, border: "1px solid #e2e8f0", overflow: "hidden" }}

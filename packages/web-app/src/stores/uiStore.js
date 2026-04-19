@@ -1,5 +1,35 @@
 import { create } from "zustand";
 
+const SETTINGS_KEY = "dm_user_settings";
+const DEFAULT_SETTINGS = {
+  editor: { wordWrap: true, tabWidth: 2 },
+  canvas: { edgeType: "smoothstep", showMinimap: true, snapToGrid: false },
+  git: { defaultBranch: "main", commitTemplate: "" },
+};
+
+function loadSettings() {
+  try {
+    const raw = localStorage.getItem(SETTINGS_KEY);
+    if (!raw) return DEFAULT_SETTINGS;
+    const parsed = JSON.parse(raw);
+    return {
+      editor: { ...DEFAULT_SETTINGS.editor, ...(parsed.editor || {}) },
+      canvas: { ...DEFAULT_SETTINGS.canvas, ...(parsed.canvas || {}) },
+      git: { ...DEFAULT_SETTINGS.git, ...(parsed.git || {}) },
+    };
+  } catch {
+    return DEFAULT_SETTINGS;
+  }
+}
+
+function persistSettings(settings) {
+  try {
+    localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
+  } catch {
+    /* ignore quota errors */
+  }
+}
+
 const useUiStore = create((set, get) => ({
   // ── Activity bar (left icon rail) ──
   // Primary activity determines what shows in the side panel AND the main content area
@@ -50,6 +80,9 @@ const useUiStore = create((set, get) => ({
   // ── Pending search query (ViewerWelcome → GlobalSearchPanel handoff) ──
   pendingSearchQuery: "",
 
+  // ── User-level settings (persisted to localStorage) ──
+  userSettings: loadSettings(),
+
   // ── Actions ──
   setActiveActivity: (activity) => set({ activeActivity: activity }),
   setPendingConnectorType: (type) => set({ pendingConnectorType: type }),
@@ -95,6 +128,20 @@ const useUiStore = create((set, get) => ({
 
   toggleCommandPalette: () => set((s) => ({ commandPaletteOpen: !s.commandPaletteOpen })),
   setCommandPaletteOpen: (open) => set({ commandPaletteOpen: open }),
+
+  updateUserSetting: (section, key, value) =>
+    set((s) => {
+      const next = {
+        ...s.userSettings,
+        [section]: { ...(s.userSettings[section] || {}), [key]: value },
+      };
+      persistSettings(next);
+      return { userSettings: next };
+    }),
+  resetUserSettings: () => {
+    persistSettings(DEFAULT_SETTINGS);
+    set({ userSettings: DEFAULT_SETTINGS });
+  },
 
   openModal: (modal, payload = null) => set({ activeModal: modal, modalPayload: payload }),
   closeModal: () => set({ activeModal: null, modalPayload: null }),

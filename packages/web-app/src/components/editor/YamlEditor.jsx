@@ -1,11 +1,13 @@
-import React, { useCallback, useRef, useState } from "react";
+import React, { useCallback, useMemo, useRef, useState } from "react";
 import CodeMirror from "@uiw/react-codemirror";
 import { yaml } from "@codemirror/lang-yaml";
 import { EditorView } from "@codemirror/view";
+import { EditorState } from "@codemirror/state";
 import { autocompletion } from "@codemirror/autocomplete";
 import { linter, lintGutter } from "@codemirror/lint";
 import { Eye, Copy, Check } from "lucide-react";
 import useWorkspaceStore from "../../stores/workspaceStore";
+import useUiStore from "../../stores/uiStore";
 import { runModelChecks } from "../../modelQuality";
 
 const lightTheme = EditorView.theme({
@@ -168,19 +170,29 @@ function yamlLinter(view) {
 const schemaAutocompletion = autocompletion({ override: [yamlCompletions] });
 const validationLinter = linter(yamlLinter, { delay: 800 });
 
-const editorExtensions = [
-  yaml(),
-  lightTheme,
-  EditorView.lineWrapping,
-  schemaAutocompletion,
-  lintGutter(),
-  validationLinter,
-];
+function buildExtensions({ wordWrap, tabWidth }) {
+  const base = [
+    yaml(),
+    lightTheme,
+    schemaAutocompletion,
+    lintGutter(),
+    validationLinter,
+    EditorState.tabSize.of(tabWidth || 2),
+  ];
+  if (wordWrap !== false) base.push(EditorView.lineWrapping);
+  return base;
+}
 
 export default function YamlEditor({ readOnly = false }) {
   const { activeFileContent, updateContent, activeFile } = useWorkspaceStore();
+  const { userSettings } = useUiStore();
   const editorRef = useRef(null);
   const [copied, setCopied] = useState(false);
+
+  const extensions = useMemo(
+    () => buildExtensions(userSettings.editor),
+    [userSettings.editor.wordWrap, userSettings.editor.tabWidth]
+  );
 
   const onChange = useCallback((value) => {
     if (!readOnly) updateContent(value);
@@ -226,7 +238,7 @@ export default function YamlEditor({ readOnly = false }) {
           value={activeFileContent}
           onChange={onChange}
           readOnly={readOnly}
-          extensions={editorExtensions}
+          extensions={extensions}
           theme="light"
           height="100%"
           style={{ height: "100%" }}

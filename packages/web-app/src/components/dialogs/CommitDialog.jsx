@@ -9,10 +9,10 @@ import {
 } from "../../lib/api";
 
 export default function CommitDialog() {
-  const { closeModal, addToast } = useUiStore();
+  const { closeModal, addToast, userSettings } = useUiStore();
   const { activeProjectId } = useWorkspaceStore();
   const [status, setStatus] = useState(null);
-  const [message, setMessage] = useState("");
+  const [message, setMessage] = useState(userSettings?.git?.commitTemplate || "");
   const [selected, setSelected] = useState(new Set());
   const [loading, setLoading] = useState(false);
   const [working, setWorking] = useState(false);
