@@ -29,15 +29,17 @@ import React from "react";
  * flips coordinates automatically via `orient="auto"`.
  */
 
-const MARKER_SIZE = 18;
-const COLOR_DEFAULT = "#64748b"; // slate-500; edges paint over this via context-stroke
-const STROKE = 1.6;
+const MARKER_SIZE = 26;
+const STROKE = 1.8;
+// `context-stroke` makes the marker inherit the edge's stroke color automatically.
+const STROKE_COLOR = "context-stroke";
+const FILL_CANVAS = "var(--color-bg-canvas, #ffffff)";
 
 function MarkerEnd({ id, children }) {
   return (
     <marker
       id={id}
-      viewBox="-12 -6 18 12"
+      viewBox="-16 -8 22 16"
       refX={0}
       refY={0}
       markerWidth={MARKER_SIZE}
@@ -54,7 +56,7 @@ function MarkerStart({ id, children }) {
   return (
     <marker
       id={id}
-      viewBox="0 -6 18 12"
+      viewBox="0 -8 22 16"
       refX={0}
       refY={0}
       markerWidth={MARKER_SIZE}
@@ -73,10 +75,10 @@ function MarkerStart({ id, children }) {
 // The crow's foot: three short strokes spreading outward.
 function CrowFoot() {
   return (
-    <g stroke="currentColor" strokeWidth={STROKE} fill="none" strokeLinecap="round">
-      <path d="M0 0 L-9 -5" />
-      <path d="M0 0 L-9 0" />
-      <path d="M0 0 L-9 5" />
+    <g stroke={STROKE_COLOR} strokeWidth={STROKE} fill="none" strokeLinecap="round">
+      <path d="M0 0 L-10 -6" />
+      <path d="M0 0 L-10 0" />
+      <path d="M0 0 L-10 6" />
     </g>
   );
 }
@@ -87,9 +89,9 @@ function OneBar({ x = -6 }) {
     <line
       x1={x}
       x2={x}
-      y1={-5}
-      y2={5}
-      stroke="currentColor"
+      y1={-6}
+      y2={6}
+      stroke={STROKE_COLOR}
       strokeWidth={STROKE}
       strokeLinecap="round"
     />
@@ -102,10 +104,10 @@ function OptionalCircle({ cx = -9 }) {
     <circle
       cx={cx}
       cy={0}
-      r={3}
-      stroke="currentColor"
+      r={3.5}
+      stroke={STROKE_COLOR}
       strokeWidth={STROKE}
-      fill="var(--color-bg-canvas, #ffffff)"
+      fill={FILL_CANVAS}
     />
   );
 }
@@ -115,7 +117,7 @@ function OptionalCircle({ cx = -9 }) {
 function OneMandatoryEnd({ id }) {
   return (
     <MarkerEnd id={id}>
-      <g color={COLOR_DEFAULT}>
+      <g>
         <OneBar x={-3} />
         <OneBar x={-8} />
       </g>
@@ -126,7 +128,7 @@ function OneMandatoryEnd({ id }) {
 function OneOptionalEnd({ id }) {
   return (
     <MarkerEnd id={id}>
-      <g color={COLOR_DEFAULT}>
+      <g>
         <OneBar x={-3} />
         <OptionalCircle cx={-9} />
       </g>
@@ -137,7 +139,7 @@ function OneOptionalEnd({ id }) {
 function ManyMandatoryEnd({ id }) {
   return (
     <MarkerEnd id={id}>
-      <g color={COLOR_DEFAULT}>
+      <g>
         <OneBar x={-2} />
         <g transform="translate(-3 0)">
           <CrowFoot />
@@ -150,7 +152,7 @@ function ManyMandatoryEnd({ id }) {
 function ManyOptionalEnd({ id }) {
   return (
     <MarkerEnd id={id}>
-      <g color={COLOR_DEFAULT}>
+      <g>
         <OptionalCircle cx={-3} />
         <g transform="translate(-5 0)">
           <CrowFoot />
@@ -165,7 +167,7 @@ function ManyOptionalEnd({ id }) {
 function OneMandatoryStart({ id }) {
   return (
     <MarkerStart id={id}>
-      <g color={COLOR_DEFAULT}>
+      <g>
         <OneBar x={-3} />
         <OneBar x={-8} />
       </g>
@@ -176,7 +178,7 @@ function OneMandatoryStart({ id }) {
 function OneOptionalStart({ id }) {
   return (
     <MarkerStart id={id}>
-      <g color={COLOR_DEFAULT}>
+      <g>
         <OneBar x={-3} />
         <OptionalCircle cx={-9} />
       </g>
@@ -187,7 +189,7 @@ function OneOptionalStart({ id }) {
 function ManyMandatoryStart({ id }) {
   return (
     <MarkerStart id={id}>
-      <g color={COLOR_DEFAULT}>
+      <g>
         <OneBar x={-2} />
         <g transform="translate(-3 0)">
           <CrowFoot />
@@ -200,7 +202,7 @@ function ManyMandatoryStart({ id }) {
 function ManyOptionalStart({ id }) {
   return (
     <MarkerStart id={id}>
-      <g color={COLOR_DEFAULT}>
+      <g>
         <OptionalCircle cx={-3} />
         <g transform="translate(-5 0)">
           <CrowFoot />
