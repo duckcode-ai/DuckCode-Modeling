@@ -14,7 +14,7 @@ const useUiStore = create((set, get) => ({
   get activeView() { return get().activeActivity; },
 
   // ── Theme ──
-  theme: localStorage.getItem("dm_theme") || "light",
+  theme: localStorage.getItem("dm_theme") || "dark",
 
   // ── Bottom panel (slimmed: only contextual panels) ──
   bottomPanelOpen: true,

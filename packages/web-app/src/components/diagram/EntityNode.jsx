@@ -286,18 +286,18 @@ export default function EntityNode({ data }) {
   if (data.compactMode) {
     const relCount = data.relationshipCount || 0;
     return (
-      <div className={`w-[140px] rounded-lg border ${colors.border} bg-white shadow-sm overflow-hidden flex`}>
-        <div className={`w-1 shrink-0 ${schemaColor.bg}`} />
+      <div className="w-[140px] rounded-lg border border-border-primary bg-bg-card shadow-sm overflow-hidden flex">
+        <div className="w-1 shrink-0" style={{ backgroundColor: schemaColor.hex }} />
         <Handle type="target" position={Position.Left} className="!bg-blue-500 !border-white !w-2 !h-2" />
-        <div className={`bg-gradient-to-r ${colors.bg} px-2 py-1.5 flex-1 min-w-0`}>
+        <div className="px-2 py-1.5 flex-1 min-w-0" style={{ backgroundColor: `${schemaColor.hex}1a` }}>
           <h3 className="text-[11px] font-semibold text-text-primary truncate">{data.name}</h3>
           <div className="flex items-center gap-1.5 mt-0.5">
             <span className={`px-1 py-0 rounded text-[8px] font-bold uppercase ${colors.badge}`}>
               {entityType.replace("_", " ")}
             </span>
-            <span className="text-[9px] text-slate-400">{fields.length}f</span>
+            <span className="text-[9px] text-text-muted">{fields.length}f</span>
             {relCount > 0 && (
-              <span className="flex items-center gap-0.5 text-[9px] text-slate-400">
+              <span className="flex items-center gap-0.5 text-[9px] text-text-muted">
                 <ArrowRightLeft size={7} />{relCount}
               </span>
             )}
@@ -327,15 +327,18 @@ export default function EntityNode({ data }) {
   const relCount = data.relationshipCount || 0;
 
   return (
-    <div className={`w-[280px] rounded-lg border ${colors.border} bg-white shadow-md shadow-slate-200/60 overflow-hidden flex`}>
+    <div className="w-[280px] rounded-lg border border-border-primary bg-bg-card shadow-md overflow-hidden flex">
       {/* Schema color accent bar */}
-      <div className={`w-1.5 shrink-0 ${schemaColor.bg}`} />
+      <div className="w-1.5 shrink-0" style={{ backgroundColor: schemaColor.hex }} />
 
       <div className="flex-1 min-w-0">
       <Handle type="target" position={Position.Left} className="!bg-blue-500 !border-white !w-2 !h-2" />
 
-      {/* Header */}
-      <div className={`bg-gradient-to-r ${colors.bg} px-3 py-2 border-b ${colors.border}`}>
+      {/* Header — tinted by subject area */}
+      <div
+        className="px-3 py-2 border-b border-border-primary"
+        style={{ backgroundColor: `${schemaColor.hex}1f` }}
+      >
         <div className="flex items-center justify-between gap-2">
           <div className="min-w-0">
             <h3 className="text-sm font-semibold text-text-primary truncate">{data.name}</h3>
@@ -362,7 +365,7 @@ export default function EntityNode({ data }) {
             <CompletenessIndicator score={data.completenessScore} />
             <button
               onClick={(e) => { e.stopPropagation(); setCollapsed(!collapsed); }}
-              className="p-0.5 rounded hover:bg-slate-200/60 text-slate-400 hover:text-slate-700 transition-colors"
+              className="p-0.5 rounded hover:bg-bg-hover text-text-muted hover:text-text-primary transition-colors"
             >
               {collapsed ? <ChevronDown size={14} /> : <ChevronUp size={14} />}
             </button>
@@ -391,7 +394,7 @@ export default function EntityNode({ data }) {
         {(data.subject_area || data.sla) && (
           <div className="flex items-center gap-2 mt-1">
             {data.subject_area && (
-              <span className="text-[9px] text-slate-500 truncate">
+              <span className="text-[9px] text-text-tertiary truncate">
                 <Database size={8} className="inline mr-0.5" />
                 {data.subject_area}
               </span>
@@ -407,15 +410,15 @@ export default function EntityNode({ data }) {
 
       {/* Description */}
       {data.description && !collapsed && (
-        <div className="px-3 py-1.5 text-[11px] text-slate-500 border-b border-slate-100 leading-relaxed">
+        <div className="px-3 py-1.5 text-[11px] text-text-tertiary border-b border-border-subtle leading-relaxed">
           {data.description}
         </div>
       )}
 
       {!collapsed && modelingHints.length > 0 && (
-        <div className="px-3 py-1.5 border-b border-slate-100 bg-slate-50/60 space-y-1">
+        <div className="px-3 py-1.5 border-b border-border-subtle bg-bg-sunken space-y-1">
           {modelingHints.slice(0, isConceptual ? 3 : 4).map((hint) => (
-            <div key={hint} className="text-[10px] text-slate-500 leading-snug">
+            <div key={hint} className="text-[10px] text-text-tertiary leading-snug">
               {hint}
             </div>
           ))}
@@ -429,14 +432,14 @@ export default function EntityNode({ data }) {
             <div
               key={field.name}
               className={`flex items-center gap-2 px-3 py-1 text-[11px] ${
-                idx % 2 === 0 ? "bg-transparent" : "bg-slate-50/60"
-              } hover:bg-slate-50 transition-colors`}
+                idx % 2 === 0 ? "bg-transparent" : "bg-bg-sunken"
+              } hover:bg-bg-hover transition-colors`}
             >
-              <span className={`font-mono flex-1 truncate ${field.deprecated ? "line-through text-slate-400" : "text-slate-800"}`}>
+              <span className={`font-mono flex-1 truncate ${field.deprecated ? "line-through text-text-muted" : "text-text-primary"}`}>
                 {field.name}
                 {field.deprecated && <AlertTriangle size={8} className="inline ml-0.5 text-amber-500" />}
               </span>
-              {!isConceptual && <span className="font-mono text-slate-400 text-[10px] shrink-0">{field.type}</span>}
+              {!isConceptual && <span className="font-mono text-text-muted text-[10px] shrink-0">{field.type}</span>}
               {!isConceptual && <FieldBadges field={field} entityName={data.name} classifications={classifications} indexedFields={indexedFields} />}
               {isPhysical && field.nullable === false && (
                 <span className="text-[8px] text-accent-red font-bold">NN</span>
@@ -449,7 +452,7 @@ export default function EntityNode({ data }) {
       {/* Hidden count */}
       {hiddenCount > 0 && (
         <div
-          className="px-3 py-1 text-[10px] text-slate-400 text-center border-t border-slate-100 cursor-pointer hover:text-slate-600 hover:bg-slate-50 transition-colors"
+          className="px-3 py-1 text-[10px] text-text-muted text-center border-t border-border-subtle cursor-pointer hover:text-text-primary hover:bg-bg-hover transition-colors"
           onClick={(e) => { e.stopPropagation(); setCollapsed(false); }}
         >
           {collapsed ? `${hiddenCount} fields` : `+ ${hiddenCount} more fields`}

@@ -661,7 +661,7 @@ export default function App() {
 
   // Initialize theme on mount
   useEffect(() => {
-    const saved = localStorage.getItem("dm_theme") || "light";
+    const saved = localStorage.getItem("dm_theme") || "dark";
     document.documentElement.setAttribute("data-theme", saved);
   }, []);
 
