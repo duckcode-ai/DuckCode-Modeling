@@ -21,7 +21,12 @@ const useUiStore = create((set, get) => ({
   bottomPanelTab: "properties", // "properties" | "validation" | "history"
 
   // ── Right panel (entity properties) ──
-  rightPanelOpen: false,
+  rightPanelOpen: true,
+
+  // ── Unified selection (drives the Right Inspector) ──
+  // `kind`: "entity" | "column" | "relationship" | "enum" | "subject_area" | "diagram" | null
+  // `entityName` is set for entity + column contexts; `fieldName` for columns; `relId` for rels.
+  selection: { kind: null, entityName: null, fieldName: null, relId: null },
 
   // ── Diagram fullscreen ──
   diagramFullscreen: false,
@@ -63,6 +68,18 @@ const useUiStore = create((set, get) => ({
 
   toggleBottomPanel: () => set((s) => ({ bottomPanelOpen: !s.bottomPanelOpen })),
   setBottomPanelTab: (tab) => set({ bottomPanelTab: tab, bottomPanelOpen: true }),
+
+  setSelection: (next) =>
+    set({
+      selection: {
+        kind: next?.kind ?? null,
+        entityName: next?.entityName ?? null,
+        fieldName: next?.fieldName ?? null,
+        relId: next?.relId ?? null,
+      },
+    }),
+  clearSelection: () =>
+    set({ selection: { kind: null, entityName: null, fieldName: null, relId: null } }),
 
   toggleRightPanel: () => set((s) => ({ rightPanelOpen: !s.rightPanelOpen })),
   toggleDiagramFullscreen: () => set((s) => ({ diagramFullscreen: !s.diagramFullscreen })),

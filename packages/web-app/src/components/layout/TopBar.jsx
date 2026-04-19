@@ -1,28 +1,48 @@
 import React from "react";
 import {
+  FolderPlus,
+  FilePlus,
   Save,
-  X,
-  AlertTriangle,
-  Loader2,
-  Moon,
-  Sun,
-  LayoutDashboard,
-  Plug,
-  Search,
-  Settings,
-  ChevronRight,
-  FileCode2,
-  LifeBuoy,
   Download,
+  Undo2,
+  Redo2,
+  ZoomIn,
+  ZoomOut,
+  Maximize2,
+  Grid3x3,
   Sparkles,
   ArrowRightLeft,
+  Loader2,
+  AlertTriangle,
+  X,
+  Moon,
+  Sun,
+  LifeBuoy,
+  LayoutDashboard,
+  Plug,
+  FileCode2,
+  Search,
+  Settings,
+  GitBranch,
+  GitCommit,
+  UploadCloud,
+  DownloadCloud,
+  ArrowUp,
+  ArrowDown,
 } from "lucide-react";
 import useWorkspaceStore from "../../stores/workspaceStore";
 import useDiagramStore from "../../stores/diagramStore";
 import useUiStore from "../../stores/uiStore";
 import useAuthStore from "../../stores/authStore";
 import UserMenu from "../auth/UserMenu";
-import { standardsFixModel, transformActiveModel } from "../../lib/api";
+import ProjectTabs from "./ProjectTabs";
+import {
+  standardsFixModel,
+  transformActiveModel,
+  fetchGitStatus,
+  pushGitBranch,
+  pullGitBranch,
+} from "../../lib/api";
 
 const ACTIVITY_LABELS = {
   model:    { label: "Model",    icon: LayoutDashboard, color: "text-accent-blue" },
@@ -31,6 +51,53 @@ const ACTIVITY_LABELS = {
   search:   { label: "Search",   icon: Search,          color: "text-amber-500" },
   settings: { label: "Settings", icon: Settings,        color: "text-slate-500" },
 };
+
+/* ── Reusable primitives ──────────────────────────────────────────────── */
+
+function Group({ children, className = "" }) {
+  return (
+    <div className={`flex items-center gap-0.5 ${className}`}>{children}</div>
+  );
+}
+
+function Divider() {
+  return <span className="dl-toolbar-divider" aria-hidden="true" />;
+}
+
+function TBButton({
+  icon: Icon,
+  label,
+  onClick,
+  disabled,
+  title,
+  variant = "default",
+  iconOnly = false,
+  loading = false,
+}) {
+  const cls =
+    variant === "primary"
+      ? "dl-toolbar-btn dl-toolbar-btn--primary"
+      : iconOnly
+      ? "dl-toolbar-btn dl-toolbar-btn--ghost-icon"
+      : "dl-toolbar-btn";
+  const IconComp = loading ? Loader2 : Icon;
+  return (
+    <button
+      type="button"
+      className={cls}
+      onClick={onClick}
+      disabled={disabled}
+      title={title || label}
+    >
+      {IconComp && (
+        <IconComp size={14} className={loading ? "animate-spin" : ""} strokeWidth={1.75} />
+      )}
+      {!iconOnly && label && <span>{label}</span>}
+    </button>
+  );
+}
+
+/* ── TopBar ───────────────────────────────────────────────────────────── */
 
 export default function TopBar() {
   const {
@@ -45,25 +112,63 @@ export default function TopBar() {
     offlineMode,
     projectConfig,
     updateContent,
+    activeProjectId,
   } = useWorkspaceStore();
 
   const { model } = useDiagramStore();
-  const { theme, toggleTheme, activeActivity, addToast } = useUiStore();
+  const { theme, toggleTheme, activeActivity, openModal, addToast } = useUiStore();
   const { canEdit } = useAuthStore();
   const [modelOpLoading, setModelOpLoading] = React.useState(false);
+  const [gitStatus, setGitStatus] = React.useState(null);
+  const [gitBusy, setGitBusy] = React.useState(false);
 
-  const handleQuickExport = () => {
-    const el = document.querySelector(".react-flow");
-    if (!el) return;
-    import("html-to-image").then(({ toPng }) => {
-      toPng(el, { backgroundColor: "#ffffff", pixelRatio: 2 }).then((dataUrl) => {
-        const a = document.createElement("a");
-        a.href = dataUrl;
-        a.download = "datalex-diagram.png";
-        a.click();
-      });
-    });
-  };
+  const refreshGit = React.useCallback(async () => {
+    if (!activeProjectId) {
+      setGitStatus(null);
+      return;
+    }
+    try {
+      const s = await fetchGitStatus(activeProjectId);
+      setGitStatus(s);
+    } catch {
+      setGitStatus(null);
+    }
+  }, [activeProjectId]);
+
+  React.useEffect(() => {
+    refreshGit();
+    const t = setInterval(refreshGit, 15000);
+    return () => clearInterval(t);
+  }, [refreshGit]);
+
+  const handleGitPush = React.useCallback(async () => {
+    if (!activeProjectId) return;
+    setGitBusy(true);
+    try {
+      await pushGitBranch(activeProjectId, {});
+      addToast?.({ type: "success", message: "Pushed to remote." });
+      refreshGit();
+    } catch (err) {
+      addToast?.({ type: "error", message: err.message || "Push failed" });
+    } finally {
+      setGitBusy(false);
+    }
+  }, [activeProjectId, addToast, refreshGit]);
+
+  const handleGitPull = React.useCallback(async () => {
+    if (!activeProjectId) return;
+    setGitBusy(true);
+    try {
+      await pullGitBranch(activeProjectId, {});
+      addToast?.({ type: "success", message: "Pulled from remote." });
+      refreshGit();
+    } catch (err) {
+      addToast?.({ type: "error", message: err.message || "Pull failed" });
+    } finally {
+      setGitBusy(false);
+    }
+  }, [activeProjectId, addToast, refreshGit]);
+
   const modelMeta = model?.model || {};
   const modelKind = modelMeta.kind || "physical";
   const nextTransform =
@@ -74,6 +179,19 @@ export default function TopBar() {
       : null;
   const activityInfo = ACTIVITY_LABELS[activeActivity] || ACTIVITY_LABELS.model;
   const ActivityIcon = activityInfo.icon;
+
+  const handleQuickExport = React.useCallback(() => {
+    const el = document.querySelector(".react-flow");
+    if (!el) return;
+    import("html-to-image").then(({ toPng }) => {
+      toPng(el, { backgroundColor: "#ffffff", pixelRatio: 2 }).then((dataUrl) => {
+        const a = document.createElement("a");
+        a.href = dataUrl;
+        a.download = "datalex-diagram.png";
+        a.click();
+      });
+    });
+  }, []);
 
   const handleTransform = React.useCallback(async () => {
     if (!nextTransform || !activeFileContent) return;
@@ -112,155 +230,314 @@ export default function TopBar() {
     }
   }, [activeFileContent, activeFile, updateContent, addToast]);
 
+  const onCanvas = activeActivity === "model" || activeActivity === "settings";
+  const editable = canEdit();
+
   return (
-    <div className="h-auto bg-bg-surface border-b border-border-primary/80 flex flex-col">
-      {/* Breadcrumb + tabs row */}
-      <div className="flex items-center gap-1 px-2 py-1 overflow-x-auto">
-        {/* Activity breadcrumb */}
-        <div className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-semibold shrink-0 border border-border-primary bg-bg-secondary ${activityInfo.color}`}>
-          <ActivityIcon size={12} />
+    <div className="bg-bg-toolbar border-b border-border-primary/90 shadow-xs">
+      {/* Row 1 — Grouped toolbar */}
+      <div className="h-11 px-2 flex items-center gap-1">
+        {/* Activity chip */}
+        <div
+          className={`flex items-center gap-1.5 px-2.5 h-7 rounded-md text-xs font-semibold shrink-0 border border-border-primary bg-bg-surface shadow-xs ${activityInfo.color}`}
+          title={`${activityInfo.label} workspace`}
+        >
+          <ActivityIcon size={13} strokeWidth={1.9} />
           {activityInfo.label}
         </div>
 
-        {/* Separator */}
-        {openTabs.length > 0 && (
-          <ChevronRight size={10} className="text-text-muted shrink-0 mx-0.5" />
+        <Divider />
+
+        {/* File group */}
+        <Group>
+          {editable && (
+            <TBButton
+              icon={FolderPlus}
+              label="Project"
+              title="Add project folder"
+              onClick={() => openModal("addProject")}
+            />
+          )}
+          {editable && (
+            <TBButton
+              icon={FilePlus}
+              label="New"
+              title="New model file"
+              onClick={() => openModal("newFile")}
+              disabled={!onCanvas}
+            />
+          )}
+          {editable ? (
+            <TBButton
+              icon={Save}
+              label="Save"
+              title={isDirty ? "Save changes (⌘S)" : "No changes to save"}
+              variant={isDirty ? "primary" : "default"}
+              onClick={saveCurrentFile}
+              disabled={!isDirty || !activeFile}
+            />
+          ) : (
+            <TBButton
+              icon={Download}
+              label="Export"
+              title="Export diagram as PNG"
+              onClick={handleQuickExport}
+            />
+          )}
+        </Group>
+
+        <Divider />
+
+        {/* Project tabs — multiple open projects, Cmd+Tab to cycle */}
+        <ProjectTabs />
+
+        <Divider />
+
+        {/* Edit group — undo/redo wiring tracked separately from Luna-class UI work */}
+        <Group>
+          <TBButton icon={Undo2} label="Undo" iconOnly disabled title="Undo (coming soon)" />
+          <TBButton icon={Redo2} label="Redo" iconOnly disabled title="Redo (coming soon)" />
+        </Group>
+
+        <Divider />
+
+        {/* View group — diagram zoom/grid (proxies DiagramToolbar actions via DOM events) */}
+        <Group>
+          <TBButton
+            icon={ZoomIn}
+            label="Zoom in"
+            iconOnly
+            title="Zoom in"
+            onClick={() => window.dispatchEvent(new CustomEvent("dl:diagram:zoom-in"))}
+            disabled={!onCanvas}
+          />
+          <TBButton
+            icon={ZoomOut}
+            label="Zoom out"
+            iconOnly
+            title="Zoom out"
+            onClick={() => window.dispatchEvent(new CustomEvent("dl:diagram:zoom-out"))}
+            disabled={!onCanvas}
+          />
+          <TBButton
+            icon={Maximize2}
+            label="Fit"
+            iconOnly
+            title="Fit to view"
+            onClick={() => window.dispatchEvent(new CustomEvent("dl:diagram:fit"))}
+            disabled={!onCanvas}
+          />
+          <TBButton
+            icon={Grid3x3}
+            label="Grid"
+            iconOnly
+            title="Toggle grid"
+            onClick={() => window.dispatchEvent(new CustomEvent("dl:diagram:toggle-grid"))}
+            disabled={!onCanvas}
+          />
+        </Group>
+
+        {/* Model ops — only when a model is loaded on the canvas */}
+        {editable && modelMeta.name && onCanvas && (
+          <>
+            <Divider />
+            <Group>
+              <TBButton
+                icon={Sparkles}
+                label="Standards"
+                title="Apply supported standards autofixes"
+                onClick={handleStandardsFix}
+                disabled={modelOpLoading || !activeFile}
+                loading={modelOpLoading}
+              />
+              {nextTransform && (
+                <TBButton
+                  icon={ArrowRightLeft}
+                  label={nextTransform.label}
+                  title={`Transform model ${nextTransform.label.toLowerCase()}`}
+                  onClick={handleTransform}
+                  disabled={modelOpLoading || !activeFile}
+                />
+              )}
+            </Group>
+          </>
         )}
 
-        {/* File tabs */}
-        {openTabs.map((tab) => {
-          const key = offlineMode ? tab.id : tab.fullPath;
-          const isActive = offlineMode
-            ? activeFile?.id === tab.id
-            : activeFile?.fullPath === tab.fullPath;
+        {/* Spacer */}
+        <div className="flex-1" />
 
-          return (
-            <div
-              key={key}
-              className={`group flex items-center gap-1.5 px-2.5 py-1.5 text-[11px] cursor-pointer rounded-lg border transition-all shrink-0 ${
-                isActive
-                  ? "border-accent-blue/30 text-text-primary bg-accent-blue/10 shadow-sm"
-                  : "border-transparent text-text-muted hover:text-text-secondary hover:bg-bg-hover"
-              }`}
-              onClick={() => switchTab(tab)}
+        {/* Model meta chips */}
+        {modelMeta.name && onCanvas && (
+          <Group className="mr-1">
+            <span className="dl-chip dl-chip--accent">{modelMeta.name}</span>
+            {modelMeta.version && (
+              <span className="dl-chip">v{modelMeta.version}</span>
+            )}
+            <span
+              className="dl-chip"
+              style={{
+                background: "var(--color-accent-green-soft)",
+                color: "var(--color-accent-green)",
+                border: "none",
+              }}
             >
-              <FileCode2 size={10} className="shrink-0 text-accent-blue/60" />
-              <span className="truncate max-w-[140px]">{tab.name || tab.path}</span>
-              {isActive && isDirty && <span className="w-1.5 h-1.5 rounded-full bg-accent-yellow shrink-0" />}
-              <button
-                onClick={(e) => { e.stopPropagation(); closeTab(tab); }}
-                className="opacity-0 group-hover:opacity-100 p-0.5 rounded hover:bg-bg-tertiary transition-all"
-              >
-                <X size={9} />
-              </button>
-            </div>
-          );
-        })}
-
-        {/* Right-side actions */}
-        <div className="flex items-center gap-1.5 ml-auto shrink-0 pr-2">
-          {/* Model meta chips — show whenever a model is loaded */}
-          {modelMeta.name && (activeActivity === "model" || activeActivity === "settings") && (
-            <div className="flex items-center gap-1.5">
-              <span className="px-1.5 py-0.5 rounded-full bg-accent-blue/10 text-accent-blue text-[10px] font-medium">
-                {modelMeta.name}
-              </span>
-              {modelMeta.version && (
-                <span className="px-1.5 py-0.5 rounded-full bg-bg-tertiary text-text-secondary text-[10px]">
-                  v{modelMeta.version}
-                </span>
-              )}
-              <span className="px-1.5 py-0.5 rounded-full bg-emerald-50 text-emerald-700 text-[10px] font-medium">
-                {modelKind}
-              </span>
-              {modelMeta.domain && (
-                <span className="px-1.5 py-0.5 rounded-full bg-accent-purple/10 text-accent-purple text-[10px]">
-                  {modelMeta.domain}
-                </span>
-              )}
-              {modelMeta.state && (
-                <span className={`px-1.5 py-0.5 rounded-full text-[10px] ${
-                  modelMeta.state === "approved"
-                    ? "bg-accent-green/10 text-accent-green"
-                    : modelMeta.state === "deprecated"
-                    ? "bg-accent-red/10 text-accent-red"
-                    : "bg-accent-yellow/10 text-accent-yellow"
-                }`}>
-                  {modelMeta.state}
-                </span>
-              )}
-            </div>
-          )}
-
-          {canEdit() && isDirty && (
-            <span className="text-[10px] text-accent-yellow flex items-center gap-0.5">
-              <AlertTriangle size={10} />
-              Unsaved
+              {modelKind}
             </span>
-          )}
-          {loading && (
-            <Loader2 size={12} className="text-text-muted animate-spin" />
-          )}
-          {canEdit() && modelMeta.name && (
-            <button
-              onClick={handleStandardsFix}
-              disabled={modelOpLoading || !activeFile}
-              className="flex items-center gap-1 px-2 py-1 rounded-md text-[11px] font-medium border border-border-primary text-text-secondary hover:bg-bg-hover disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
-              title="Apply supported standards autofixes"
-            >
-              {modelOpLoading ? <Loader2 size={11} className="animate-spin" /> : <Sparkles size={11} />}
-              Standards
-            </button>
-          )}
-          {canEdit() && modelMeta.name && nextTransform && (
-            <button
-              onClick={handleTransform}
-              disabled={modelOpLoading || !activeFile}
-              className="flex items-center gap-1 px-2 py-1 rounded-md text-[11px] font-medium border border-border-primary text-text-secondary hover:bg-bg-hover disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
-              title={`Transform model ${nextTransform.label.toLowerCase()}`}
-            >
-              {modelOpLoading ? <Loader2 size={11} className="animate-spin" /> : <ArrowRightLeft size={11} />}
-              {nextTransform.label}
-            </button>
-          )}
+            {modelMeta.domain && (
+              <span
+                className="dl-chip"
+                style={{
+                  background: "var(--color-accent-purple-soft)",
+                  color: "var(--color-accent-purple)",
+                  border: "none",
+                }}
+              >
+                {modelMeta.domain}
+              </span>
+            )}
+          </Group>
+        )}
+
+        {/* Unsaved indicator */}
+        {editable && isDirty && (
+          <span className="flex items-center gap-1 px-1.5 text-xs text-accent-yellow">
+            <AlertTriangle size={12} />
+            Unsaved
+          </span>
+        )}
+
+        {loading && <Loader2 size={13} className="text-text-muted animate-spin mx-1" />}
+
+        <Divider />
+
+        {/* Git section */}
+        {gitStatus ? (
+          <Group>
+            <TBButton
+              icon={GitBranch}
+              label={gitStatus.branch || "HEAD"}
+              title={`Branch: ${gitStatus.branch || "HEAD"}`}
+              onClick={() => openModal("commit")}
+              disabled={!editable}
+            />
+            {gitStatus.behind > 0 && (
+              <span
+                className="dl-chip"
+                title={`${gitStatus.behind} commit(s) behind`}
+              >
+                <ArrowDown size={10} /> {gitStatus.behind}
+              </span>
+            )}
+            {gitStatus.ahead > 0 && (
+              <span
+                className="dl-chip dl-chip--accent"
+                title={`${gitStatus.ahead} commit(s) ahead`}
+              >
+                <ArrowUp size={10} /> {gitStatus.ahead}
+              </span>
+            )}
+            <TBButton
+              icon={GitCommit}
+              iconOnly
+              title="Commit changes…"
+              onClick={() => openModal("commit")}
+              disabled={!editable || gitBusy}
+            />
+            <TBButton
+              icon={DownloadCloud}
+              iconOnly
+              title="Pull"
+              onClick={handleGitPull}
+              disabled={!editable || gitBusy}
+            />
+            <TBButton
+              icon={UploadCloud}
+              iconOnly
+              title="Push"
+              onClick={handleGitPush}
+              disabled={!editable || gitBusy}
+              loading={gitBusy}
+            />
+          </Group>
+        ) : (
+          <TBButton icon={GitBranch} label="Git" title="No git repository" disabled />
+        )}
+
+        <Divider />
+
+        {/* Right cluster */}
+        <Group>
+          <TBButton
+            icon={Plug}
+            iconOnly
+            title="Connections"
+            onClick={() => openModal("connectionsManager")}
+          />
+          <TBButton
+            icon={Settings}
+            iconOnly
+            title="Settings"
+            onClick={() => openModal("settings")}
+          />
           <a
             href="https://discord.gg/Dnm6bUvk"
             target="_blank"
             rel="noopener noreferrer"
-            className="p-1.5 rounded-md text-text-muted border border-border-primary bg-bg-surface hover:bg-bg-hover hover:text-text-primary transition-colors"
-            title="Support community (Discord)"
+            className="dl-toolbar-btn dl-toolbar-btn--ghost-icon"
+            title="Community (Discord)"
           >
-            <LifeBuoy size={13} />
+            <LifeBuoy size={14} strokeWidth={1.75} />
           </a>
-          <button
-            onClick={toggleTheme}
-            className="p-1.5 rounded-md text-text-muted border border-border-primary bg-bg-surface hover:bg-bg-hover hover:text-text-primary transition-colors"
+          <TBButton
+            icon={theme === "light" ? Moon : Sun}
+            iconOnly
             title={`Switch to ${theme === "light" ? "dark" : "light"} mode (⌘D)`}
-          >
-            {theme === "light" ? <Moon size={13} /> : <Sun size={13} />}
-          </button>
-          {canEdit() ? (
-            <button
-              onClick={saveCurrentFile}
-              disabled={!isDirty || !activeFile}
-              className="flex items-center gap-1 px-2 py-1 rounded-md text-[11px] font-medium bg-accent-blue text-white hover:bg-accent-blue/80 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
-            >
-              <Save size={11} />
-              Save
-            </button>
-          ) : (
-            <button
-              onClick={handleQuickExport}
-              className="flex items-center gap-1 px-2 py-1 rounded-md text-[11px] font-medium border border-border-primary text-text-secondary hover:bg-bg-hover transition-colors"
-              title="Export diagram as PNG"
-            >
-              <Download size={11} />
-              Export
-            </button>
-          )}
+            onClick={toggleTheme}
+          />
           <UserMenu />
-        </div>
+        </Group>
       </div>
+
+      {/* Row 2 — File tabs */}
+      {openTabs.length > 0 && (
+        <div className="h-8 px-2 flex items-center gap-0.5 border-t border-border-subtle bg-bg-surface/40 overflow-x-auto">
+          {openTabs.map((tab) => {
+            const key = offlineMode ? tab.id : tab.fullPath;
+            const isActive = offlineMode
+              ? activeFile?.id === tab.id
+              : activeFile?.fullPath === tab.fullPath;
+
+            return (
+              <div
+                key={key}
+                onClick={() => switchTab(tab)}
+                className={`group flex items-center gap-1.5 h-7 px-2 text-xs rounded-md cursor-pointer transition-all shrink-0 ${
+                  isActive
+                    ? "bg-bg-active text-text-accent shadow-xs"
+                    : "text-text-tertiary hover:bg-bg-hover hover:text-text-primary"
+                }`}
+              >
+                <FileCode2 size={11} className="shrink-0 text-accent-blue/70" strokeWidth={1.75} />
+                <span className="truncate max-w-[160px] font-medium">{tab.name || tab.path}</span>
+                {isActive && isDirty && (
+                  <span className="w-1.5 h-1.5 rounded-full bg-accent-yellow shrink-0" />
+                )}
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    closeTab(tab);
+                  }}
+                  className="opacity-0 group-hover:opacity-100 p-0.5 rounded hover:bg-bg-tertiary transition-all"
+                  title="Close tab"
+                >
+                  <X size={10} strokeWidth={2} />
+                </button>
+              </div>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }

@@ -24,6 +24,14 @@ const useDiagramStore = create((set, get) => ({
   layoutRefreshTick: 0, // increments when user asks to re-run auto layout
   _lastAutoTuneCount: 0, // track last auto-tune to avoid re-applying
 
+  // Subject-area collapse state (keyed by subject-area name)
+  collapsedSubjectAreas: {},
+
+  // Diagrams — project has 1..N diagrams; each is a filtered view of entities
+  diagrams: [{ id: "main", name: "Main", entityNames: null }],
+  activeDiagramId: "main",
+  fitDiagramTick: 0,
+
   // Layout & viz settings
   vizSettings: {
     fieldView: "all",
@@ -85,6 +93,56 @@ const useDiagramStore = create((set, get) => ({
   setLargeModelBanner: (banner) => set({ largeModelBanner: banner }),
   setCenterEntityId: (id) => set({ centerEntityId: id }),
   requestLayoutRefresh: () => set((s) => ({ layoutRefreshTick: s.layoutRefreshTick + 1 })),
+  requestFitDiagram: () => set((s) => ({ fitDiagramTick: s.fitDiagramTick + 1 })),
+
+  toggleSubjectAreaCollapsed: (name) => {
+    if (!name) return;
+    set((s) => ({
+      collapsedSubjectAreas: {
+        ...s.collapsedSubjectAreas,
+        [name]: !s.collapsedSubjectAreas[name],
+      },
+    }));
+  },
+
+  setDiagrams: (diagrams, activeDiagramId) =>
+    set((s) => ({
+      diagrams: Array.isArray(diagrams) && diagrams.length > 0 ? diagrams : s.diagrams,
+      activeDiagramId:
+        activeDiagramId ||
+        (Array.isArray(diagrams) && diagrams[0] ? diagrams[0].id : s.activeDiagramId),
+    })),
+  selectDiagram: (id) => {
+    const { diagrams } = get();
+    if (!diagrams.some((d) => d.id === id)) return;
+    set({ activeDiagramId: id });
+  },
+  addDiagram: (name) => {
+    const trimmed = (name || "Untitled").trim() || "Untitled";
+    const id = `dg-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
+    set((s) => ({
+      diagrams: [...s.diagrams, { id, name: trimmed, entityNames: null }],
+      activeDiagramId: id,
+    }));
+    return id;
+  },
+  renameDiagram: (id, name) => {
+    const trimmed = (name || "").trim();
+    if (!trimmed) return;
+    set((s) => ({
+      diagrams: s.diagrams.map((d) => (d.id === id ? { ...d, name: trimmed } : d)),
+    }));
+  },
+  closeDiagram: (id) => {
+    const { diagrams, activeDiagramId } = get();
+    if (diagrams.length <= 1) return;
+    const next = diagrams.filter((d) => d.id !== id);
+    const nextActive =
+      id === activeDiagramId
+        ? next[Math.max(0, diagrams.findIndex((d) => d.id === id) - 1)]?.id || next[0].id
+        : activeDiagramId;
+    set({ diagrams: next, activeDiagramId: nextActive });
+  },
 
   updateVizSetting: (key, value) => {
     set((s) => ({

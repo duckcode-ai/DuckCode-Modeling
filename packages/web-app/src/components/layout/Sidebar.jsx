@@ -28,7 +28,7 @@ import useWorkspaceStore from "../../stores/workspaceStore";
 import useDiagramStore from "../../stores/diagramStore";
 import useUiStore from "../../stores/uiStore";
 import useAuthStore from "../../stores/authStore";
-import EntityListPanel from "../panels/EntityListPanel";
+import ObjectListPanel from "../panels/ObjectListPanel";
 import ConnectorLogo from "../icons/ConnectorLogo";
 import BookmarksPanel from "../viewer/BookmarksPanel";
 import { fetchConnections, cloneGitRepo } from "../../lib/api";
@@ -560,25 +560,25 @@ function FileSection() {
   );
 }
 
-// ── Entity list in side panel ──
-function EntitySection() {
+// ── Object list in side panel (grouped by type — Luna style) ──
+function ObjectListSection() {
   const { model } = useDiagramStore();
   const entities = model?.entities || [];
   const [expanded, setExpanded] = useState(true);
 
   return (
-    <div className="mx-2 my-1 px-2 py-1 rounded-lg border border-border-primary/80 bg-bg-surface">
+    <div className="mx-2 my-1 px-1 py-1 rounded-lg border border-border-primary/80 bg-bg-surface">
       <button
         onClick={() => setExpanded(!expanded)}
-        className="flex items-center gap-1.5 w-full px-1 py-1.5 text-[10px] text-text-muted uppercase tracking-wider font-semibold hover:text-text-secondary transition-colors"
+        className="flex items-center gap-1.5 w-full px-2 py-1.5 text-[10px] text-text-muted uppercase tracking-wider font-semibold hover:text-text-secondary transition-colors"
       >
         {expanded ? <ChevronDown size={10} /> : <ChevronRight size={10} />}
-        Entities
+        Objects
         <span className="ml-auto text-[9px] font-normal">{entities.length}</span>
       </button>
       {expanded && (
-        <div className="min-h-[100px] max-h-[300px]">
-          <EntityListPanel />
+        <div className="min-h-[120px]">
+          <ObjectListPanel />
         </div>
       )}
     </div>
@@ -979,7 +979,7 @@ function SidePanel({ activity }) {
           <>
             <ProjectSection />
             <FileSection />
-            <EntitySection />
+            <ObjectListSection />
             {!canEdit && <BookmarksPanel />}
           </>
         )}
