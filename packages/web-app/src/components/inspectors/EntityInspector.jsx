@@ -6,6 +6,10 @@ import useDiagramStore from "../../stores/diagramStore";
 import {
   updateEntityMeta,
   setEntityScalarProperty,
+  renameEntity,
+  removeEntity,
+  addField,
+  parseYamlSafe,
 } from "../../lib/yamlRoundTrip";
 import { OBJECT_TYPE_DISPLAY_ORDER, getObjectTypeMeta } from "../../lib/objectTypeMeta";
 import {
@@ -15,7 +19,7 @@ import {
   SelectInput,
   TextareaInput,
 } from "./InspectorField";
-import { ChevronRight } from "lucide-react";
+import { ChevronRight, Plus, Trash2 } from "lucide-react";
 
 /**
  * Edits the top-level properties of a single entity. The column grid at the
@@ -24,21 +28,57 @@ import { ChevronRight } from "lucide-react";
  */
 export default function EntityInspector({ entity }) {
   const { activeFileContent, updateContent } = useWorkspaceStore();
-  const { setSelection } = useUiStore();
+  const { setSelection, addToast, clearSelection } = useUiStore();
   const { canEdit: canEditFn } = useAuthStore();
   const canEdit = canEditFn();
-  const { getSchemaOptions } = useDiagramStore();
+  const { getSchemaOptions, selectEntity } = useDiagramStore();
 
   const readOnly = !canEdit;
 
   const apply = (mutator, ...args) => {
-    if (!activeFileContent || readOnly) return;
+    if (!activeFileContent || readOnly) return null;
     const result = mutator(activeFileContent, ...args);
-    if (!result.error) updateContent(result.yaml);
+    if (result.error) {
+      addToast?.({ type: "error", message: result.error });
+      return null;
+    }
+    updateContent(result.yaml);
+    return result;
   };
 
   const setMeta = (key, value) => apply(updateEntityMeta, entity.name, key, value);
   const setScalar = (key, value) => apply(setEntityScalarProperty, entity.name, key, value);
+
+  const handleRename = (next) => {
+    const trimmed = String(next || "").trim();
+    if (!trimmed || trimmed === entity.name) return;
+    const result = apply(renameEntity, entity.name, trimmed);
+    if (result) {
+      selectEntity?.(trimmed);
+      setSelection({ kind: "entity", entityName: trimmed });
+    }
+  };
+
+  const handleDelete = () => {
+    if (readOnly) return;
+    if (!window.confirm(`Delete entity "${entity.name}"? This also removes related relationships.`)) return;
+    const result = apply(removeEntity, entity.name);
+    if (result) {
+      clearSelection();
+      addToast?.({ type: "success", message: `Deleted ${entity.name}` });
+    }
+  };
+
+  const handleAddColumn = () => {
+    if (readOnly) return;
+    const before = new Set((entity.fields || []).map((f) => f.name));
+    const result = apply(addField, entity.name);
+    if (!result) return;
+    const parsed = parseYamlSafe(result.yaml);
+    const nextEntity = (parsed.doc?.entities || []).find((e) => e.name === entity.name);
+    const added = (nextEntity?.fields || []).map((f) => f.name).find((n) => !before.has(n));
+    if (added) setSelection({ kind: "column", entityName: entity.name, fieldName: added });
+  };
 
   const typeOptions = OBJECT_TYPE_DISPLAY_ORDER.map((kind) => {
     const meta = getObjectTypeMeta(kind);
@@ -56,7 +96,11 @@ export default function EntityInspector({ entity }) {
     <div className="flex flex-col">
       <InspectorSection title="Identity">
         <InspectorField label="Name">
-          <TextInput value={entity.name} readOnly={true} />
+          <TextInput
+            value={entity.name}
+            onChange={handleRename}
+            readOnly={readOnly}
+          />
         </InspectorField>
         <InspectorField label="Type">
           <SelectInput
@@ -119,7 +163,32 @@ export default function EntityInspector({ entity }) {
             ))}
           </div>
         )}
+        {!readOnly && (
+          <div className="px-3 py-2">
+            <button
+              onClick={handleAddColumn}
+              className="dl-toolbar-btn dl-toolbar-btn--ghost-icon w-full justify-center"
+              title="Add a new column"
+            >
+              <Plus size={13} />
+              Add column
+            </button>
+          </div>
+        )}
       </InspectorSection>
+
+      {!readOnly && (
+        <div className="px-3 py-3 border-t border-border-primary">
+          <button
+            onClick={handleDelete}
+            className="dl-toolbar-btn dl-toolbar-btn--ghost-icon w-full justify-center text-accent-red"
+            title="Delete this entity"
+          >
+            <Trash2 size={14} />
+            Delete entity
+          </button>
+        </div>
+      )}
     </div>
   );
 }

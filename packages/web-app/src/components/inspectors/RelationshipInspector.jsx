@@ -1,9 +1,10 @@
 import React from "react";
+import { Trash2 } from "lucide-react";
 import useWorkspaceStore from "../../stores/workspaceStore";
 import useDiagramStore from "../../stores/diagramStore";
 import useUiStore from "../../stores/uiStore";
 import useAuthStore from "../../stores/authStore";
-import { mutateModel } from "../../lib/yamlRoundTrip";
+import { mutateModel, removeRelationship } from "../../lib/yamlRoundTrip";
 import {
   InspectorField,
   InspectorSection,
@@ -22,7 +23,7 @@ const CARDINALITY_OPTIONS = [
 export default function RelationshipInspector({ relId }) {
   const { activeFileContent, updateContent } = useWorkspaceStore();
   const { model, edges } = useDiagramStore();
-  const { addToast } = useUiStore();
+  const { addToast, setSelection, clearSelection } = useUiStore();
   const { canEdit: canEditFn } = useAuthStore();
   const canEdit = canEditFn();
   const readOnly = !canEdit;
@@ -58,17 +59,62 @@ export default function RelationshipInspector({ relId }) {
       else target[key] = value;
     });
 
+  const handleRename = (next) => {
+    const trimmed = String(next || "").trim();
+    if (!trimmed || trimmed === rel.name) return;
+    const existing = (model?.relationships || []).some((r) => r.name === trimmed);
+    if (existing) {
+      addToast?.({ type: "error", message: `Relationship "${trimmed}" already exists` });
+      return;
+    }
+    apply((m) => {
+      const target = (m.relationships || []).find((r) => r.name === rel.name);
+      if (target) target.name = trimmed;
+    });
+    setSelection({ kind: "relationship", relId: trimmed });
+  };
+
+  const handleDelete = () => {
+    if (readOnly) return;
+    if (!window.confirm(`Delete relationship "${rel.name}"?`)) return;
+    if (!activeFileContent) return;
+    const result = removeRelationship(activeFileContent, rel.name);
+    if (result.error) {
+      addToast?.({ type: "error", message: result.error });
+      return;
+    }
+    updateContent(result.yaml);
+    clearSelection();
+    addToast?.({ type: "success", message: `Deleted relationship ${rel.name}` });
+  };
+
+  const entityOptions = (model?.entities || []).map((e) => ({ value: e.name, label: e.name }));
+
   return (
     <div className="flex flex-col">
       <InspectorSection title="Identity">
         <InspectorField label="Name">
-          <TextInput value={rel.name || relId} readOnly={true} />
+          <TextInput
+            value={rel.name || relId}
+            onChange={handleRename}
+            readOnly={readOnly}
+          />
         </InspectorField>
         <InspectorField label="From">
-          <TextInput value={rel.from || ""} readOnly={true} />
+          <SelectInput
+            value={rel.from || ""}
+            onChange={(v) => setRelField("from", v)}
+            options={entityOptions}
+            readOnly={readOnly}
+          />
         </InspectorField>
         <InspectorField label="To">
-          <TextInput value={rel.to || ""} readOnly={true} />
+          <SelectInput
+            value={rel.to || ""}
+            onChange={(v) => setRelField("to", v)}
+            options={entityOptions}
+            readOnly={readOnly}
+          />
         </InspectorField>
       </InspectorSection>
 
@@ -94,6 +140,19 @@ export default function RelationshipInspector({ relId }) {
           readOnly={readOnly}
         />
       </InspectorSection>
+
+      {!readOnly && (
+        <div className="px-3 py-3 border-t border-border-primary">
+          <button
+            onClick={handleDelete}
+            className="dl-toolbar-btn dl-toolbar-btn--ghost-icon w-full justify-center text-accent-red"
+            title="Delete this relationship"
+          >
+            <Trash2 size={14} />
+            Delete relationship
+          </button>
+        </div>
+      )}
     </div>
   );
 }
