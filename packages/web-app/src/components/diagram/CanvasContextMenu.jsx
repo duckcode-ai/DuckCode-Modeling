@@ -1,5 +1,5 @@
 import React, { useEffect, useRef } from "react";
-import { Edit3, Trash2, Copy, Crosshair, Plus } from "lucide-react";
+import { Edit3, Trash2, Copy, Crosshair, Plus, LayoutGrid } from "lucide-react";
 
 export default function CanvasContextMenu({ menu, onClose, onAction }) {
   const ref = useRef(null);
@@ -27,6 +27,11 @@ export default function CanvasContextMenu({ menu, onClose, onAction }) {
         { id: "edit", label: "Edit entity", icon: Edit3 },
         { id: "duplicate", label: "Duplicate", icon: Copy },
         { id: "locate", label: "Locate in tree", icon: Crosshair },
+        {
+          id: "toggle-diagram",
+          label: menu.inActiveDiagram ? "Remove from diagram" : "Add to diagram",
+          icon: LayoutGrid,
+        },
         { id: "delete", label: "Delete entity", icon: Trash2, danger: true },
       ]
     : menu.target === "relationship"

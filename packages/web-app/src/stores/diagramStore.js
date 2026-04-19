@@ -144,6 +144,38 @@ const useDiagramStore = create((set, get) => ({
     set({ diagrams: next, activeDiagramId: nextActive });
   },
 
+  // Toggle whether an entity is included in the active diagram's scope.
+  // Diagrams with entityNames === null show everything; once the user scopes a
+  // diagram explicitly, we switch to a maintained include list.
+  toggleEntityInActiveDiagram: (entityName) => {
+    const name = String(entityName || "").trim();
+    if (!name) return;
+    const { diagrams, activeDiagramId, model } = get();
+    const allNames = (model?.entities || []).map((e) => e.name);
+    set({
+      diagrams: diagrams.map((d) => {
+        if (d.id !== activeDiagramId) return d;
+        const current = Array.isArray(d.entityNames) ? d.entityNames : allNames;
+        const has = current.includes(name);
+        const nextList = has ? current.filter((n) => n !== name) : [...current, name];
+        return { ...d, entityNames: nextList };
+      }),
+    });
+  },
+
+  // Replace the active diagram's entity scope wholesale (or clear to "all").
+  setActiveDiagramEntities: (entityNames) => {
+    const { diagrams, activeDiagramId } = get();
+    const next = entityNames === null
+      ? null
+      : Array.from(new Set((entityNames || []).filter(Boolean)));
+    set({
+      diagrams: diagrams.map((d) =>
+        d.id === activeDiagramId ? { ...d, entityNames: next } : d
+      ),
+    });
+  },
+
   updateVizSetting: (key, value) => {
     set((s) => ({
       vizSettings: { ...s.vizSettings, [key]: value },

@@ -502,11 +502,16 @@ function FlowCanvas() {
   const onNodeContextMenu = useCallback((event, node) => {
     if (node.type === "group") return;
     event.preventDefault();
+    const { diagrams: ds, activeDiagramId: adid } = useDiagramStore.getState();
+    const active = (ds || []).find((d) => d.id === adid);
+    const inActiveDiagram =
+      !Array.isArray(active?.entityNames) || active.entityNames.includes(node.id);
     setContextMenu({
       target: node.type === "enumNode" ? "enum" : "entity",
       x: event.clientX,
       y: event.clientY,
       nodeId: node.id,
+      inActiveDiagram,
     });
   }, []);
   const onEdgeContextMenu = useCallback((event, edge) => {
@@ -543,6 +548,8 @@ function FlowCanvas() {
         }
       } else if (actionId === "duplicate") {
         window.dispatchEvent(new CustomEvent("dl:entity:duplicate", { detail: { name: menu.nodeId } }));
+      } else if (actionId === "toggle-diagram") {
+        diagram.toggleEntityInActiveDiagram?.(menu.nodeId);
       }
     } else if (menu.target === "relationship") {
       if (actionId === "edit") {
