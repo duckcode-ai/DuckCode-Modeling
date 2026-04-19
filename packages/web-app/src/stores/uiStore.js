@@ -18,7 +18,7 @@ const useUiStore = create((set, get) => ({
 
   // ── Bottom panel (slimmed: only contextual panels) ──
   bottomPanelOpen: true,
-  bottomPanelTab: "properties", // "properties" | "validation" | "history"
+  bottomPanelTab: "validation", // "validation" | "diff" | "impact"
 
   // ── YAML editor pane (hidden by default; toggle via Code icon) ──
   yamlPanelOpen: false,

@@ -13,7 +13,6 @@ import CommandPalette from "./components/dialogs/CommandPalette";
 import YamlEditor from "./components/editor/YamlEditor";
 import DiagramCanvas from "./components/diagram/DiagramCanvas";
 import DiagramTabs from "./components/layout/DiagramTabs";
-import EntityPanel from "./components/panels/EntityPanel";
 import ValidationPanel from "./components/panels/ValidationPanel";
 import DiffPanel from "./components/panels/DiffPanel";
 import ImpactPanel from "./components/panels/ImpactPanel";
@@ -27,7 +26,6 @@ import useWorkspaceStore from "./stores/workspaceStore";
 import useDiagramStore from "./stores/diagramStore";
 
 import {
-  Columns3,
   ShieldCheck,
   GitCompare,
   Activity,
@@ -45,7 +43,6 @@ import {
 import { fetchGitBranches, fetchGitRemote } from "./lib/api";
 
 const ALL_BOTTOM_TABS = [
-  { id: "properties",  label: "Properties",  icon: Columns3 },
   { id: "validation",  label: "Validation",  icon: ShieldCheck, adminOnly: true },
   { id: "diff",        label: "Diff & Gate", icon: GitCompare,  adminOnly: true },
   { id: "impact",      label: "Impact",      icon: Activity,    adminOnly: true },
@@ -485,8 +482,6 @@ function EditProjectModal() {
 
 function BottomPanelContent({ tab }) {
   switch (tab) {
-    case "properties":
-      return <EntityPanel />;
     case "validation":
       return <ValidationPanel />;
     case "diff":
@@ -494,7 +489,7 @@ function BottomPanelContent({ tab }) {
     case "impact":
       return <ImpactPanel />;
     default:
-      return <EntityPanel />;
+      return <ValidationPanel />;
   }
 }
 
@@ -774,13 +769,6 @@ export default function App() {
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
   }, [showShortcuts, setBottomPanelTab, toggleBottomPanel]);
-
-  // Auto-open properties panel when entity selected
-  useEffect(() => {
-    if (selectedEntityId) {
-      setBottomPanelTab("properties");
-    }
-  }, [selectedEntityId, setBottomPanelTab]);
 
   // Show error toast
   useEffect(() => {
