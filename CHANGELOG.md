@@ -7,6 +7,22 @@ from `v0.1.0` onward.
 
 ## [Unreleased]
 
+## [0.2.2] — 2026-04-20
+
+### Fixed
+
+- **"File not found" after Import dbt repo (Edit in place).** Edit-in-place
+  previously only registered the project and sent the tree in the import
+  response — the YAMLs never touched disk, so clicking a file in the
+  Explorer hit `/api/files?path=…` and got a 404 because dbt ships
+  `.sql` + a shared `schema.yml`, not per-model `.yml`. The import now
+  writes every DataLex-generated `.yml` into the user's dbt folder at its
+  source path (never clobbering a pre-existing file), so clicks resolve
+  to real on-disk content and the Canvas can render entities.
+- As a side-effect, the Canvas is no longer empty after import: once
+  the first file opens successfully, its entities populate the diagram
+  and inferred relationships draw between them.
+
 ## [0.2.1] — 2026-04-20
 
 ### Fixed

@@ -2645,11 +2645,29 @@ app.post("/api/dbt/import", requireAdmin, express.json({ limit: "2mb" }), async 
       try { rmSync(cloneDir, { recursive: true, force: true }); } catch (_) {}
     }
 
-    // Edit-in-place mode: register the user's dbt folder as a DataLex project
-    // so the GUI's Save All writes back into it. Idempotent — if the folder is
-    // already registered we reuse the existing project. The imported tree is
-    // returned alongside the projectId; the web-app opens the tree *against*
-    // the project without touching disk until the user saves.
+    // Edit-in-place mode: materialise the imported YAMLs inside the user's
+    // dbt folder so clicking a file in the Explorer can read it from disk.
+    // We only write files that don't already exist — never clobber a
+    // hand-authored schema.yml the user already maintains. This turns the
+    // in-memory import into a real round-trippable state on first import.
+    if (editInPlace && resolvedProjectDir && !cloneDir) {
+      for (const entry of tree) {
+        const destRel = entry.path.replace(/\.yaml$/i, ".yml");
+        const destAbs = join(resolvedProjectDir, destRel);
+        try {
+          if (!existsSync(destAbs)) {
+            mkdirSync(dirname(destAbs), { recursive: true });
+            writeFileSync(destAbs, entry.content, "utf-8");
+          }
+        } catch (err) {
+          console.error(`[datalex] editInPlace write failed for ${destRel}: ${err.message}`);
+        }
+      }
+    }
+
+    // Register the user's dbt folder as a DataLex project so Save All + the
+    // project picker work. Idempotent — if the folder is already registered
+    // we reuse the existing project.
     let projectRecord = null;
     if (editInPlace && resolvedProjectDir && !cloneDir) {
       try {
