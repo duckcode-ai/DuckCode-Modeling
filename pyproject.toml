@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "datalex-cli"
-version = "0.2.0"
+version = "0.2.1"
 description = "Git-native data modeling for dbt users"
 readme = "README.md"
 requires-python = ">=3.9"
@@ -30,8 +30,11 @@ dependencies = [
 
 [project.optional-dependencies]
 # Bundled Node runtime — `pip install datalex-cli[serve]` gives the user
-# a working `datalex serve` even on hosts without Node on PATH.
-serve = ["nodejs-bin>=20,<21"]
+# a working `datalex serve` even on hosts without Node on PATH. The
+# `nodejs-bin` package only publishes wheels for Python 3.9–3.12, so we
+# gate it behind a PEP 508 marker; on 3.13+ the extra is empty but still
+# declared, which keeps `pip install datalex-cli[serve]` from backtracking.
+serve = ["nodejs-bin>=20,<21; python_version < '3.13'"]
 duckdb = ["duckdb>=0.9"]
 postgres = ["psycopg2-binary"]
 mysql = ["mysql-connector-python"]
@@ -41,7 +44,7 @@ databricks = ["databricks-sql-connector"]
 sqlserver = ["pyodbc"]
 redshift = ["redshift-connector"]
 all = [
-  "nodejs-bin>=20,<21",
+  "nodejs-bin>=20,<21; python_version < '3.13'",
   "duckdb>=0.9",
   "psycopg2-binary",
   "mysql-connector-python",

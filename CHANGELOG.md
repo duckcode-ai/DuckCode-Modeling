@@ -7,6 +7,16 @@ from `v0.1.0` onward.
 
 ## [Unreleased]
 
+## [0.2.1] — 2026-04-20
+
+### Fixed
+
+- `pip install 'datalex-cli[serve]'` on Python 3.13+ silently backtracked
+  to 0.1.1 because `nodejs-bin` has no wheels for those interpreters. The
+  `[serve]` extra now gates `nodejs-bin` behind `python_version < '3.13'`
+  so pip can resolve the extra on any supported Python. On 3.13/3.14,
+  install Node 20+ from nodejs.org — `datalex serve` will pick it up.
+
 ### Fixed
 
 - `datalex serve --project-dir <dir>` now auto-registers that directory as
