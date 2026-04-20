@@ -3,7 +3,7 @@ import React from "react";
 import Icon from "./icons";
 import { THEMES } from "./notation";
 
-export default function LeftPanel({ activeTable, onSelectTable, tables, theme, setTheme, subjectAreas = [], connectionLabel = "prod-analytics-01", connectionDsn = "postgres://…5432/subscriptions", schemas = [] }) {
+export default function LeftPanel({ activeTable, onSelectTable, tables, theme, setTheme, subjectAreas = [], connectionLabel = "prod-analytics-01", connectionDsn = "postgres://…5432/subscriptions", schemas = [], onAddEntity }) {
   const I = Icon;
   const [tab, setTab] = React.useState("OBJECTS");
   const [query, setQuery] = React.useState("");
@@ -27,7 +27,7 @@ export default function LeftPanel({ activeTable, onSelectTable, tables, theme, s
         <svg className="tree-caret" viewBox="0 0 10 10"><path d="M3 2l4 3-4 3" fill="currentColor" /></svg>
         <span>{label}</span>
         <span className="count">({items.length})</span>
-        <button className="add" onClick={(e) => e.stopPropagation()}><I.Plus /></button>
+        <button className="add" onClick={(e) => { e.stopPropagation(); onAddEntity && onAddEntity(key); }}><I.Plus /></button>
       </div>
       <div className="tree-items">{items.map(renderItem)}</div>
     </div>

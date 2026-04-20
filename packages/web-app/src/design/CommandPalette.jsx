@@ -2,7 +2,7 @@
 import React from "react";
 import Icon from "./icons";
 
-export default function CommandPalette({ open, onClose, tables, onSelectTable, extraCommands = [] }) {
+export default function CommandPalette({ open, onClose, tables, onSelectTable, extraCommands = [], handlers = {} }) {
   const I = Icon;
   const [q, setQ] = React.useState("");
   const [idx, setIdx] = React.useState(0);
@@ -17,11 +17,11 @@ export default function CommandPalette({ open, onClose, tables, onSelectTable, e
   }, [open]);
 
   const commands = [
-    { id: "new-table", section: "Actions", label: "New table…",          meta: "⌘N",  icon: <I.Plus /> },
-    { id: "new-rel",   section: "Actions", label: "New relationship…",   meta: "⌘R",  icon: <I.Relation /> },
-    { id: "auto",      section: "Actions", label: "Auto-layout diagram", meta: "⌘⇧L", icon: <I.Grid /> },
-    { id: "export",    section: "Actions", label: "Export SQL…",         meta: "⌘E",  icon: <I.Download /> },
-    { id: "theme",     section: "Actions", label: "Toggle theme",        meta: "⌘⇧T", icon: <I.Layers /> },
+    { id: "new-table", section: "Actions", label: "New table…",          meta: "⌘N",  icon: <I.Plus />,     run: handlers.newTable },
+    { id: "new-rel",   section: "Actions", label: "New relationship…",   meta: "⌘R",  icon: <I.Relation />, run: handlers.newRelationship },
+    { id: "auto",      section: "Actions", label: "Auto-layout diagram", meta: "⌘⇧L", icon: <I.Grid />,     run: handlers.autoLayout },
+    { id: "export",    section: "Actions", label: "Export SQL…",         meta: "⌘E",  icon: <I.Download />, run: handlers.exportSql },
+    { id: "theme",     section: "Actions", label: "Toggle theme",        meta: "⌘⇧T", icon: <I.Layers />,   run: handlers.cycleTheme },
     ...extraCommands,
     ...tables.map((t) => ({
       id: `t-${t.id}`, section: "Tables", label: t.name, meta: `${t.columns.length} cols`,

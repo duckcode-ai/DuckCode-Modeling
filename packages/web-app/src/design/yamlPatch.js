@@ -120,6 +120,38 @@ export function appendField(yamlText, entityName, fieldSpec) {
   return dump(doc);
 }
 
+/* Append a new entity (or enum) to the document. */
+export function appendEntity(yamlText, entitySpec) {
+  const doc = loadDoc(yamlText);
+  if (!doc) return null;
+  doc.entities = doc.entities || [];
+  // Reject duplicates (case-insensitive).
+  const name = String(entitySpec?.name || "").toLowerCase();
+  if (!name) return null;
+  if (doc.entities.some((e) => String(e.name || "").toLowerCase() === name)) return null;
+  doc.entities.push(entitySpec);
+  return dump(doc);
+}
+
+/* Delete an entity and any relationships that reference it. */
+export function deleteEntity(yamlText, entityName) {
+  const doc = loadDoc(yamlText);
+  if (!doc) return null;
+  const target = String(entityName || "").toLowerCase();
+  if (!target) return null;
+  doc.entities = (doc.entities || []).filter(
+    (e) => String(e.name || "").toLowerCase() !== target
+  );
+  if (Array.isArray(doc.relationships)) {
+    doc.relationships = doc.relationships.filter((r) => {
+      const from = String(r.from || "").split(".")[0].toLowerCase();
+      const to = String(r.to || "").split(".")[0].toLowerCase();
+      return from !== target && to !== target;
+    });
+  }
+  return dump(doc);
+}
+
 /* Delete a field from an entity. */
 export function deleteField(yamlText, entityName, fieldName) {
   const doc = loadDoc(yamlText);

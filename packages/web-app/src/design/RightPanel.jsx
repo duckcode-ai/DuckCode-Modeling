@@ -4,9 +4,12 @@
 import React from "react";
 import Icon from "./icons";
 import { NOTATION } from "./notation";
-import YamlEditor from "../components/editor/YamlEditor";
 import useWorkspaceStore from "../stores/workspaceStore";
 import { patchField } from "./yamlPatch";
+
+// Lazy-loaded — CodeMirror pulls a large chunk we don't need until the user
+// opens the YAML tab.
+const YamlEditor = React.lazy(() => import("../components/editor/YamlEditor"));
 
 function renderSQL(t) {
   const kw = (s) => `<span class="sql-kw">${s}</span>`;
@@ -115,7 +118,7 @@ function RelInspector({ rel }) {
   );
 }
 
-export default function RightPanel({ table, rel, tables, selectedCol, setSelectedCol }) {
+export default function RightPanel({ table, rel, tables, selectedCol, setSelectedCol, onDeleteEntity }) {
   const I = Icon;
   const [tab, setTab] = React.useState("COLUMNS");
   const activeFile = useWorkspaceStore((s) => s.activeFile);
@@ -134,7 +137,9 @@ export default function RightPanel({ table, rel, tables, selectedCol, setSelecte
         </div>
         <div style={{ flex: 1, minHeight: 0, overflow: "hidden", background: "var(--bg-canvas)" }}>
           {activeFile ? (
-            <YamlEditor />
+            <React.Suspense fallback={<div style={{ padding: 20, fontSize: 12, color: "var(--text-tertiary)" }}>Loading editor…</div>}>
+              <YamlEditor />
+            </React.Suspense>
           ) : (
             <div style={{ padding: "40px 20px", textAlign: "center", color: "var(--text-tertiary)", fontSize: 12 }}>
               Open a file to edit its YAML.
@@ -194,7 +199,13 @@ export default function RightPanel({ table, rel, tables, selectedCol, setSelecte
           <h2>{table.name}</h2>
           <button className="copy-btn" title="Copy name"><I.Copy /></button>
           <button className="copy-btn" title="Edit" style={{ marginLeft: "auto" }}><I.Edit /></button>
-          <button className="copy-btn" title="Delete"><I.Trash /></button>
+          <button
+            className="copy-btn"
+            title="Delete entity"
+            onClick={() => onDeleteEntity && onDeleteEntity(table.name)}
+          >
+            <I.Trash />
+          </button>
         </div>
         <div className="insp-sub">
           {table.schema}.{table.name} · {table.columns.length} columns{table.rowCount ? ` · ${table.rowCount}${typeof table.rowCount === "number" ? " rows" : ""}` : ""}

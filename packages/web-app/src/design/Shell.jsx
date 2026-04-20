@@ -19,26 +19,8 @@ import CommandPalette from "./CommandPalette";
 import { DEMO_SCHEMA } from "./demoSchema";
 import { THEMES } from "./notation";
 import { adaptDataLexYaml } from "./schemaAdapter";
+import { appendEntity, deleteEntity } from "./yamlPatch";
 
-// Legacy panels & dialogs (reused, not re-ported)
-import ModelerPanel from "../components/panels/ModelerPanel";
-import EntityPanel from "../components/panels/EntityPanel";
-import LibrariesPanel from "../components/panels/LibrariesPanel";
-import SubjectAreasPanel from "../components/panels/SubjectAreasPanel";
-import ValidationPanel from "../components/panels/ValidationPanel";
-import DiffPanel from "../components/panels/DiffPanel";
-import ImpactPanel from "../components/panels/ImpactPanel";
-import HistoryPanel from "../components/panels/HistoryPanel";
-import ModelGraphPanel from "../components/panels/ModelGraphPanel";
-import DictionaryPanel from "../components/panels/DictionaryPanel";
-import KeyboardShortcutsPanel from "../components/panels/KeyboardShortcutsPanel";
-import SettingsDialog from "../components/dialogs/SettingsDialog";
-import ConnectionsManager from "../components/dialogs/ConnectionsManager";
-import CommitDialog from "../components/dialogs/CommitDialog";
-import LegacyCommandPalette from "../components/dialogs/CommandPalette";
-import ExportDdlDialog from "../components/dialogs/ExportDdlDialog";
-import PanelDialog from "../components/dialogs/PanelDialog";
-import GitBranchDialog from "../components/dialogs/GitBranchDialog";
 import { fetchGitStatus } from "../lib/api";
 import {
   AddProjectModal,
@@ -46,7 +28,27 @@ import {
   NewFileModal,
 } from "../components/dialogs/ProjectModals";
 import LoginPage from "../components/auth/LoginPage";
-import ViewerWelcome from "../components/viewer/ViewerWelcome";
+import KeyboardShortcutsPanel from "../components/panels/KeyboardShortcutsPanel";
+
+// Heavy panels / dialogs are split into separate chunks — they only load when
+// the user actually opens them, which keeps the initial JS bundle small.
+const ModelerPanel        = React.lazy(() => import("../components/panels/ModelerPanel"));
+const EntityPanel         = React.lazy(() => import("../components/panels/EntityPanel"));
+const LibrariesPanel      = React.lazy(() => import("../components/panels/LibrariesPanel"));
+const SubjectAreasPanel   = React.lazy(() => import("../components/panels/SubjectAreasPanel"));
+const ValidationPanel     = React.lazy(() => import("../components/panels/ValidationPanel"));
+const DiffPanel           = React.lazy(() => import("../components/panels/DiffPanel"));
+const ImpactPanel         = React.lazy(() => import("../components/panels/ImpactPanel"));
+const HistoryPanel        = React.lazy(() => import("../components/panels/HistoryPanel"));
+const ModelGraphPanel     = React.lazy(() => import("../components/panels/ModelGraphPanel"));
+const DictionaryPanel     = React.lazy(() => import("../components/panels/DictionaryPanel"));
+const SettingsDialog      = React.lazy(() => import("../components/dialogs/SettingsDialog"));
+const ConnectionsManager  = React.lazy(() => import("../components/dialogs/ConnectionsManager"));
+const CommitDialog        = React.lazy(() => import("../components/dialogs/CommitDialog"));
+const ExportDdlDialog     = React.lazy(() => import("../components/dialogs/ExportDdlDialog"));
+const PanelDialog         = React.lazy(() => import("../components/dialogs/PanelDialog"));
+const GitBranchDialog     = React.lazy(() => import("../components/dialogs/GitBranchDialog"));
+const ViewerWelcome       = React.lazy(() => import("../components/viewer/ViewerWelcome"));
 
 import useWorkspaceStore from "../stores/workspaceStore";
 import useAuthStore from "../stores/authStore";
@@ -72,20 +74,63 @@ const ALL_BOTTOM_TABS = [
   { id: "history",       label: "History",       icon: Clock },
 ];
 
+const LazyFallback = (
+  <div style={{ padding: 20, fontSize: 12, color: "var(--text-tertiary)" }}>Loading…</div>
+);
+
 function BottomPanelContent({ tab }) {
+  let node;
   switch (tab) {
-    case "modeler":       return <ModelerPanel />;
-    case "properties":    return <EntityPanel />;
-    case "libraries":     return <LibrariesPanel />;
-    case "subject-areas": return <SubjectAreasPanel />;
-    case "validation":    return <ValidationPanel />;
-    case "diff":          return <DiffPanel />;
-    case "impact":        return <ImpactPanel />;
-    case "model-graph":   return <ModelGraphPanel />;
-    case "dictionary":    return <DictionaryPanel />;
-    case "history":       return <HistoryPanel />;
-    default:              return <EntityPanel />;
+    case "modeler":       node = <ModelerPanel />; break;
+    case "properties":    node = <EntityPanel />; break;
+    case "libraries":     node = <LibrariesPanel />; break;
+    case "subject-areas": node = <SubjectAreasPanel />; break;
+    case "validation":    node = <ValidationPanel />; break;
+    case "diff":          node = <DiffPanel />; break;
+    case "impact":        node = <ImpactPanel />; break;
+    case "model-graph":   node = <ModelGraphPanel />; break;
+    case "dictionary":    node = <DictionaryPanel />; break;
+    case "history":       node = <HistoryPanel />; break;
+    default:              node = <EntityPanel />;
   }
+  return <React.Suspense fallback={LazyFallback}>{node}</React.Suspense>;
+}
+
+function WelcomeModal({ onClose }) {
+  return (
+    <div
+      style={{
+        position: "fixed", inset: 0, zIndex: 80,
+        background: "rgba(0,0,0,0.55)", backdropFilter: "blur(4px)",
+        display: "flex", alignItems: "center", justifyContent: "center",
+      }}
+      onClick={onClose}
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        style={{
+          width: "min(720px, 92vw)", maxHeight: "85vh", overflow: "auto",
+          background: "var(--bg-2)", border: "1px solid var(--border-strong)",
+          borderRadius: 12, boxShadow: "var(--shadow-pop)", position: "relative",
+        }}
+      >
+        <button
+          onClick={onClose}
+          style={{
+            position: "absolute", top: 10, right: 10, zIndex: 1,
+            background: "transparent", border: "none", color: "var(--text-tertiary)",
+            cursor: "pointer", padding: 6, borderRadius: 6,
+          }}
+          title="Close"
+        >
+          <X size={16} />
+        </button>
+        <React.Suspense fallback={<div style={{ padding: 40, textAlign: "center", color: "var(--text-tertiary)" }}>Loading…</div>}>
+          <ViewerWelcome />
+        </React.Suspense>
+      </div>
+    </div>
+  );
 }
 
 function ToastContainer() {
@@ -359,6 +404,66 @@ export default function Shell() {
     else addToast({ type: "error", message: "Open a project first." });
   };
 
+  /* ── Entity add / delete (wired through yamlPatch helpers) ─────── */
+  const handleAddEntity = React.useCallback((kind) => {
+    const s = useWorkspaceStore.getState();
+    if (!s.activeFile) { addToast({ type: "error", message: "Open a file first." }); return; }
+    const isEnum = kind === "ENUMS";
+    const label = isEnum ? "enum" : "entity";
+    const name = window.prompt(`New ${label} name (e.g. ${isEnum ? "order_status" : "customer"})`);
+    if (!name || !name.trim()) return;
+    const clean = name.trim();
+    const spec = isEnum
+      ? { name: clean, type: "enum", values: [] }
+      : { name: clean, type: "entity", fields: [{ name: "id", type: "uuid", primary_key: true }] };
+    const next = appendEntity(s.activeFileContent, spec);
+    if (next == null) {
+      addToast({ type: "error", message: `Could not add ${label} — invalid YAML or duplicate name.` });
+      return;
+    }
+    s.updateContent(next);
+    addToast({ type: "success", message: `Added ${label} “${clean}”.` });
+  }, [addToast]);
+
+  const handleDeleteEntity = React.useCallback((entityName) => {
+    if (!entityName) return;
+    const s = useWorkspaceStore.getState();
+    if (!s.activeFile) return;
+    if (!window.confirm(`Delete entity “${entityName}”? This removes all fields and any relationships referencing it.`)) return;
+    const next = deleteEntity(s.activeFileContent, entityName);
+    if (next == null) { addToast({ type: "error", message: "Could not delete — invalid YAML." }); return; }
+    s.updateContent(next);
+    setSelected(null);
+    addToast({ type: "success", message: `Deleted “${entityName}”.` });
+  }, [addToast]);
+
+  /* ── ELK auto-layout (palette action) ──────────────────────────── */
+  const handleAutoLayout = React.useCallback(async () => {
+    if (!tables.length) return;
+    try {
+      const mod = await import("../lib/elkLayout");
+      const rfNodes = tables.map((t) => ({
+        id: t.id,
+        type: "entityNode",
+        position: { x: t.x || 0, y: t.y || 0 },
+        data: { fields: t.columns, subject_area: t.subject || t.cat },
+      }));
+      const rfEdges = (schema.relationships || []).map((r, i) => ({
+        id: `e-${i}`,
+        source: r.from?.table, target: r.to?.table,
+      })).filter((e) => e.source && e.target);
+      const { nodes: laid } = await mod.layoutWithElk(rfNodes, rfEdges, { density: "normal", groupBySubjectArea: false });
+      const pos = new Map(laid.map((n) => [n.id, n.position]));
+      setTables((prev) => prev.map((t) => {
+        const p = pos.get(t.id);
+        return p ? { ...t, x: Math.round(p.x), y: Math.round(p.y) } : t;
+      }));
+      addToast({ type: "success", message: "Auto-layout applied." });
+    } catch (err) {
+      addToast({ type: "error", message: `Auto-layout failed: ${err.message || err}` });
+    }
+  }, [tables, schema.relationships, addToast]);
+
   const activeBottomTabs = React.useMemo(
     () => ALL_BOTTOM_TABS.filter((t) => !t.adminOnly || (canEdit && canEdit())),
     [canEdit]
@@ -431,6 +536,7 @@ export default function Shell() {
         schemas={schemaList}
         connectionLabel={isDemo ? "prod-analytics-01" : (activeFile?.name || activeProjectId || "workspace")}
         connectionDsn={isDemo ? "postgres://…5432/subscriptions" : `datalex://${activeProjectId || "local"}`}
+        onAddEntity={handleAddEntity}
       />
 
       <Canvas
@@ -453,6 +559,7 @@ export default function Shell() {
           tables={tables}
           selectedCol={selectedCol}
           setSelectedCol={setSelectedCol}
+          onDeleteEntity={handleDeleteEntity}
         />
       )}
 
@@ -495,27 +602,46 @@ export default function Shell() {
         connectionState={isDemo ? "Demo mode" : "Connected"}
       />
 
-      {/* Luna-style palette (visual) + legacy palette (full actions, ⌘K) */}
+      {/* Luna-style palette with real handlers for built-in actions. Extra
+          actions (viewer welcome, git branch, …) are appended via
+          extraCommands. The older LegacyCommandPalette remains available as
+          a fallback if a user opts into it via a future setting. */}
       <CommandPalette
-        open={false}
-        onClose={() => {}}
+        open={commandPaletteOpen}
+        onClose={() => setCommandPaletteOpen(false)}
         tables={tables}
-        onSelectTable={(id) => handleSelect({ type: "table", id })}
+        onSelectTable={(id) => { handleSelect({ type: "table", id }); setCommandPaletteOpen(false); }}
+        handlers={{
+          newTable:        () => handleNewTable(),
+          newRelationship: () => addToast({ type: "info", message: "New relationship — use the YAML tab." }),
+          autoLayout:      () => handleAutoLayout(),
+          exportSql:       () => openModal("exportDdl"),
+          cycleTheme:      () => cycleTheme(),
+        }}
+        extraCommands={[
+          { id: "welcome",    section: "Help",    label: "Show Viewer welcome",    meta: "",    icon: <span style={{ fontSize: 12 }}>👋</span>, run: () => openModal("welcome") },
+          { id: "git-branch", section: "Git",     label: "Switch / create branch", meta: "",    icon: <span style={{ fontSize: 12 }}>⎇</span>,  run: () => activeProjectId && openModal("gitBranch") },
+          { id: "commit",     section: "Git",     label: "Commit changes…",        meta: "",    icon: <span style={{ fontSize: 12 }}>✓</span>,  run: () => openModal("commit") },
+          { id: "settings",   section: "Actions", label: "Settings…",              meta: "",    icon: <span style={{ fontSize: 12 }}>⚙</span>,  run: () => openModal("settings") },
+          { id: "connect",    section: "Actions", label: "Manage connections…",    meta: "",    icon: <span style={{ fontSize: 12 }}>⛁</span>,  run: () => openModal("connectionsManager") },
+          { id: "import",     section: "Actions", label: "Import schema…",         meta: "",    icon: <span style={{ fontSize: 12 }}>⇩</span>,  run: () => openModal("importDialog") },
+        ]}
       />
 
-      {commandPaletteOpen && <LegacyCommandPalette />}
-
-      {/* Modals */}
-      {activeModal === "addProject"         && <AddProjectModal />}
-      {activeModal === "editProject"        && <EditProjectModal />}
-      {activeModal === "newFile"            && <NewFileModal />}
-      {activeModal === "settings"           && <SettingsDialog />}
-      {activeModal === "connectionsManager" && <ConnectionsManager />}
-      {activeModal === "commit"             && <CommitDialog />}
-      {activeModal === "exportDdl"          && <ExportDdlDialog />}
-      {activeModal === "importDialog"       && <PanelDialog kind="import" />}
-      {activeModal === "searchDialog"       && <PanelDialog kind="search" />}
-      {activeModal === "gitBranch"          && <GitBranchDialog />}
+      {/* Modals (lazy-loaded where heavy) */}
+      <React.Suspense fallback={null}>
+        {activeModal === "addProject"         && <AddProjectModal />}
+        {activeModal === "editProject"        && <EditProjectModal />}
+        {activeModal === "newFile"            && <NewFileModal />}
+        {activeModal === "settings"           && <SettingsDialog />}
+        {activeModal === "connectionsManager" && <ConnectionsManager />}
+        {activeModal === "commit"             && <CommitDialog />}
+        {activeModal === "exportDdl"          && <ExportDdlDialog />}
+        {activeModal === "importDialog"       && <PanelDialog kind="import" />}
+        {activeModal === "searchDialog"       && <PanelDialog kind="search" />}
+        {activeModal === "gitBranch"          && <GitBranchDialog />}
+        {activeModal === "welcome"            && <WelcomeModal onClose={closeModal} />}
+      </React.Suspense>
 
       {showShortcuts && <KeyboardShortcutsPanel onClose={() => setShowShortcuts(false)} />}
 
