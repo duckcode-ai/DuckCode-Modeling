@@ -16,6 +16,9 @@ packages/web-app/dist/
 .dm-connections.json
 .dm-projects.json
 
+# Auto-written CLI shim (datalex serve writes this to REPO_ROOT — host-specific shebang)
+/dm
+
 # Agent/editor local config
 .claude/
 .vscode/

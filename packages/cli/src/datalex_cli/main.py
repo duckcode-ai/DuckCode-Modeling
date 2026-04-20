@@ -1397,9 +1397,36 @@ def cmd_serve(args: argparse.Namespace) -> int:
         if repo_root is not None:
             candidates.append(repo_root / "packages" / "web-app" / "dist")
         for candidate in candidates:
-            if candidate and candidate.exists():
+            if candidate and candidate.exists() and (candidate / "index.html").exists():
                 web_dist = str(candidate)
                 break
+
+    # If we're running from a source checkout and the web bundle hasn't been
+    # built yet, try to build it on-the-fly so the user doesn't have to know
+    # about `npm run build`. Skipped in wheel installs (no source tree).
+    if not web_dist and repo_root is not None:
+        webapp_src = repo_root / "packages" / "web-app"
+        if (webapp_src / "package.json").exists():
+            import shutil as _shutil
+            npm = _shutil.which("npm")
+            if npm:
+                print("[datalex] Web bundle not found — building once with `npm run build`...")
+                try:
+                    if not (webapp_src / "node_modules").exists():
+                        print("[datalex]   installing web-app dependencies (first-time, ~1 min)...")
+                        subprocess.run([npm, "install", "--silent"], cwd=str(webapp_src), check=True)
+                    subprocess.run([npm, "run", "build", "--silent"], cwd=str(webapp_src), check=True)
+                    built = webapp_src / "dist"
+                    if (built / "index.html").exists():
+                        web_dist = str(built)
+                        print("[datalex]   build complete.")
+                except Exception as err:
+                    print(f"[datalex]   auto-build failed: {err}")
+                    print("[datalex]   run `cd packages/web-app && npm install && npm run build` manually.")
+            else:
+                print("[datalex] Web bundle missing and `npm` not found on PATH.")
+                print("[datalex]   install Node 20+ (https://nodejs.org) and re-run, or")
+                print("[datalex]   build manually: `cd packages/web-app && npm install && npm run build`")
 
     # Node resolution: prefer system node, fall back to `nodejs-bin` if it
     # was installed as an optional dep.
@@ -1460,6 +1487,46 @@ def cmd_serve(args: argparse.Namespace) -> int:
             # Read-only project dir is fine: we'll hit API errors for
             # subprocess-backed routes but the UI still loads.
             print(f"[datalex] Note: could not write CLI shim at {dm_shim}: {err}")
+
+    # Auto-register the --project-dir folder as a DataLex project so the UI
+    # opens directly into it instead of the "model-examples" default. We only
+    # write .dm-projects.json if it doesn't already exist — if the user ran
+    # `datalex serve` here before, we keep their previous state.
+    import json as _json
+    import time as _time
+    projects_file = Path(project_dir) / ".dm-projects.json"
+    if not projects_file.exists():
+        try:
+            default_name = Path(project_dir).name or "project"
+            initial = [
+                {
+                    "id": f"proj_{int(_time.time() * 1000)}",
+                    "name": default_name,
+                    "path": str(Path(project_dir).resolve()),
+                }
+            ]
+            projects_file.write_text(_json.dumps(initial, indent=2))
+            print(f"[datalex]   registered project: {default_name} → {project_dir}")
+        except Exception as err:
+            print(f"[datalex]   note: couldn't auto-register project: {err}")
+
+    # Detect an existing server on this port and surface a helpful message
+    # rather than letting Node silently fail with EADDRINUSE.
+    try:
+        import socket as _socket
+        with _socket.socket(_socket.AF_INET, _socket.SOCK_STREAM) as _s:
+            _s.settimeout(0.2)
+            if _s.connect_ex(("127.0.0.1", port)) == 0:
+                print(
+                    f"[datalex] ERROR: port {port} is already in use.\n"
+                    f"[datalex]   another `datalex serve` is probably still running.\n"
+                    f"[datalex]   stop it with:  lsof -ti:{port} | xargs kill\n"
+                    f"[datalex]   or start on a different port: datalex serve --port {port + 1}",
+                    file=sys.stderr,
+                )
+                return 1
+    except Exception:
+        pass  # non-fatal — worst case Node will report EADDRINUSE itself
 
     url = f"http://localhost:{port}"
     print(f"[datalex] Starting DataLex server on {url}")

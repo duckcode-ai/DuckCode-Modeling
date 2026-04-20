@@ -7,6 +7,30 @@ from `v0.1.0` onward.
 
 ## [Unreleased]
 
+### Fixed
+
+- `datalex serve --project-dir <dir>` now auto-registers that directory as
+  the active DataLex project by writing `.dm-projects.json` on first launch.
+  Previously the UI fell back to the hardcoded `model-examples` default and
+  new users had to manually click through Import before anything worked.
+- Port-conflict detection: if another `datalex serve` is already on the
+  target port, we print the kill command instead of letting Node fail
+  silently with EADDRINUSE.
+- Web bundle auto-build: running `datalex serve` from a source checkout
+  where `packages/web-app/dist/` hasn't been built yet now runs
+  `npm install && npm run build` automatically (one-time), provided `npm`
+  is on PATH.
+- Api-server subprocess calls (`/api/dbt/import`, `/api/connections/*`,
+  `/api/pull`, etc.) now use the same Python interpreter that ran
+  `datalex serve` via a new `DM_PYTHON` env var, fixing
+  `ModuleNotFoundError: No module named 'datalex_cli'` on machines where
+  PATH `python3` differs from the one that has the package installed.
+- Edit-in-place mode for local dbt imports: `POST /api/dbt/import` now
+  accepts `editInPlace: true` to register the dbt folder as a DataLex
+  project so `Save All` writes back to the original `.yml` paths rather
+  than to a disposable tmpdir.
+- Removed the login page. DataLex is open source — there is no auth gate.
+
 ## [0.2.0] — 2026-04-20
 
 **Backend integration for the dbt workflow.** Five PRs land together —
