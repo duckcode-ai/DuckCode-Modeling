@@ -1,6 +1,11 @@
 PyYAML>=6.0
 jsonschema>=4.0
 
+# Optional — bundled Node.js runtime so `datalex serve` works without the
+# user installing Node separately. If `node` is already on PATH we use
+# that instead; this is only a fallback.
+# pip install "nodejs-bin>=20,<21"
+
 # Optional database connector drivers (install as needed):
 # pip install psycopg2-binary          # PostgreSQL
 # pip install mysql-connector-python   # MySQL

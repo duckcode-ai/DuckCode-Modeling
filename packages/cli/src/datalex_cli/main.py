@@ -1324,6 +1324,183 @@ def cmd_import_dbt(args: argparse.Namespace) -> int:
     return 1 if has_errors(issues) else 0
 
 
+def cmd_serve(args: argparse.Namespace) -> int:
+    """Start the bundled DataLex server.
+
+    The server is the Node/Express api-server that also serves the built
+    web-app as static files, so we only ever bind ONE port. This removes
+    the old two-terminal / CORS-preflight setup and makes `pip install
+    datalex-cli && datalex serve` the smallest possible onboarding
+    path.
+
+    Resolution order for the api-server entry point:
+      1. `DM_SERVER_JS` env var (for integration tests and dev workflows)
+      2. A wheel-bundled copy under `datalex_core/_server/index.js`
+         (installed via package-data when the wheel was built)
+      3. The repo-local path `packages/api-server/index.js` (for folks
+         running from a `pip install -e .` clone)
+
+    Resolution order for the web dist:
+      1. `WEB_DIST` env var
+      2. Wheel-bundled `datalex_core/_webapp/`
+      3. Repo-local `packages/web-app/dist/`
+
+    If `node` isn't on PATH, we print a focused error rather than a
+    stack trace — the user just needs to install Node 20+.
+    """
+    import shutil
+    import signal
+    import subprocess
+    import webbrowser
+
+    try:
+        import datalex_core  # noqa: F401
+        core_pkg_path = Path(datalex_core.__file__).resolve().parent
+    except Exception:
+        core_pkg_path = None
+
+    # Repo-root heuristic: walk up from this file until we find packages/.
+    here = Path(__file__).resolve()
+    repo_root = None
+    for parent in here.parents:
+        if (parent / "packages" / "api-server" / "index.js").exists():
+            repo_root = parent
+            break
+
+    # Locate the server entry point.
+    server_js = os.environ.get("DM_SERVER_JS") or None
+    if not server_js:
+        candidates = []
+        if core_pkg_path is not None:
+            candidates.append(core_pkg_path / "_server" / "index.js")
+        if repo_root is not None:
+            candidates.append(repo_root / "packages" / "api-server" / "index.js")
+        for candidate in candidates:
+            if candidate and candidate.exists():
+                server_js = str(candidate)
+                break
+    if not server_js or not Path(server_js).exists():
+        print(
+            "ERROR: DataLex server bundle not found.\n"
+            "Set DM_SERVER_JS=/path/to/packages/api-server/index.js, or "
+            "install a wheel that ships _server/index.js.",
+            file=sys.stderr,
+        )
+        return 1
+
+    # Locate the web dist (optional — api routes still work without it).
+    web_dist = os.environ.get("WEB_DIST") or None
+    if not web_dist:
+        candidates = []
+        if core_pkg_path is not None:
+            candidates.append(core_pkg_path / "_webapp")
+        if repo_root is not None:
+            candidates.append(repo_root / "packages" / "web-app" / "dist")
+        for candidate in candidates:
+            if candidate and candidate.exists():
+                web_dist = str(candidate)
+                break
+
+    # Node resolution: prefer system node, fall back to `nodejs-bin` if it
+    # was installed as an optional dep.
+    node_bin = shutil.which("node")
+    if node_bin is None:
+        try:
+            from nodejs_bin import node as nodejs_bin_node  # type: ignore
+
+            node_bin = str(getattr(nodejs_bin_node, "path", "")) or None
+        except Exception:
+            node_bin = None
+    if not node_bin:
+        print(
+            "ERROR: `node` was not found on PATH.\n"
+            "Install Node 20+ (https://nodejs.org) or `pip install nodejs-bin` "
+            "and re-run `datalex serve`.",
+            file=sys.stderr,
+        )
+        return 1
+
+    port = int(getattr(args, "port", 3030) or 3030)
+    env = os.environ.copy()
+    env["PORT"] = str(port)
+    if web_dist:
+        env["WEB_DIST"] = web_dist
+    # Let the api-server know where to put default project metadata
+    # when running in "installed" mode. If the user passed --project-dir
+    # we use it; otherwise, default to the current working directory so
+    # `.dm-projects.json` lives next to their data.
+    project_dir = getattr(args, "project_dir", None) or os.getcwd()
+    env["REPO_ROOT"] = project_dir
+
+    # The api-server resolves the CLI script via `join(REPO_ROOT, "dm")`
+    # in ~20 call sites. In a repo clone that file exists; in a pip
+    # install it doesn't. Writing a small shim next to REPO_ROOT lets
+    # every existing callsite keep working without touching the
+    # api-server source. If the shim path is already present (dev
+    # clone), we leave it alone.
+    dm_shim = Path(project_dir) / "dm"
+    if not dm_shim.exists():
+        try:
+            dm_shim.write_text(
+                "#!{py}\n"
+                "import sys\n"
+                "from datalex_cli.main import main\n"
+                "raise SystemExit(main())\n".format(py=sys.executable)
+            )
+            try:
+                dm_shim.chmod(0o755)
+            except Exception:
+                pass
+        except Exception as err:
+            # Read-only project dir is fine: we'll hit API errors for
+            # subprocess-backed routes but the UI still loads.
+            print(f"[datalex] Note: could not write CLI shim at {dm_shim}: {err}")
+
+    url = f"http://localhost:{port}"
+    print(f"[datalex] Starting DataLex server on {url}")
+    print(f"[datalex]   server:   {server_js}")
+    print(f"[datalex]   web dist: {web_dist or '(none — API only)'}")
+    print(f"[datalex]   project:  {project_dir}")
+
+    proc = subprocess.Popen([node_bin, server_js], env=env, cwd=project_dir)
+
+    # Open the browser after a short delay to let the server bind.
+    if not getattr(args, "no_browser", False):
+        def _open_when_ready() -> None:
+            import threading
+            import time as _time
+
+            def _run():
+                _time.sleep(1.2)
+                try:
+                    webbrowser.open(url)
+                except Exception:
+                    pass
+            threading.Thread(target=_run, daemon=True).start()
+
+        _open_when_ready()
+
+    # Forward SIGINT/SIGTERM to the child so Ctrl+C is clean.
+    def _shutdown(signum, _frame):
+        try:
+            proc.send_signal(signum)
+        except Exception:
+            pass
+
+    signal.signal(signal.SIGINT, _shutdown)
+    if hasattr(signal, "SIGTERM"):
+        signal.signal(signal.SIGTERM, _shutdown)
+
+    try:
+        return proc.wait()
+    except KeyboardInterrupt:
+        try:
+            proc.terminate()
+        except Exception:
+            pass
+        return 130
+
+
 def cmd_dbt_sync(args: argparse.Namespace) -> int:
     """Merge DataLex model metadata into an existing dbt schema.yml (non-destructive)."""
     model = load_yaml_model(args.model)
@@ -1496,13 +1673,135 @@ def cmd_pull(args: argparse.Namespace) -> int:
         for w in result.warnings:
             print(f"  [WARN] {w}")
 
-    if output_path_or_error:
-        _write_yaml(output_path_or_error, result.model)
-        print(f"\nWrote model: {output_path_or_error}")
-    else:
-        print("\n" + yaml.safe_dump(result.model, sort_keys=False))
+    # Per-entity progress lines — consumed by the API server's SSE pull
+    # stream so the UI can render row-by-row feedback. Safe for human
+    # readers too: each line is self-contained and not intermixed with
+    # other output ordering.
+    _emit_pull_progress_lines(result, config)
+
+    # If the user pointed us at a dbt project and didn't explicitly opt out,
+    # fan the single-YAML output into the dbt folder convention:
+    #   <project>/sources/<db>__<schema>.yaml
+    #   <project>/models/staging/stg_<schema>__<table>.yml
+    # Falls back silently to the flat single-file layout on error or when
+    # `dbt_project.yml` isn't present.
+    dbt_layout_used = False
+    if getattr(args, "dbt_layout", True):
+        project_dir_raw = getattr(args, "project_dir", "") or ""
+        if project_dir_raw:
+            project_dir = Path(project_dir_raw).expanduser()
+            if (project_dir / "dbt_project.yml").exists():
+                try:
+                    written = _write_dbt_aware_layout(project_dir, result.model, config)
+                    if written:
+                        dbt_layout_used = True
+                        for p in written:
+                            print(f"[pull] wrote {p}")
+                except Exception as exc:  # noqa: BLE001
+                    print(f"[pull] dbt layout write failed, falling back: {exc}", file=sys.stderr)
+
+    if not dbt_layout_used:
+        if output_path_or_error:
+            _write_yaml(output_path_or_error, result.model)
+            print(f"\nWrote model: {output_path_or_error}")
+        else:
+            print("\n" + yaml.safe_dump(result.model, sort_keys=False))
 
     return 0
+
+
+def _emit_pull_progress_lines(result: "ConnectorResult", config: "ConnectorConfig") -> None:
+    """Emit one `[pull] <schema>.<table>: <n> rows` line per imported entity.
+
+    The connector may or may not populate `row_count` on each entity. When
+    absent we emit `unknown` so the SSE stream still gets a per-table beat.
+    """
+    schema_label = config.schema or config.dataset or "default"
+    entities = (result.model or {}).get("entities") or []
+    for ent in entities:
+        name = str(ent.get("name") or "").strip() or "<unknown>"
+        row_count = ent.get("row_count")
+        if row_count is None:
+            # Some connectors tuck counts under `meta` or similar — best-effort fallback.
+            meta = ent.get("meta") or {}
+            row_count = meta.get("row_count") if isinstance(meta, dict) else None
+        row_label = f"{row_count} rows" if isinstance(row_count, (int, float)) else "unknown rows"
+        print(f"[pull] {schema_label}.{name}: {row_label}")
+
+
+def _write_dbt_aware_layout(
+    project_dir: Path,
+    model: Dict[str, Any],
+    config: "ConnectorConfig",
+) -> List[str]:
+    """Split a pulled model into dbt-convention folders.
+
+    Returns the list of (relative) paths written. Does NOT remove the
+    existing `models/<model>.yaml` output — callers decide whether to still
+    emit that. We return an empty list if there's nothing to write so the
+    caller can fall back to the flat layout.
+    """
+    entities = (model or {}).get("entities") or []
+    if not entities:
+        return []
+
+    db = _sanitize_model_file_stem(config.database or config.project or "db", "db")
+    schema = _sanitize_model_file_stem(config.schema or config.dataset or "public", "public")
+
+    # 1. sources/<db>__<schema>.yaml — dbt v2 source spec listing every table.
+    sources_path = project_dir / "sources" / f"{db}__{schema}.yaml"
+    source_block = {
+        "version": 2,
+        "sources": [
+            {
+                "name": schema,
+                "database": config.database or config.project or None,
+                "schema": schema,
+                "tables": [
+                    {"name": str(ent.get("name") or "").strip() or "unnamed"}
+                    for ent in entities
+                ],
+            }
+        ],
+    }
+    sources_path.parent.mkdir(parents=True, exist_ok=True)
+    _write_yaml(str(sources_path), source_block)
+
+    written = [str(sources_path.relative_to(project_dir))]
+
+    # 2. models/staging/stg_<schema>__<table>.yml — one stub per entity so
+    #    dbt discovers them and DataLex keeps a per-table model file.
+    staging_dir = project_dir / "models" / "staging"
+    staging_dir.mkdir(parents=True, exist_ok=True)
+    for ent in entities:
+        table_name = str(ent.get("name") or "").strip()
+        if not table_name:
+            continue
+        stem = _sanitize_model_file_stem(table_name, "unnamed")
+        stub_path = staging_dir / f"stg_{schema}__{stem}.yml"
+        stub_block = {
+            "version": 2,
+            "models": [
+                {
+                    "name": f"stg_{schema}__{stem}",
+                    "description": ent.get("description")
+                    or f"Staging model for source {schema}.{table_name}.",
+                    "columns": [
+                        {
+                            "name": f.get("name"),
+                            "description": f.get("description") or "",
+                            "data_type": f.get("type") or "",
+                        }
+                        for f in (ent.get("fields") or [])
+                        if f.get("name")
+                    ],
+                }
+            ],
+        }
+        _write_yaml(str(stub_path), stub_block)
+        written.append(str(stub_path.relative_to(project_dir)))
+
+    return written
 
 
 def cmd_connectors(args: argparse.Namespace) -> int:
@@ -2508,6 +2807,28 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="datalex", description="DataLex CLI")
     sub = parser.add_subparsers(dest="command", required=True)
 
+    # `datalex serve` — start the bundled api-server + web-app on a
+    # single port. Registered first because it's the single most
+    # important command for new users (pip install → serve → browse).
+    serve_parser = sub.add_parser(
+        "serve",
+        help="Start the DataLex web UI + API server on a single port",
+    )
+    serve_parser.add_argument(
+        "--port", type=int, default=3030,
+        help="Port to bind (default: 3030)",
+    )
+    serve_parser.add_argument(
+        "--no-browser", action="store_true",
+        help="Don't auto-open the browser on start",
+    )
+    serve_parser.add_argument(
+        "--project-dir", default=None,
+        help="Project root directory (where .dm-projects.json lives). "
+             "Defaults to the current working directory.",
+    )
+    serve_parser.set_defaults(func=cmd_serve)
+
     init_parser = sub.add_parser("init", help="Initialize a new workspace")
     init_parser.add_argument("--path", default=".", help="Workspace path")
     init_parser.add_argument(
@@ -2770,6 +3091,19 @@ def build_parser() -> argparse.ArgumentParser:
         help="Create --project-dir if missing (otherwise prompt in interactive mode)",
     )
     pull_parser.add_argument("--test", action="store_true", help="Test connection only, do not pull schema")
+    pull_parser.add_argument(
+        "--dbt-layout",
+        dest="dbt_layout",
+        action="store_true",
+        default=True,
+        help="When --project-dir contains dbt_project.yml, write sources/ + models/staging/ layout (default on).",
+    )
+    pull_parser.add_argument(
+        "--no-dbt-layout",
+        dest="dbt_layout",
+        action="store_false",
+        help="Opt out of dbt folder convention even when dbt_project.yml is present.",
+    )
     pull_parser.set_defaults(func=cmd_pull)
 
     connectors_parser = sub.add_parser("connectors", help="List available database connectors and driver status")

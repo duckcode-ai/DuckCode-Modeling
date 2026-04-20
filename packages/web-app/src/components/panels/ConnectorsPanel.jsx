@@ -28,6 +28,7 @@ import {
 import useWorkspaceStore from "../../stores/workspaceStore";
 import useUiStore from "../../stores/uiStore";
 import ConnectorLogo from "../icons/ConnectorLogo";
+import WarehouseTablePickerDialog from "../dialogs/WarehouseTablePickerDialog";
 
 const API = "http://localhost:3001";
 
@@ -352,6 +353,16 @@ export default function ConnectorsPanel() {
 
   // Step 1: connection test
   const [connected, setConnected] = useState(false);
+  // PR D: test-detail pill shown under the Test button (pingMs + server
+  // version come from /api/connectors/test). Cleared on reset.
+  const [testDetail, setTestDetail] = useState(null);
+  // PR D: live SSE log lines for streaming pulls. Rendered as a log pane
+  // on the schemas step. Each entry is { type: "progress"|"warn"|"error"|"info", text }.
+  const [pullLogLines, setPullLogLines] = useState([]);
+  const [streamingPull, setStreamingPull] = useState(false);
+  // PR D: the granular table picker dialog. When open, the user picks
+  // exact tables per schema before the pull kicks off.
+  const [showPicker, setShowPicker] = useState(false);
 
   // Step 2: schemas (multi-select)
   const [schemas, setSchemas] = useState([]);
@@ -455,6 +466,10 @@ export default function ConnectorsPanel() {
   const resetWizard = () => {
     setStep(0);
     setConnected(false);
+    setTestDetail(null);
+    setPullLogLines([]);
+    setStreamingPull(false);
+    setShowPicker(false);
     setTargetProjectId("");
     setSchemas([]);
     setSelectedSchemas(new Set());
@@ -542,11 +557,14 @@ export default function ConnectorsPanel() {
     setFormValues((prev) => ({ ...prev, [key]: value }));
     if (connected) { setConnected(false); setStep(0); }
     setError(null);
+    // Any credential change invalidates the last successful Test result.
+    if (testDetail) setTestDetail(null);
   };
 
   // Step 1: Test connection
   const handleTestConnection = async () => {
     setError(null);
+    setTestDetail(null);
     setLoading(true);
     try {
       const data = await apiPost("/api/connectors/test", {
@@ -558,6 +576,14 @@ export default function ConnectorsPanel() {
         if (data.connectionId) setActiveConnectionId(data.connectionId);
         await refreshSavedConnections();
         setConnected(true);
+        // Capture the test-detail pill so the user sees their ping time
+        // and backing server version. Both fields are optional — older
+        // api-servers and connectors that can't emit a version return
+        // null and we fall back gracefully.
+        setTestDetail({
+          pingMs: typeof data.pingMs === "number" ? data.pingMs : null,
+          serverVersion: data.serverVersion || null,
+        });
         // Auto-advance: fetch schemas
         setStep(1);
         await fetchSchemas();
@@ -792,6 +818,130 @@ export default function ConnectorsPanel() {
     } finally {
       setLoading(false);
       setPullProgress(null);
+    }
+  };
+
+  // PR D: streaming pull. Opens a `fetch`+ReadableStream-backed SSE
+  // connection to the api-server's `/api/connectors/pull/stream` route
+  // and appends each `[pull] …` progress line to the log pane in real
+  // time. Intended for single-schema pulls (the subprocess is invoked
+  // once per stream). Multi-schema streaming would chain one stream per
+  // schema; out of scope here — the multi path still uses pull-multi.
+  const appendLog = (type, text) => {
+    setPullLogLines((prev) => {
+      const next = [...prev, { type, text, ts: Date.now() }];
+      // Keep the last 300 lines so a very chatty pull doesn't blow up
+      // React's diff cost.
+      return next.length > 300 ? next.slice(next.length - 300) : next;
+    });
+  };
+
+  const runStreamingPull = async ({ schemaName, tableList }) => {
+    const targetProject = (projects || []).find((p) => p.id === targetProjectId);
+    const targetPath = targetProject?.path || "";
+    if (!targetProjectId || !targetPath) {
+      setError("Select a target project folder before pulling metadata.");
+      return;
+    }
+    setError(null);
+    setStreamingPull(true);
+    setPullLogLines([]);
+    appendLog("info", `Starting stream for ${schemaName} (${tableList.length} tables)…`);
+
+    try {
+      const body = {
+        connector: selectedConnector,
+        connection_id: activeConnectionId,
+        project_id: targetProjectId,
+        project_path: targetPath,
+        project_dir: targetPath,
+        dbt_layout: true,
+        ...formValues,
+        db_schema: schemaName,
+        model_name: schemaName,
+        tables: tableList,
+      };
+      if (selectedConnector === "bigquery") body.dataset = schemaName;
+
+      const resp = await fetch(`${API}/api/connectors/pull/stream`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      if (!resp.ok || !resp.body) {
+        throw new Error(`Stream failed: HTTP ${resp.status}`);
+      }
+
+      const reader = resp.body.getReader();
+      const decoder = new TextDecoder();
+      let buf = "";
+      // Parse SSE frames: `event: X\ndata: Y\n\n`.
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        buf += decoder.decode(value, { stream: true });
+        let sep;
+        while ((sep = buf.indexOf("\n\n")) !== -1) {
+          const frame = buf.slice(0, sep);
+          buf = buf.slice(sep + 2);
+          if (!frame.trim() || frame.startsWith(":")) continue; // comment / heartbeat
+          let event = "message";
+          let dataRaw = "";
+          for (const rawLine of frame.split(/\r?\n/)) {
+            if (rawLine.startsWith("event:")) event = rawLine.slice(6).trim();
+            else if (rawLine.startsWith("data:")) dataRaw += rawLine.slice(5).trim();
+          }
+          let data;
+          try { data = dataRaw ? JSON.parse(dataRaw) : null; } catch (_) { data = { line: dataRaw }; }
+          if (event === "progress") appendLog("progress", data?.line || "");
+          else if (event === "warn") appendLog("warn", data?.line || "");
+          else if (event === "error") {
+            appendLog("error", data?.message || "error");
+            setError(data?.message || "Pull stream failed");
+          } else if (event === "start") appendLog("info", `Subprocess started (pid ${data?.pid ?? "?"})`);
+          else if (event === "done") {
+            appendLog(data?.ok ? "info" : "error", data?.ok ? `Finished (exit ${data.code}).` : `Failed (exit ${data.code}).`);
+          }
+        }
+      }
+      await refreshSavedConnections();
+      addToast?.({ message: `Streaming pull of ${schemaName} finished. See log pane.`, type: "success" });
+    } catch (err) {
+      appendLog("error", err.message || String(err));
+      setError(err.message || String(err));
+    } finally {
+      setStreamingPull(false);
+    }
+  };
+
+  // PR D: picker callback. The picker hands back a plain-object map
+  // of {schema: tableNames[]}. For now we support two modes:
+  //   - Exactly one schema selected → kick off a streaming pull
+  //     (live log pane feels great for that scope).
+  //   - Multi-schema → merge into `schemaTableSelections` and let the
+  //     existing `handlePull` path run `/pull-multi` as before.
+  const handlePickerConfirm = ({ selections: picks }) => {
+    setShowPicker(false);
+    const entries = Object.entries(picks || {});
+    if (entries.length === 0) return;
+
+    // Push the picker's choices into the schemas multi-select + per-
+    // schema table selection state so the downstream pull button uses
+    // the exact subset.
+    const nextSchemas = new Set(entries.map(([s]) => s));
+    const nextTableSel = {};
+    for (const [schema, list] of entries) nextTableSel[schema] = new Set(list);
+    setSelectedSchemas(nextSchemas);
+    setSchemaTableSelections((prev) => ({ ...prev, ...nextTableSel }));
+
+    if (entries.length === 1) {
+      const [schemaName, tables] = entries[0];
+      runStreamingPull({ schemaName, tableList: tables });
+    } else {
+      addToast?.({
+        type: "info",
+        message: `Picked ${entries.length} schemas. Click Pull to import.`,
+      });
     }
   };
 
@@ -1682,6 +1832,29 @@ export default function ConnectorsPanel() {
                 <ChevronRight size={11} />
               </button>
             </div>
+            {/* PR D: Test-detail pill. Rendered immediately after a
+                successful Test so the user has confidence their round
+                trip is fast and they know which server version they're
+                talking to. */}
+            {testDetail && (
+              <div
+                className="flex items-center gap-2 mt-1 px-2.5 py-1 rounded-md border border-emerald-200 bg-emerald-50/70 text-[10px]"
+                title="Server probe result"
+              >
+                <CheckCircle2 size={11} className="text-emerald-600 shrink-0" />
+                <span className="text-emerald-900 font-semibold">Connected</span>
+                {typeof testDetail.pingMs === "number" && (
+                  <span className="text-emerald-800">
+                    ping <span className="font-mono font-semibold">{testDetail.pingMs}ms</span>
+                  </span>
+                )}
+                {testDetail.serverVersion && (
+                  <span className="text-emerald-800 truncate max-w-[380px]">
+                    · <span className="font-mono">{testDetail.serverVersion}</span>
+                  </span>
+                )}
+              </div>
+            )}
           </div>
         )}
 
@@ -2072,10 +2245,59 @@ export default function ConnectorsPanel() {
                     Pull {selectedSchemas.size} Schema{selectedSchemas.size !== 1 ? "s" : ""} as Separate Models
                     <ChevronRight size={11} />
                   </button>
+                  <button
+                    onClick={() => setShowPicker(true)}
+                    disabled={loading || schemas.length === 0}
+                    className="flex items-center gap-1.5 px-3 py-1.5 text-[11px] font-medium rounded-md border border-border-primary bg-bg-primary text-text-secondary hover:bg-bg-hover transition-colors disabled:opacity-50"
+                    title="Pick exact tables per schema (with inferred PKs + row counts)"
+                  >
+                    <Table2 size={11} /> Pick tables…
+                  </button>
                   <span className="text-[9px] text-text-muted">
                     Creates {selectedSchemas.size} .model.yaml file{selectedSchemas.size !== 1 ? "s" : ""}
                   </span>
                 </div>
+
+                {/* PR D: live SSE log pane. Rendered when a streaming
+                    pull has produced any log lines, or is in flight. */}
+                {(streamingPull || pullLogLines.length > 0) && (
+                  <div className="mt-2 rounded-md border border-border-primary/80 bg-[#0b1020] text-[11px] overflow-hidden">
+                    <div className="flex items-center justify-between px-2 py-1 border-b border-white/10 bg-black/30">
+                      <span className="flex items-center gap-1.5 text-[10px] text-emerald-200 font-semibold tracking-wide uppercase">
+                        {streamingPull ? <Loader2 size={10} className="animate-spin" /> : <CheckCircle2 size={10} />}
+                        Pull progress {streamingPull ? "(streaming)" : "(last run)"}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => setPullLogLines([])}
+                        className="text-[9px] text-slate-400 hover:text-slate-100"
+                        title="Clear log"
+                      >
+                        Clear
+                      </button>
+                    </div>
+                    <div
+                      className="px-2 py-1.5 font-mono text-[10.5px] max-h-44 overflow-y-auto"
+                      style={{ color: "#cbd5e1" }}
+                    >
+                      {pullLogLines.length === 0 && (
+                        <div className="text-slate-500">Waiting for subprocess…</div>
+                      )}
+                      {pullLogLines.map((ln, i) => {
+                        const color = ln.type === "error"
+                          ? "#fca5a5"
+                          : ln.type === "warn"
+                          ? "#fde68a"
+                          : ln.type === "info"
+                          ? "#93c5fd"
+                          : "#a7f3d0";
+                        return (
+                          <div key={i} style={{ color }}>{ln.text}</div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
               </>
             )}
           </div>
@@ -2627,6 +2849,21 @@ export default function ConnectorsPanel() {
         )}
         </div>{/* end max-w-3xl */}
       </div>
+
+      {/* PR D: granular warehouse table picker. Rendered as a portal
+          by the shared Modal component, so the backdrop sits above
+          everything else in the panel regardless of scroll position. */}
+      <WarehouseTablePickerDialog
+        open={showPicker}
+        connector={selectedConnector}
+        connectionParams={formValues}
+        schemas={schemas}
+        initialSelections={Object.fromEntries(
+          Object.entries(schemaTableSelections).map(([k, v]) => [k, [...(v || [])]])
+        )}
+        onCancel={() => setShowPicker(false)}
+        onConfirm={handlePickerConfirm}
+      />
     </div>
   );
 }

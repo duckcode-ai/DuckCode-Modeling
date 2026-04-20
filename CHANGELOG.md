@@ -7,6 +7,60 @@ from `v0.1.0` onward.
 
 ## [Unreleased]
 
+## [0.2.0] — 2026-04-20
+
+**Backend integration for the dbt workflow.** Five PRs land together —
+covering folder-preserving dbt import, a proper canvas modeling
+experience, a file/folder workspace, a live warehouse-pull UX, and a
+single-command install/serve flow.
+
+### Added
+
+- **`datalex serve` / `dm serve`** — starts the bundled Express API
+  server and web-app static bundle on one port (`--port`, default
+  `3030`). `pip install datalex-cli && datalex serve` is now the full
+  install path: no Node/Docker, no second terminal, no CORS. Falls back
+  to `nodejs-bin` when system `node` isn't present.
+- **Folder-preserving dbt import** (PR A) — `dm dbt sync` and the new
+  `POST /api/dbt/import` route write each model at its original
+  `models/staging/...` / `models/marts/...` path on disk. Explorer now
+  renders a recursive tree and a checked-in jaffle-shop fixture lights
+  up the full project offline in one click.
+- **Column lint** (`dbtLint.js`) surfaces missing `description`,
+  `data_type`, and test-less primary keys inline in the inspector and
+  aggregates in the Validation panel.
+- **Canvas modeling** (PR B) — drag from one column to another to open
+  a pre-filled relationship dialog, positions persist via a new
+  `display:` sub-map per entity, and the old decorative Undo/Redo
+  buttons now drive a real per-file history ring buffer (⌘Z / ⌘⇧Z).
+- **File/folder workspace CRUD** (PR C) — new api-server routes for
+  folders, rename, move, delete, and save-all; the Explorer gets a
+  right-click context menu and HTML5 drag-to-move. Every path is
+  resolved with a `..`/symlink guardrail.
+- **Live warehouse pull polish** (PR D) —
+  - `POST /api/connectors/test` returns `{ pingMs, serverVersion }`
+    and renders a pill under the Test button.
+  - `POST /api/connectors/pull/stream` streams per-table `[pull] …`
+    progress lines as SSE; the Connectors panel has a live log pane.
+  - `cmd_pull` can write dbt-shaped projects to
+    `sources/<db>__<schema>.yaml` + `models/staging/stg_…yml` when the
+    target is a dbt project (`--no-dbt-layout` to opt out).
+  - New `WarehouseTablePickerDialog` lets users pick exact tables per
+    schema with inferred primary keys + row counts, including a
+    one-click "Pick demo tables" shortcut for a Snowflake
+    `JAFFLE_SHOP` schema.
+
+### Changed
+
+- Version bumped to `0.2.0` across `pyproject.toml`,
+  `packages/web-app/package.json`, and `packages/api-server/package.json`.
+- Wheel now ships both the built web-app (`datalex_core/_webapp/`) and
+  the api-server entry point (`datalex_core/_server/`) as package
+  data, so `datalex serve` works from an installed wheel with zero
+  extra setup.
+- `CONNECTOR_FIELDS` / `CONNECTOR_META` unchanged — no credential
+  migrations required.
+
 ## [0.1.1] — 2026-04-18
 
 First PyPI release. `pip install datalex-cli` now works end-to-end.

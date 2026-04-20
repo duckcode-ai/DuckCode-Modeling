@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "datalex-cli"
-version = "0.1.1"
+version = "0.2.0"
 description = "Git-native data modeling for dbt users"
 readme = "README.md"
 requires-python = ">=3.9"
@@ -55,9 +55,19 @@ Issues = "https://github.com/duckcode-ai/DataLex/issues"
 
 [project.scripts]
 datalex = "datalex_cli.main:main"
+dm = "datalex_cli.main:main"
 
 [tool.setuptools.packages.find]
 where = ["packages/core_engine/src", "packages/cli/src"]
 
 [tool.setuptools.package-data]
-"datalex_core" = ["_schemas/**/*.json"]
+# `_server` and `_webapp` ship the Node api-server entry point and the
+# built web-app dist respectively. Both are populated by the release
+# workflow before `python -m build`, so source checkouts without a web
+# build still install — `datalex serve` then falls back to the
+# repo-local paths.
+"datalex_core" = [
+  "_schemas/**/*.json",
+  "_server/**/*",
+  "_webapp/**/*",
+]

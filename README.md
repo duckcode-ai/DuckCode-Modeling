@@ -30,7 +30,30 @@ with contracts, lineage, ERDs, and clean round-trip back to dbt.
   <img src="Assets/Overview.png" alt="DataLex Visual Studio — file tree, YAML editor, and React Flow ERD on the same entity" width="100%" />
 </p>
 
-## 60-second demo
+## Quickstart (recommended)
+
+```bash
+pip install datalex-cli        # installs the CLI, core engine, and bundled server
+datalex serve                  # opens http://localhost:3030 in your browser
+```
+
+From there, hit **Import dbt repo → Load jaffle-shop demo** to try the full
+flow offline. There is no Node install, no Docker, no second terminal —
+the Express api-server and the built web-app are both shipped inside
+the wheel.
+
+Need a different port or a specific project directory?
+
+```bash
+datalex serve --port 4040 --project-dir ~/my-dbt-project
+datalex serve --no-browser     # CI / headless
+```
+
+> **What if I don't have Node installed?** The bundled server is a Node
+> process. If `node` isn't on your PATH, install Node 20+ or run
+> `pip install "nodejs-bin>=20,<21"` and re-run `datalex serve`.
+
+## 60-second demo (offline, no warehouse)
 
 <p align="center">
   <img src="demo/demo.gif" alt="DataLex dbt sync demo — build a DuckDB warehouse, sync into DataLex YAML, emit back to dbt with contracts enforced" width="100%" />

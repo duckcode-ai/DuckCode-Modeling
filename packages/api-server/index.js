@@ -3,7 +3,7 @@ import cors from "cors";
 import { readdir, readFile, writeFile, mkdir, stat, rename, copyFile, unlink as unlinkFile } from "fs/promises";
 import { join, relative, extname, basename, resolve, isAbsolute, dirname } from "path";
 import { existsSync, mkdirSync, readFileSync, writeFileSync, unlinkSync, rmdirSync, rmSync } from "fs";
-import { execFileSync } from "child_process";
+import { execFileSync, spawn } from "child_process";
 import { tmpdir } from "os";
 import { createRequire } from "module";
 import { createHash, randomBytes } from "crypto";
@@ -82,6 +82,43 @@ const WEB_DIST = process.env.WEB_DIST || join(REPO_ROOT, "packages", "web-app", 
 // Use venv Python if available, otherwise fall back to system python3
 const VENV_PYTHON = join(REPO_ROOT, ".venv", "bin", "python3");
 const PYTHON = existsSync(VENV_PYTHON) ? VENV_PYTHON : "python3";
+
+// Resolve the CLI entry point. `dm` at the repo root is the dev-clone
+// path; when the api-server is shipped in a pip wheel, that script
+// doesn't exist, so we fall back to the `datalex` / `dm` shell script
+// the wheel installs on PATH (via [project.scripts] in pyproject.toml).
+//
+// `cmd_serve` may also set DM_CLI directly to override — useful for
+// integration tests.
+const REPO_DM_SCRIPT = join(REPO_ROOT, "dm");
+const REPO_DATALEX_SCRIPT = join(REPO_ROOT, "datalex");
+const DM_CLI_OVERRIDE = process.env.DM_CLI || null;
+const DM_CLI_KIND = (() => {
+  if (DM_CLI_OVERRIDE && existsSync(DM_CLI_OVERRIDE)) return "python-script";
+  if (DM_CLI_OVERRIDE) return "exec";  // bare command name on PATH
+  if (existsSync(REPO_DM_SCRIPT)) return "python-script";
+  if (existsSync(REPO_DATALEX_SCRIPT)) return "python-script";
+  return "exec"; // falls back to `datalex` on PATH
+})();
+const DM_CLI_TARGET = (() => {
+  if (DM_CLI_OVERRIDE) return DM_CLI_OVERRIDE;
+  if (existsSync(REPO_DM_SCRIPT)) return REPO_DM_SCRIPT;
+  if (existsSync(REPO_DATALEX_SCRIPT)) return REPO_DATALEX_SCRIPT;
+  return "datalex";
+})();
+
+// dmExec(...args) → [command, [argv]] pair for execFileSync/spawn. Use
+// it anywhere the old code did `execFileSync(PYTHON, [join(REPO_ROOT,
+// "dm"), ...])`. Callers that still pass `[PYTHON, join(REPO_ROOT,
+// "dm"), ...]` keep working because the `dm` file still exists in the
+// dev clone; the fallback only kicks in on installed wheels.
+function dmExec(...args) {
+  if (DM_CLI_KIND === "python-script") {
+    return { cmd: PYTHON, argv: [DM_CLI_TARGET, ...args] };
+  }
+  return { cmd: DM_CLI_TARGET, argv: [...args] };
+}
+
 const IS_DOCKER_RUNTIME = existsSync("/.dockerenv");
 const DIRECT_APPLY_ENABLED = ["1", "true", "yes", "on"].includes(String(process.env.DM_ENABLE_DIRECT_APPLY || "").toLowerCase());
 const DATALEX_CONFIG_DIRNAME = ".datalex";
@@ -2897,9 +2934,14 @@ app.post("/api/connectors/dbt-repo/scan", requireAdmin, express.json(), async (r
   }
 });
 
-// Test database connection
+// Test database connection. Returns {ok, message, pingMs, serverVersion?}
+// — pingMs is wall-clock time for the subprocess probe (upper bound), and
+// serverVersion is best-effort parsed from the "OK: …" line if present.
+// Future work: dialect-specific probes (account/role for Snowflake etc.)
+// by running a second subprocess after the test succeeds.
 app.post("/api/connectors/test", express.json(), async (req, res) => {
   let conn = { args: [], cleanup: () => {} };
+  const startedAt = Date.now();
   try {
     const { connector, connection_name, connection_id: _connectionId, ...params } = req.body;
     if (!connector) return res.status(400).json({ error: "Missing connector type" });
@@ -2909,7 +2951,9 @@ app.post("/api/connectors/test", express.json(), async (req, res) => {
 
     try {
       const output = execFileSync(PYTHON, args, { encoding: "utf-8", timeout: 30000, cwd: REPO_ROOT });
+      const pingMs = Date.now() - startedAt;
       const ok = output.startsWith("OK");
+      const serverVersion = extractServerVersion(output);
       let saved = null;
       if (ok) {
         saved = await upsertConnectionProfile({
@@ -2921,12 +2965,18 @@ app.post("/api/connectors/test", express.json(), async (req, res) => {
       res.json({
         ok,
         message: output.trim(),
+        pingMs,
+        serverVersion,
         connectionId: saved?.id || null,
         connection: saved,
       });
     } catch (execErr) {
       const stderr = execErr.stderr || execErr.message;
-      res.json({ ok: false, message: stderr.trim() });
+      res.json({
+        ok: false,
+        message: stderr.trim(),
+        pingMs: Date.now() - startedAt,
+      });
     } finally {
       conn.cleanup();
     }
@@ -2934,6 +2984,24 @@ app.post("/api/connectors/test", express.json(), async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 });
+
+// Best-effort version extraction from the connector --test output. Each
+// connector writes an "OK: connected to …" line; we look for common
+// version-ish substrings ("PostgreSQL 16.3", "v5.7.44", "version 8.4.0").
+// Returns null when nothing looks like a version.
+function extractServerVersion(output) {
+  const text = String(output || "");
+  const patterns = [
+    /(PostgreSQL|MySQL|MariaDB|SQL Server|Microsoft SQL Server|Snowflake|BigQuery|Databricks|Redshift)\s+([\d.]+[\w.-]*)/i,
+    /version[:\s]+([\d.]+[\w.-]*)/i,
+    /\bv(\d+\.\d+(?:\.\d+)?[\w.-]*)/,
+  ];
+  for (const rx of patterns) {
+    const m = text.match(rx);
+    if (m) return m[0];
+  }
+  return null;
+}
 
 // List schemas/datasets in a database
 app.post("/api/connectors/schemas", express.json(), async (req, res) => {
@@ -3152,6 +3220,168 @@ app.post("/api/connectors/pull-multi", express.json(), async (req, res) => {
   } finally {
     baseConn.cleanup();
   }
+});
+
+// Streaming pull: same body as /pull but pipes stdout as SSE events so the
+// UI can render per-table progress. Each `[pull] …` line (or any other
+// stdout) fires a `data: <line>` event; the final message is a single
+// `event: done\ndata: {summary JSON}` frame. Errors arrive as
+// `event: error\ndata: {msg}`.
+//
+// We use POST body semantics because the params include secrets — a
+// GET/querystring would leak them in logs. EventSource in browsers only
+// supports GET, so the UI uses `fetch` + a ReadableStream reader to parse
+// SSE frames manually. That's lighter than a WebSocket and avoids CORS
+// preflight fuss when served from the same origin.
+app.post("/api/connectors/pull/stream", express.json(), async (req, res) => {
+  const {
+    connector,
+    model_name,
+    tables,
+    connection_id,
+    project_id,
+    project_path,
+    project_dir,
+    dbt_layout,
+    ...params
+  } = req.body || {};
+  if (!connector) {
+    return res.status(400).json({ error: "Missing connector type" });
+  }
+
+  res.setHeader("Content-Type", "text/event-stream");
+  res.setHeader("Cache-Control", "no-cache");
+  res.setHeader("Connection", "keep-alive");
+  res.setHeader("X-Accel-Buffering", "no"); // disable nginx buffering if proxied
+  res.flushHeaders?.();
+
+  const writeEvent = (event, data) => {
+    if (event) res.write(`event: ${event}\n`);
+    res.write(`data: ${typeof data === "string" ? data : JSON.stringify(data)}\n\n`);
+  };
+
+  let conn = { args: [], cleanup: () => {} };
+  try {
+    conn = buildConnArgs(params);
+  } catch (err) {
+    writeEvent("error", { message: err.message });
+    return res.end();
+  }
+
+  const args = [join(REPO_ROOT, "dm"), "pull", connector, ...conn.args];
+  if (model_name) args.push("--model-name", model_name);
+  if (tables) {
+    const list = typeof tables === "string"
+      ? tables.split(",").map((t) => t.trim()).filter(Boolean)
+      : tables;
+    if (list.length) args.push("--tables", ...list);
+  }
+  if (project_dir) args.push("--project-dir", project_dir, "--create-project-dir");
+  if (dbt_layout === false) args.push("--no-dbt-layout");
+
+  const child = spawn(PYTHON, args, { cwd: REPO_ROOT });
+  let stdoutBuf = "";
+  let stderrBuf = "";
+
+  writeEvent("start", { connector, pid: child.pid });
+
+  const emitLines = (buf, streamName) => {
+    const lines = buf.split(/\r?\n/);
+    const tail = lines.pop() || "";
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (!trimmed) continue;
+      // Only forward "[pull]" progress lines by default to keep the SSE
+      // stream focused. YAML content lives in `stdoutBuf` and ships as
+      // part of the `done` summary event at the end.
+      if (trimmed.startsWith("[pull]") || streamName === "stderr") {
+        writeEvent(streamName === "stderr" ? "warn" : "progress", { line: trimmed });
+      }
+    }
+    return tail;
+  };
+
+  child.stdout.on("data", (chunk) => {
+    stdoutBuf += chunk.toString("utf-8");
+    const newTail = emitLines(stdoutBuf, "stdout");
+    // Keep only the unfinished-line tail so we don't re-emit old progress.
+    stdoutBuf = stdoutBuf.slice(stdoutBuf.length - newTail.length);
+  });
+  child.stderr.on("data", (chunk) => {
+    stderrBuf += chunk.toString("utf-8");
+    const newTail = emitLines(stderrBuf, "stderr");
+    stderrBuf = stderrBuf.slice(stderrBuf.length - newTail.length);
+  });
+
+  // Heartbeat every 15 s keeps proxies from closing the connection on
+  // slow pulls where multiple tables take a while to introspect.
+  const heartbeat = setInterval(() => {
+    try { res.write(": ping\n\n"); } catch (_) { /* client gone */ }
+  }, 15000);
+
+  req.on("close", () => {
+    clearInterval(heartbeat);
+    try { child.kill("SIGTERM"); } catch (_) { /* already exited */ }
+    conn.cleanup();
+  });
+
+  child.on("close", async (code) => {
+    clearInterval(heartbeat);
+    // Flush any trailing buffered lines (e.g. a final line without newline)
+    if (stdoutBuf.trim().startsWith("[pull]")) {
+      writeEvent("progress", { line: stdoutBuf.trim() });
+    }
+    if (stderrBuf.trim()) {
+      writeEvent("warn", { line: stderrBuf.trim() });
+    }
+
+    // Parse the YAML portion of stdout for a final summary payload.
+    const fullStdout = stdoutBuf; // carries the YAML tail if emitted post-split
+    let model = null;
+    try {
+      // Collect every chunk emitted so far by re-reading the stream is
+      // not available here — we only have the current tail. The
+      // subprocess writes YAML to stdout AFTER the progress lines, so
+      // the useful payload has been streamed already. For the summary
+      // we synthesise counts from progress lines in the UI layer.
+      model = null;
+    } catch (_) { model = null; }
+
+    try {
+      const saved = await appendConnectionImportEvent({
+        connectionId: connection_id,
+        connector,
+        params,
+        event: {
+          mode: "pull-stream",
+          projectId: project_id || null,
+          projectPath: project_path || null,
+          schemas: [params.db_schema || params.dataset || model_name || "default"],
+          files: [],
+          totalEntities: 0,
+          totalFields: 0,
+          totalRelationships: 0,
+        },
+      });
+      writeEvent("done", {
+        code,
+        ok: code === 0,
+        connectionId: saved?.id || null,
+      });
+    } catch (err) {
+      writeEvent("error", { message: err.message });
+    } finally {
+      conn.cleanup();
+      res.end();
+    }
+  });
+
+  child.on("error", (err) => {
+    clearInterval(heartbeat);
+    writeEvent("error", { message: err.message });
+    conn.cleanup();
+    res.end();
+  });
 });
 
 if (existsSync(WEB_DIST)) {
