@@ -1,0 +1,116 @@
+/* datalex-integration.css — small overrides that adapt the pristine Luna
+   prototype CSS to the wired-up DataLex shell (bottom drawer, dirty marker,
+   full-height auth gate, toast z-index). Load AFTER datalex-design.css. */
+
+/* Extend the shell grid with an optional bottom-drawer row. The drawer is
+   conditionally rendered by Shell.jsx and sits between `left/canvas/right`
+   and the status bar. */
+.app.with-bottom {
+  grid-template-rows: 44px 36px 1fr var(--bottom-h, 260px) 26px;
+  grid-template-areas:
+    "topbar topbar topbar"
+    "tabs   tabs   tabs"
+    "left   canvas right"
+    "left   bottom right"
+    "status status status";
+}
+.bottom-drawer {
+  grid-area: bottom;
+  background: var(--bg-1);
+  border-top: 1px solid var(--border-default);
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+}
+.bottom-drawer-tabs {
+  display: flex;
+  align-items: center;
+  height: 30px;
+  border-bottom: 1px solid var(--border-default);
+  background: var(--bg-2);
+  overflow-x: auto;
+  flex-shrink: 0;
+}
+.bottom-drawer-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 12px;
+  height: 30px;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--text-tertiary);
+  background: transparent;
+  border: none;
+  border-bottom: 2px solid transparent;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: color 120ms var(--ease), background 120ms var(--ease);
+}
+.bottom-drawer-tab:hover { color: var(--text-secondary); background: var(--bg-hover, rgba(255,255,255,0.04)); }
+.bottom-drawer-tab.active {
+  color: var(--accent);
+  border-bottom-color: var(--accent);
+}
+.bottom-drawer-tab svg { width: 12px; height: 12px; }
+.bottom-drawer-close {
+  margin-left: auto;
+  margin-right: 6px;
+  padding: 4px;
+  background: transparent;
+  border: none;
+  color: var(--text-tertiary);
+  cursor: pointer;
+  border-radius: 4px;
+}
+.bottom-drawer-close:hover { color: var(--text-primary); background: var(--bg-hover, rgba(255,255,255,0.04)); }
+.bottom-drawer-body {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}
+
+/* Dirty dot on project tabs */
+.tab.unsaved .tab-dot::after {
+  content: "";
+  position: absolute;
+  top: -2px;
+  right: -2px;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 0 2px var(--bg-0);
+}
+.tab .tab-dot { position: relative; }
+
+/* Make auth gate fill the viewport without inheriting the grid. */
+.auth-fullscreen { height: 100vh; display: flex; align-items: center; justify-content: center; background: var(--bg-0); }
+
+/* Toast layer always on top */
+.datalex-toasts { position: fixed; bottom: 40px; right: 16px; z-index: 200; display: flex; flex-direction: column; gap: 8px; pointer-events: none; }
+.datalex-toasts > * { pointer-events: auto; }
+
+/* Reopen-drawer chip when collapsed */
+.bottom-reopen {
+  position: absolute;
+  right: 16px;
+  bottom: 14px;
+  z-index: 40;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border: 1px solid var(--border-default);
+  border-radius: 999px;
+  background: var(--bg-2);
+  color: var(--text-secondary);
+  font-size: 11px;
+  cursor: pointer;
+  box-shadow: var(--shadow-pop);
+}
+.bottom-reopen:hover { color: var(--text-primary); border-color: var(--border-strong); }
+
+/* Allow the bottom-panel children (legacy panels) to use their tailwind bg classes without fighting Luna tokens. */
+.bottom-drawer-body .legacy-panel-root { height: 100%; background: var(--bg-canvas); color: var(--text-primary); }
