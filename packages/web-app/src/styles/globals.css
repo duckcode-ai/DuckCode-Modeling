@@ -6,62 +6,71 @@
    ────────────────────────────────────────────────────────────────────────── */
 
 @theme {
+  /* ──────────────────────────────────────────────────────────────────
+     Semantic tokens bridge to Luna CSS vars (declared in
+     datalex-design.css under [data-theme="…"]). This means every
+     Tailwind utility like `bg-bg-secondary`, `text-text-primary`,
+     `border-border-primary`, `bg-accent-blue` resolves to a Luna
+     variable at runtime — so switching theme updates ALL surfaces
+     (panels, dialogs, legacy components) live, not just the root shell.
+     ────────────────────────────────────────────────────────────────── */
+
   /* Surfaces */
-  --color-bg-primary: #ffffff;
-  --color-bg-secondary: #f8fafc;
-  --color-bg-tertiary: #f1f5f9;
-  --color-bg-surface: #ffffff;
-  --color-bg-elevated: #ffffff;
-  --color-bg-sunken: #f1f5f9;
-  --color-bg-hover: #f1f5f9;
-  --color-bg-active: #e0ecff;
-  --color-bg-card: #ffffff;
-  --color-bg-toolbar: #fafbfc;
-  --color-bg-canvas: #f6f8fb;
-  --color-bg-overlay: rgba(15, 23, 42, 0.55);
+  --color-bg-primary:   var(--bg-1);
+  --color-bg-secondary: var(--bg-2);
+  --color-bg-tertiary:  var(--bg-3);
+  --color-bg-surface:   var(--bg-2);
+  --color-bg-elevated:  var(--bg-3);
+  --color-bg-sunken:    var(--bg-0);
+  --color-bg-hover:     var(--bg-3);
+  --color-bg-active:    var(--accent-dim);
+  --color-bg-card:      var(--bg-2);
+  --color-bg-toolbar:   var(--bg-1);
+  --color-bg-canvas:    var(--bg-canvas);
+  --color-bg-overlay:   var(--scrim);
 
   /* Borders */
-  --color-border-primary: #e2e8f0;
-  --color-border-secondary: #cbd5e1;
-  --color-border-subtle: #eef2f7;
-  --color-border-strong: #94a3b8;
-  --color-border-accent: #3b82f6;
-  --color-border-focus: #60a5fa;
+  --color-border-primary:   var(--border-default);
+  --color-border-secondary: var(--border-strong);
+  --color-border-subtle:    var(--border-subtle);
+  --color-border-strong:    var(--border-strong);
+  --color-border-accent:    var(--accent);
+  --color-border-focus:     var(--border-focus);
 
   /* Text */
-  --color-text-primary: #0f172a;
-  --color-text-secondary: #334155;
-  --color-text-tertiary: #475569;
-  --color-text-muted: #94a3b8;
-  --color-text-subtle: #cbd5e1;
-  --color-text-accent: #2563eb;
-  --color-text-on-accent: #ffffff;
+  --color-text-primary:   var(--text-primary);
+  --color-text-secondary: var(--text-secondary);
+  --color-text-tertiary:  var(--text-tertiary);
+  --color-text-muted:     var(--text-muted);
+  --color-text-subtle:    var(--text-muted);
+  --color-text-accent:    var(--accent);
+  --color-text-on-accent: var(--accent-fg);
 
   /* Accents */
-  --color-accent-blue: #3b82f6;
-  --color-accent-blue-soft: #dbeafe;
-  --color-accent-green: #16a34a;
-  --color-accent-green-soft: #dcfce7;
-  --color-accent-yellow: #ca8a04;
-  --color-accent-yellow-soft: #fef9c3;
-  --color-accent-red: #dc2626;
-  --color-accent-red-soft: #fee2e2;
-  --color-accent-purple: #9333ea;
-  --color-accent-purple-soft: #f3e8ff;
-  --color-accent-orange: #ea580c;
-  --color-accent-orange-soft: #ffedd5;
-  --color-accent-cyan: #0891b2;
-  --color-accent-cyan-soft: #cffafe;
-  --color-accent-pink: #db2777;
-  --color-accent-pink-soft: #fce7f3;
-  --color-accent-teal: #0d9488;
-  --color-accent-teal-soft: #ccfbf1;
+  --color-accent-blue:        var(--accent);
+  --color-accent-blue-soft:   var(--accent-dim);
+  --color-accent-green:       var(--cat-billing);
+  --color-accent-green-soft:  var(--cat-billing-soft);
+  --color-accent-yellow:      var(--pk);
+  --color-accent-yellow-soft: rgba(245, 181, 68, 0.14);
+  --color-accent-red:         #ef4444;
+  --color-accent-red-soft:    rgba(239, 68, 68, 0.14);
+  --color-accent-purple:      var(--cat-users);
+  --color-accent-purple-soft: var(--cat-users-soft);
+  --color-accent-orange:      var(--cat-product);
+  --color-accent-orange-soft: var(--cat-product-soft);
+  --color-accent-cyan:        var(--cat-audit);
+  --color-accent-cyan-soft:   var(--cat-audit-soft);
+  --color-accent-pink:        var(--cat-access);
+  --color-accent-pink-soft:   var(--cat-access-soft);
+  --color-accent-teal:        var(--idx);
+  --color-accent-teal-soft:   rgba(78, 201, 176, 0.14);
 
   /* Status */
-  --color-status-success: #16a34a;
-  --color-status-warning: #ca8a04;
-  --color-status-error: #dc2626;
-  --color-status-info: #2563eb;
+  --color-status-success: var(--cat-billing);
+  --color-status-warning: var(--pk);
+  --color-status-error:   #ef4444;
+  --color-status-info:    var(--accent);
 
   /* Cardinality (edge colors) */
   --color-cardinality-one-one: #16a34a;
@@ -138,55 +147,10 @@
 }
 
 /* ──────────────────────────────────────────────────────────────────────────
-   Dark theme (Luna-style deep slate)
+   Legacy dark theme — retained for back-compat. Luna themes
+   (midnight/obsidian/paper/arctic) live in datalex-design.css and drive
+   all semantic tokens via var() bridges above.
    ────────────────────────────────────────────────────────────────────────── */
-
-[data-theme="dark"] {
-  --color-bg-primary: #0b1220;
-  --color-bg-secondary: #111a2e;
-  --color-bg-tertiary: #1a2540;
-  --color-bg-surface: #131d33;
-  --color-bg-elevated: #172240;
-  --color-bg-sunken: #0b1220;
-  --color-bg-hover: #1f2c4c;
-  --color-bg-active: #1e3a6a;
-  --color-bg-card: #131d33;
-  --color-bg-toolbar: #0f1829;
-  --color-bg-canvas: #0a1020;
-  --color-bg-overlay: rgba(0, 0, 0, 0.65);
-
-  --color-border-primary: #1e2b4a;
-  --color-border-secondary: #2b3b66;
-  --color-border-subtle: #172240;
-  --color-border-strong: #475569;
-  --color-border-accent: #3b82f6;
-  --color-border-focus: #60a5fa;
-
-  --color-text-primary: #e2e8f0;
-  --color-text-secondary: #cbd5e1;
-  --color-text-tertiary: #94a3b8;
-  --color-text-muted: #64748b;
-  --color-text-subtle: #475569;
-  --color-text-accent: #60a5fa;
-  --color-text-on-accent: #ffffff;
-
-  --color-accent-blue-soft: #1e3a8a;
-  --color-accent-green-soft: #064e3b;
-  --color-accent-yellow-soft: #713f12;
-  --color-accent-red-soft: #7f1d1d;
-  --color-accent-purple-soft: #4c1d95;
-  --color-accent-orange-soft: #7c2d12;
-  --color-accent-cyan-soft: #164e63;
-  --color-accent-pink-soft: #831843;
-  --color-accent-teal-soft: #134e4a;
-
-  --shadow-xs: 0 1px 0 rgba(0, 0, 0, 0.25);
-  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.35);
-  --shadow-md: 0 4px 8px -2px rgba(0, 0, 0, 0.4), 0 2px 4px -1px rgba(0, 0, 0, 0.3);
-  --shadow-lg: 0 10px 20px -4px rgba(0, 0, 0, 0.5);
-  --shadow-xl: 0 20px 40px -8px rgba(0, 0, 0, 0.6);
-  --shadow-focus: 0 0 0 2px rgba(96, 165, 250, 0.5);
-}
 
 /* ──────────────────────────────────────────────────────────────────────────
    Base

@@ -62,7 +62,7 @@ export default function GitBranchDialog() {
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm" onClick={closeModal}>
-      <div className="bg-bg-secondary border border-border-primary rounded-xl shadow-2xl w-[460px] max-w-[92vw] flex flex-col" onClick={(e) => e.stopPropagation()}>
+      <div className="bg-bg-secondary border border-border-primary rounded-xl shadow-2xl w-[460px] max-w-[92vw] max-h-[85vh] flex flex-col overflow-hidden" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center justify-between px-4 py-3 border-b border-border-primary">
           <h3 className="text-sm font-semibold text-text-primary flex items-center gap-2">
             <GitBranch size={16} className="text-accent-blue" />
@@ -72,7 +72,7 @@ export default function GitBranchDialog() {
             <X size={16} />
           </button>
         </div>
-        <div className="p-4 space-y-3">
+        <div className="p-4 space-y-3 overflow-y-auto">
           {error && (
             <div className="flex items-center gap-2 text-xs text-status-error bg-red-50 border border-red-200 rounded-md px-3 py-2">
               <AlertCircle size={12} /> {error}

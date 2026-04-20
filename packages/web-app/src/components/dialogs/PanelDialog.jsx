@@ -23,7 +23,7 @@ export default function PanelDialog({ kind }) {
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm" onClick={closeModal}>
       <div
         className="bg-bg-secondary border border-border-primary rounded-xl shadow-2xl flex flex-col"
-        style={{ width: w, maxWidth: "94vw", height: h }}
+        style={{ width: w, maxWidth: "94vw", height: h, maxHeight: "90vh" }}
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between px-4 py-3 border-b border-border-primary shrink-0">
@@ -32,7 +32,7 @@ export default function PanelDialog({ kind }) {
             <X size={16} />
           </button>
         </div>
-        <div className="flex-1 min-h-0 overflow-hidden">
+        <div className="flex-1 min-h-0 overflow-auto">
           <Panel />
         </div>
       </div>

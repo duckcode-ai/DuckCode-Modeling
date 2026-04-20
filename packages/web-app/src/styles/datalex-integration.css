@@ -114,3 +114,118 @@
 
 /* Allow the bottom-panel children (legacy panels) to use their tailwind bg classes without fighting Luna tokens. */
 .bottom-drawer-body .legacy-panel-root { height: 100%; background: var(--bg-canvas); color: var(--text-primary); }
+
+/* ──────────────────────────────────────────────────────────────────────────
+   Dark-theme palette shim
+   Many legacy panels/dialogs were written with raw Tailwind colors (e.g.
+   `bg-red-50`, `bg-slate-50`, `bg-blue-100`, `border-red-200`). Those are
+   fine in light themes (paper / arctic) but glare white on dark themes
+   (midnight / obsidian). This layer remaps the low-value tints to the
+   Luna surface tokens when a dark theme is active.
+
+   Using attribute selectors keeps specificity low; !important is required
+   only because Tailwind's utility classes are placed in the same cascade.
+   ────────────────────────────────────────────────────────────────────────── */
+[data-theme="midnight"],
+[data-theme="obsidian"] {
+  /* Default theme colours (midnight) are already dark — scope these via
+     :where on an ancestor attribute so they match anywhere in the app. */
+}
+
+:where([data-theme="midnight"], [data-theme="obsidian"]) .bg-white,
+:where([data-theme="midnight"], [data-theme="obsidian"]) .bg-slate-50,
+:where([data-theme="midnight"], [data-theme="obsidian"]) .bg-gray-50,
+:where([data-theme="midnight"], [data-theme="obsidian"]) .bg-slate-100,
+:where([data-theme="midnight"], [data-theme="obsidian"]) .bg-gray-100 {
+  background-color: var(--bg-2) !important;
+}
+:where([data-theme="midnight"], [data-theme="obsidian"]) .bg-slate-200 {
+  background-color: var(--bg-3) !important;
+}
+:where([data-theme="midnight"], [data-theme="obsidian"]) .bg-slate-700,
+:where([data-theme="midnight"], [data-theme="obsidian"]) .bg-slate-800,
+:where([data-theme="midnight"], [data-theme="obsidian"]) .bg-slate-900 {
+  background-color: var(--bg-0) !important;
+}
+
+/* Soft tint surfaces (red-50, blue-50, etc.) turn into faint accent washes. */
+:where([data-theme="midnight"], [data-theme="obsidian"]) .bg-red-50 { background-color: rgba(239, 68, 68, 0.12) !important; }
+:where([data-theme="midnight"], [data-theme="obsidian"]) .bg-blue-50 { background-color: var(--accent-dim) !important; }
+:where([data-theme="midnight"], [data-theme="obsidian"]) .bg-blue-100 { background-color: var(--accent-dim) !important; }
+:where([data-theme="midnight"], [data-theme="obsidian"]) .bg-blue-200 { background-color: var(--accent-dim) !important; }
+:where([data-theme="midnight"], [data-theme="obsidian"]) .bg-green-50 { background-color: rgba(16, 185, 129, 0.12) !important; }
+:where([data-theme="midnight"], [data-theme="obsidian"]) .bg-green-100 { background-color: rgba(16, 185, 129, 0.14) !important; }
+:where([data-theme="midnight"], [data-theme="obsidian"]) .bg-yellow-50 { background-color: rgba(245, 181, 68, 0.12) !important; }
+:where([data-theme="midnight"], [data-theme="obsidian"]) .bg-orange-50 { background-color: rgba(245, 158, 11, 0.12) !important; }
+:where([data-theme="midnight"], [data-theme="obsidian"]) .bg-orange-100 { background-color: rgba(245, 158, 11, 0.14) !important; }
+:where([data-theme="midnight"], [data-theme="obsidian"]) .bg-purple-50 { background-color: rgba(124, 92, 255, 0.12) !important; }
+:where([data-theme="midnight"], [data-theme="obsidian"]) .bg-purple-100 { background-color: rgba(124, 92, 255, 0.14) !important; }
+:where([data-theme="midnight"], [data-theme="obsidian"]) .bg-pink-50 { background-color: rgba(236, 72, 153, 0.12) !important; }
+
+/* Bordery versions. */
+:where([data-theme="midnight"], [data-theme="obsidian"]) .border-slate-100,
+:where([data-theme="midnight"], [data-theme="obsidian"]) .border-slate-200,
+:where([data-theme="midnight"], [data-theme="obsidian"]) .border-gray-200 {
+  border-color: var(--border-default) !important;
+}
+:where([data-theme="midnight"], [data-theme="obsidian"]) .border-slate-300 {
+  border-color: var(--border-strong) !important;
+}
+:where([data-theme="midnight"], [data-theme="obsidian"]) .border-red-200 { border-color: rgba(239, 68, 68, 0.35) !important; }
+:where([data-theme="midnight"], [data-theme="obsidian"]) .border-blue-200,
+:where([data-theme="midnight"], [data-theme="obsidian"]) .border-blue-300,
+:where([data-theme="midnight"], [data-theme="obsidian"]) .border-blue-400 { border-color: rgba(91, 140, 255, 0.35) !important; }
+:where([data-theme="midnight"], [data-theme="obsidian"]) .border-green-200 { border-color: rgba(16, 185, 129, 0.35) !important; }
+:where([data-theme="midnight"], [data-theme="obsidian"]) .border-orange-200,
+:where([data-theme="midnight"], [data-theme="obsidian"]) .border-orange-300 { border-color: rgba(245, 158, 11, 0.35) !important; }
+:where([data-theme="midnight"], [data-theme="obsidian"]) .border-purple-200,
+:where([data-theme="midnight"], [data-theme="obsidian"]) .border-purple-300 { border-color: rgba(124, 92, 255, 0.35) !important; }
+:where([data-theme="midnight"], [data-theme="obsidian"]) .border-pink-200 { border-color: rgba(236, 72, 153, 0.35) !important; }
+:where([data-theme="midnight"], [data-theme="obsidian"]) .border-yellow-200 { border-color: rgba(245, 181, 68, 0.35) !important; }
+
+/* Text colours that were dark-on-light need to lift on dark themes. */
+:where([data-theme="midnight"], [data-theme="obsidian"]) .text-slate-900,
+:where([data-theme="midnight"], [data-theme="obsidian"]) .text-slate-800,
+:where([data-theme="midnight"], [data-theme="obsidian"]) .text-gray-900,
+:where([data-theme="midnight"], [data-theme="obsidian"]) .text-black {
+  color: var(--text-primary) !important;
+}
+:where([data-theme="midnight"], [data-theme="obsidian"]) .text-slate-700,
+:where([data-theme="midnight"], [data-theme="obsidian"]) .text-slate-600,
+:where([data-theme="midnight"], [data-theme="obsidian"]) .text-gray-700,
+:where([data-theme="midnight"], [data-theme="obsidian"]) .text-gray-600 {
+  color: var(--text-secondary) !important;
+}
+:where([data-theme="midnight"], [data-theme="obsidian"]) .text-slate-500,
+:where([data-theme="midnight"], [data-theme="obsidian"]) .text-slate-400,
+:where([data-theme="midnight"], [data-theme="obsidian"]) .text-gray-500,
+:where([data-theme="midnight"], [data-theme="obsidian"]) .text-gray-400 {
+  color: var(--text-tertiary) !important;
+}
+
+/* Divider utility used in some lists. */
+:where([data-theme="midnight"], [data-theme="obsidian"]) .divide-slate-100 > :not([hidden]) ~ :not([hidden]),
+:where([data-theme="midnight"], [data-theme="obsidian"]) .divide-slate-200 > :not([hidden]) ~ :not([hidden]),
+:where([data-theme="midnight"], [data-theme="obsidian"]) .divide-gray-200 > :not([hidden]) ~ :not([hidden]) {
+  border-color: var(--border-default) !important;
+}
+
+/* ──────────────────────────────────────────────────────────────────────────
+   Modal sizing safety net
+   Some dialogs were written without max-height. Cap every fixed-inset-0
+   child at 90vh with vertical scroll so content is always reachable.
+   ────────────────────────────────────────────────────────────────────────── */
+.fixed.inset-0 > div:not(.cmd):not(.cmd-overlay) {
+  max-height: 90vh;
+}
+.fixed.inset-0 > div:not(.cmd):not(.cmd-overlay) > * {
+  min-height: 0;
+}
+
+/* Tailwind `input`/`textarea`/`select` default to browser native colours,
+   which clash with dark themes. Normalize. */
+:where([data-theme="midnight"], [data-theme="obsidian"]) input:not([type="checkbox"]):not([type="radio"]):not([type="color"]),
+:where([data-theme="midnight"], [data-theme="obsidian"]) textarea,
+:where([data-theme="midnight"], [data-theme="obsidian"]) select {
+  color-scheme: dark;
+}
