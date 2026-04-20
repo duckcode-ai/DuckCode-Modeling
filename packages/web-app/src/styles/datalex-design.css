@@ -44,6 +44,26 @@
   --accent-hover: #7aa3ff;
   --accent-dim: rgba(91, 140, 255, 0.14);
   --accent-fg: #ffffff;
+  --accent-on: #ffffff; /* legacy alias — prefer --accent-fg */
+
+  /* Neutral hover (generic surface hover — lists, menu items, small buttons) */
+  --bg-hover: rgba(255, 255, 255, 0.05);
+
+  /* Status semantics (error / warning / success / info) — each theme
+     supplies a tuned hue + 0.10-0.14 background + 0.30-0.40 border so
+     alerts read clean on every surface. */
+  --status-error:        #ef4444;
+  --status-error-bg:     rgba(239, 68, 68, 0.12);
+  --status-error-border: rgba(239, 68, 68, 0.32);
+  --status-warning:        #f5b544;
+  --status-warning-bg:     rgba(245, 181, 68, 0.12);
+  --status-warning-border: rgba(245, 181, 68, 0.34);
+  --status-success:        #10b981;
+  --status-success-bg:     rgba(16, 185, 129, 0.12);
+  --status-success-border: rgba(16, 185, 129, 0.32);
+  --status-info:        var(--accent);
+  --status-info-bg:     var(--accent-dim);
+  --status-info-border: rgba(91, 140, 255, 0.32);
 
   --pk: #f5b544;
   --fk: #8b7fff;
@@ -68,6 +88,18 @@
   --rel-line-strong: #6b7385;
   --rel-line-active: #7aa3ff;
   --rel-line-dim: rgba(74,80,96,0.35);
+
+  /* SQL syntax palette (midnight) — mirrors the YAML dark palette so
+     both readouts feel like the same editor surface. Tuned to read on
+     --bg-0 at AA contrast. */
+  --sql-keyword:     #7db7ff;  /* CREATE, SELECT, JOIN — sky blue */
+  --sql-type:        #4ec9b0;  /* INT, VARCHAR, etc — teal */
+  --sql-string:      #8ee1a7;  /* 'abc' — soft green */
+  --sql-number:      #ffb87a;  /* 42, 3.14 — warm amber */
+  --sql-function:    #dcdcaa;  /* now(), count() — soft yellow */
+  --sql-punctuation: #9aa3b4;  /* commas, parens */
+  --sql-ident:       var(--text-primary);
+  --sql-comment:     var(--text-tertiary);
 
   --shadow-card: 0 1px 0 rgba(255,255,255,0.04) inset, 0 8px 24px rgba(0,0,0,0.35);
   --shadow-pop: 0 20px 50px rgba(0,0,0,0.5);
@@ -106,6 +138,24 @@
   --accent-hover: #ffffff;
   --accent-dim: rgba(230, 231, 234, 0.10);
   --accent-fg: #0a0b0d;
+  --accent-on: #0a0b0d;
+
+  --bg-hover: rgba(255, 255, 255, 0.045);
+
+  /* Obsidian keeps saturation low so semantic colors read as "muted" —
+     red/amber/green still clearly distinct but never shouty. */
+  --status-error:        #f87171;
+  --status-error-bg:     rgba(248, 113, 113, 0.10);
+  --status-error-border: rgba(248, 113, 113, 0.30);
+  --status-warning:        #fbbf24;
+  --status-warning-bg:     rgba(251, 191, 36, 0.10);
+  --status-warning-border: rgba(251, 191, 36, 0.30);
+  --status-success:        #4ade80;
+  --status-success-bg:     rgba(74, 222, 128, 0.10);
+  --status-success-border: rgba(74, 222, 128, 0.30);
+  --status-info:        var(--accent);
+  --status-info-bg:     var(--accent-dim);
+  --status-info-border: rgba(230, 231, 234, 0.30);
 
   --pk: #e3b341;
   --fk: #a29bff;
@@ -128,6 +178,17 @@
   --rel-line-strong: #6e6e73;
   --rel-line-active: #ededee;
   --rel-line-dim: rgba(58,59,64,0.5);
+
+  /* SQL syntax palette (obsidian) — lower-saturation than midnight so
+     the pane reads as calm neutral instead of party-colored. */
+  --sql-keyword:     #9cc7ff;
+  --sql-type:        #7fd4bf;
+  --sql-string:      #7fd49c;
+  --sql-number:      #ffc48c;
+  --sql-function:    #e0d89c;
+  --sql-punctuation: #8b8b92;
+  --sql-ident:       var(--text-primary);
+  --sql-comment:     var(--text-tertiary);
 }
 
 /* ================================================================
@@ -157,6 +218,26 @@
   --accent-hover: #2341b8;
   --accent-dim: rgba(53, 88, 214, 0.09);
   --accent-fg: #ffffff;
+  --accent-on: #ffffff;
+
+  /* Paper uses DARK hover tint (light theme) — bg is off-white, so we
+     want a faint smoke, not the dark-theme's white-overlay. */
+  --bg-hover: rgba(40, 30, 20, 0.05);
+
+  /* Paper tunes to print-house reds/golds/greens — deeper, saturated,
+     readable on warm off-white. */
+  --status-error:        #c62828;
+  --status-error-bg:     rgba(198, 40, 40, 0.08);
+  --status-error-border: rgba(198, 40, 40, 0.32);
+  --status-warning:        #b8860b;
+  --status-warning-bg:     rgba(184, 134, 11, 0.10);
+  --status-warning-border: rgba(184, 134, 11, 0.32);
+  --status-success:        #0d8b5e;
+  --status-success-bg:     rgba(13, 139, 94, 0.09);
+  --status-success-border: rgba(13, 139, 94, 0.30);
+  --status-info:        var(--accent);
+  --status-info-bg:     var(--accent-dim);
+  --status-info-border: rgba(53, 88, 214, 0.30);
 
   --pk: #b8860b;
   --fk: #5b4ac4;
@@ -181,6 +262,17 @@
   --rel-line-strong: #7a7468;
   --rel-line-active: #3558d6;
   --rel-line-dim: rgba(184, 176, 161, 0.45);
+
+  /* SQL syntax palette (paper) — deep, print-house tones that stay
+     legible on cream bg without flattening. */
+  --sql-keyword:     #2c5ba8;  /* deep blue */
+  --sql-type:        #0d8b7a;  /* teal */
+  --sql-string:      #0b7a3e;  /* forest green */
+  --sql-number:      #a04b1a;  /* burnt orange */
+  --sql-function:    #8a6d3b;  /* amber ink */
+  --sql-punctuation: #6b6356;
+  --sql-ident:       var(--text-primary);
+  --sql-comment:     var(--text-tertiary);
 
   --shadow-card: 0 1px 0 rgba(255,255,255,0.9) inset, 0 1px 2px rgba(0,0,0,0.04), 0 8px 24px rgba(60,50,30,0.08);
   --shadow-pop: 0 20px 50px rgba(60,50,30,0.18);
@@ -214,6 +306,23 @@
   --accent-hover: #0043ce;
   --accent-dim: rgba(15, 98, 254, 0.09);
   --accent-fg: #ffffff;
+  --accent-on: #ffffff;
+
+  --bg-hover: rgba(15, 40, 80, 0.05);
+
+  /* Arctic uses IBM Carbon semantic palette. */
+  --status-error:        #da1e28;
+  --status-error-bg:     rgba(218, 30, 40, 0.08);
+  --status-error-border: rgba(218, 30, 40, 0.28);
+  --status-warning:        #b06a00;
+  --status-warning-bg:     rgba(176, 106, 0, 0.10);
+  --status-warning-border: rgba(176, 106, 0, 0.32);
+  --status-success:        #198038;
+  --status-success-bg:     rgba(25, 128, 56, 0.08);
+  --status-success-border: rgba(25, 128, 56, 0.30);
+  --status-info:        var(--accent);
+  --status-info-bg:     var(--accent-dim);
+  --status-info-border: rgba(15, 98, 254, 0.30);
 
   --pk: #b78000;
   --fk: #6929c4;
@@ -238,6 +347,17 @@
   --rel-line-strong: #6a7a92;
   --rel-line-active: #0f62fe;
   --rel-line-dim: rgba(169, 181, 196, 0.5);
+
+  /* SQL syntax palette (arctic) — IBM Carbon-ish crisp blues and teals
+     on near-white bg. */
+  --sql-keyword:     #0043ce;
+  --sql-type:        #007d79;
+  --sql-string:      #0e6027;
+  --sql-number:      #b06a00;
+  --sql-function:    #8a3ffc;
+  --sql-punctuation: #586878;
+  --sql-ident:       var(--text-primary);
+  --sql-comment:     var(--text-tertiary);
 
   --shadow-card: 0 1px 0 rgba(255,255,255,1) inset, 0 1px 2px rgba(15,40,80,0.04), 0 8px 24px rgba(15,40,80,0.08);
   --shadow-pop: 0 20px 50px rgba(15,40,80,0.18);
@@ -290,7 +410,7 @@ input { font: inherit; color: inherit; }
 .app {
   display: grid;
   grid-template-rows: 44px 36px 1fr 26px;
-  grid-template-columns: 260px 1fr 320px;
+  grid-template-columns: 260px 1fr var(--right-w, 320px);
   grid-template-areas:
     "topbar topbar topbar"
     "tabs   tabs   tabs"
@@ -298,6 +418,12 @@ input { font: inherit; color: inherit; }
     "status status status";
   height: 100vh;
   background: var(--bg-0);
+}
+/* When the right panel is closed the shell collapses the slot entirely,
+   giving the canvas the extra horizontal room. The JSX sets this class on
+   `.app` via `!rightPanelOpen`. */
+.app.no-right {
+  grid-template-columns: 260px 1fr 0;
 }
 
 /* ============================================================
@@ -367,29 +493,251 @@ input { font: inherit; color: inherit; }
 .tool-btn:hover { background: var(--bg-3); color: var(--text-primary); }
 .tool-btn.active { background: var(--bg-3); color: var(--accent); }
 .tool-btn svg { width: 14px; height: 14px; flex-shrink: 0; }
+.tool-btn:disabled { cursor: not-allowed; }
 
-.search-launcher {
-  display: flex; align-items: center; gap: 8px;
-  height: 28px; padding: 0 10px 0 8px;
+/* Segmented view switcher — swaps the main canvas surface
+   (Diagram / Table / Views / Enums). Lives inside the top bar, replacing
+   the old static "Diagram" pill. Accent-dim fill marks the active segment
+   on every Luna theme. */
+.view-switcher {
+  display: inline-flex;
+  padding: 2px;
   background: var(--bg-2);
   border: 1px solid var(--border-default);
   border-radius: 7px;
+  gap: 2px;
+  height: 28px;
+  align-items: center;
+}
+.view-seg {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 0 10px;
+  height: 22px;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 11.5px;
+  font-weight: 500;
+  border: 0;
+  cursor: pointer;
+  transition: background 120ms var(--ease), color 120ms var(--ease);
+  white-space: nowrap;
+}
+.view-seg svg { width: 13px; height: 13px; flex-shrink: 0; }
+.view-seg:hover { color: var(--text-primary); }
+.view-seg.active {
+  background: var(--accent-dim);
+  color: var(--accent);
+}
+
+/* Popover shell shared by BellMenu + UserMenu. Positioned by inline style
+   but styling + shadow standardised here. */
+.chrome-popover {
+  position: absolute;
+  z-index: 60;
+  background: var(--bg-2);
+  border: 1px solid var(--border-strong);
+  border-radius: 10px;
+  box-shadow: var(--shadow-pop);
+  overflow: hidden;
+}
+.chrome-popover-header {
+  display: flex; align-items: center; gap: 8px;
+  padding: 10px 12px 8px;
+  border-bottom: 1px solid var(--border-subtle);
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-tertiary);
+}
+.chrome-popover-header .spacer { flex: 1; }
+.chrome-popover-body {
+  max-height: 360px;
+  overflow: auto;
+  padding: 6px;
+}
+.chrome-popover-row {
+  display: flex; align-items: center; gap: 10px;
+  width: 100%;
+  padding: 8px 10px;
+  border-radius: 6px;
+  background: transparent;
+  border: 0;
+  color: var(--text-primary);
+  text-align: left;
+  cursor: pointer;
+  font-size: 12px;
+  transition: background 120ms var(--ease);
+}
+.chrome-popover-row:hover { background: var(--bg-3); }
+.chrome-popover-row .meta {
+  font-size: 10.5px;
+  color: var(--text-tertiary);
+  font-family: var(--font-mono);
+  margin-left: auto;
+  flex-shrink: 0;
+}
+.chrome-popover-row.danger { color: #ef4444; }
+.chrome-popover-divider {
+  height: 1px;
+  background: var(--border-subtle);
+  margin: 4px 6px;
+}
+
+/* Bell — unread dot */
+.bell-btn { position: relative; }
+.bell-btn .unread-dot {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  width: 7px;
+  height: 7px;
+  border-radius: 4px;
+  background: var(--accent);
+  border: 1.5px solid var(--bg-1);
+}
+
+/* Shell-view wrapper — used by TableView / ViewsView / EnumsView so they
+   occupy the same main canvas grid slot as the diagram and scroll
+   independently of the shell chrome. */
+.shell-view {
+  grid-area: canvas;
+  background: var(--bg-0);
+  border-left: 1px solid var(--border-subtle);
+  border-right: 1px solid var(--border-subtle);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  min-width: 0;
+}
+.shell-view .panel-frame { flex: 1; min-height: 0; }
+.shell-view-density-toggle {
+  display: inline-flex;
+  border: 1px solid var(--border-default);
+  border-radius: 6px;
+  overflow: hidden;
+  background: var(--bg-1);
+}
+.shell-view-density-toggle button {
+  border: 0;
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 11px;
+  font-weight: 500;
+  padding: 5px 10px;
+  cursor: pointer;
+}
+.shell-view-density-toggle button.active {
+  background: var(--accent-dim);
+  color: var(--accent);
+}
+.shell-view-table-wrap {
+  max-height: 100%;
+  overflow: auto;
+  border: 1px solid var(--border-default);
+  border-radius: 8px;
+  background: var(--bg-1);
+}
+.shell-view-table-wrap .panel-table { border: none; border-radius: 0; }
+.shell-view-table-wrap .panel-table tbody tr { cursor: pointer; }
+.shell-view-table-wrap .panel-table tbody tr.active {
+  background: var(--accent-dim);
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+.shell-view-checkbox {
+  width: 13px; height: 13px;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+.shell-view-bulkbar {
+  display: flex; align-items: center; gap: 10px;
+  padding: 8px 12px;
+  background: var(--accent-dim);
+  border: 1px solid var(--accent);
+  border-radius: 8px;
+  font-size: 11.5px;
+  color: var(--text-primary);
+  margin-bottom: 10px;
+}
+.shell-view-bulkbar .spacer { flex: 1; }
+
+/* User chip as interactive button (matches .tool-btn hover semantics) */
+.user-chip-btn {
+  display: flex; align-items: center; gap: 8px;
+  padding: 3px 10px 3px 3px;
+  border-radius: 20px;
+  border: 1px solid var(--border-default);
+  background: transparent;
+  font-size: 12px;
+  color: var(--text-primary);
+  cursor: pointer;
+  transition: background 120ms var(--ease), border-color 120ms var(--ease);
+}
+.user-chip-btn:hover {
+  background: var(--bg-2);
+  border-color: var(--border-strong);
+}
+
+.search-launcher {
+  display: flex; align-items: center; gap: 8px;
+  height: 30px; padding: 0 8px 0 10px;
+  background: var(--bg-2);
+  border: 1px solid var(--border-default);
+  border-radius: 8px;
   color: var(--text-tertiary);
   font-size: 12px;
-  min-width: 220px;
+  min-width: 260px;
+  cursor: pointer;
+  transition: border-color 140ms var(--ease), background 140ms var(--ease), box-shadow 140ms var(--ease), color 140ms var(--ease);
 }
-.search-launcher:hover { border-color: var(--border-strong); }
+.search-launcher:hover {
+  border-color: var(--accent);
+  color: var(--text-secondary);
+  background: var(--bg-1);
+}
+.search-launcher:focus-visible,
+.search-launcher:active {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-dim);
+  color: var(--text-primary);
+}
+.search-launcher .search-launcher-icon {
+  color: var(--text-tertiary);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.search-launcher:hover .search-launcher-icon,
+.search-launcher:focus-visible .search-launcher-icon {
+  color: var(--accent);
+}
+.search-launcher .search-launcher-text {
+  flex: 1;
+  min-width: 0;
+  text-align: left;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .search-launcher svg { width: 13px; height: 13px; }
 .kbd {
   margin-left: auto;
   display: inline-flex; align-items: center; gap: 2px;
-  padding: 1px 5px;
+  padding: 1px 6px;
   background: var(--bg-3);
   border: 1px solid var(--border-default);
   border-radius: 4px;
   font-family: var(--font-mono);
   font-size: 10px;
-  color: var(--text-tertiary);
+  font-weight: 600;
+  color: var(--text-secondary);
+  letter-spacing: 0.04em;
+}
+.search-launcher:hover .kbd {
+  border-color: var(--accent);
+  color: var(--accent);
 }
 
 .user-chip {
@@ -936,7 +1284,145 @@ input { font: inherit; color: inherit; }
   display: flex;
   flex-direction: column;
   overflow: hidden;
+  position: relative; /* anchor for .right-resize */
 }
+
+/* Drag strip on the LEFT edge of the right panel. 4 px wide, transparent
+   by default, shows an accent glow on hover / drag. The actual drag
+   logic lives in RightPanel.jsx (mousedown → mousemove (RAF) → mouseup
+   (commit to uiStore)). */
+.right-resize {
+  position: absolute;
+  top: 0; bottom: 0; left: -2px;
+  width: 5px;
+  cursor: ew-resize;
+  z-index: 5;
+  background: transparent;
+  transition: background 120ms var(--ease);
+}
+.right-resize:hover,
+.right-resize.dragging {
+  background: var(--accent-dim);
+}
+.right-resize::after {
+  content: "";
+  position: absolute;
+  top: 0; bottom: 0; left: 2px;
+  width: 1px;
+  background: transparent;
+  transition: background 120ms var(--ease);
+}
+.right-resize:hover::after,
+.right-resize.dragging::after {
+  background: var(--accent);
+}
+
+/* Inspector tab strip — replaces the old .insp-tabs styling with a row
+   that plays nicely with PanelFrame's toolbar slot. */
+.inspector-tabs {
+  display: inline-flex;
+  gap: 2px;
+  padding: 2px;
+  background: var(--bg-2);
+  border: 1px solid var(--border-default);
+  border-radius: 7px;
+}
+.inspector-tab {
+  padding: 4px 10px;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 11px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 120ms var(--ease), color 120ms var(--ease);
+  white-space: nowrap;
+}
+.inspector-tab:hover { color: var(--text-primary); }
+.inspector-tab.active {
+  background: var(--accent-dim);
+  color: var(--accent);
+}
+.inspector-tab:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+/* Inline edit form used inside relationship / index cards. Flows like a
+   mini .panel-form-grid but pinned to two columns at most so it reads
+   as a "drawer" inside the parent card rather than a full-width form. */
+.inspector-inline-form {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px 10px;
+  padding: 10px;
+  margin-top: 10px;
+  background: var(--bg-0);
+  border: 1px dashed var(--border-default);
+  border-radius: 6px;
+}
+.inspector-inline-form .full { grid-column: 1 / -1; }
+
+/* Segmented ON DELETE / ON UPDATE picker inside the relationship card. */
+.inspector-action-picker {
+  display: inline-flex;
+  gap: 2px;
+  padding: 2px;
+  background: var(--bg-2);
+  border: 1px solid var(--border-default);
+  border-radius: 6px;
+  flex-wrap: wrap;
+}
+.inspector-action-picker button {
+  padding: 3px 8px;
+  border: 0;
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 10.5px;
+  font-weight: 500;
+  font-family: var(--font-mono);
+  letter-spacing: 0.03em;
+  border-radius: 4px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+.inspector-action-picker button .swatch {
+  width: 7px; height: 7px; border-radius: 2px; display: inline-block;
+}
+.inspector-action-picker button:hover { color: var(--text-primary); }
+.inspector-action-picker button.active {
+  background: var(--accent-dim);
+  color: var(--accent);
+}
+
+/* Live-SQL preview container. Uses monospace + subtle background so it
+   visually separates from surrounding PanelCards. All syntax colours
+   come from the --sql-* palette defined per Luna theme so the preview
+   reads well on midnight, obsidian, paper, and arctic. */
+.inspector-sql-pre {
+  margin: 0;
+  padding: 12px;
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  line-height: 1.55;
+  color: var(--sql-ident, var(--text-primary));
+  background: var(--bg-0);
+  border: 1px solid var(--border-default);
+  border-radius: 8px;
+  overflow: auto;
+  max-height: 440px;
+  white-space: pre;
+}
+.inspector-sql-pre .sql-kw      { color: var(--sql-keyword); font-weight: 600; }
+.inspector-sql-pre .sql-type    { color: var(--sql-type); }
+.inspector-sql-pre .sql-str     { color: var(--sql-string); }
+.inspector-sql-pre .sql-num     { color: var(--sql-number); }
+.inspector-sql-pre .sql-fn      { color: var(--sql-function); }
+.inspector-sql-pre .sql-punct   { color: var(--sql-punctuation); }
+.inspector-sql-pre .sql-comment { color: var(--sql-comment); font-style: italic; }
 
 .insp-header {
   padding: 14px 16px 10px;
@@ -1176,7 +1662,9 @@ input { font: inherit; color: inherit; }
   font-family: var(--font-mono);
 }
 
-/* SQL block */
+/* SQL block — compact, token-driven. Shared by any place rendering a
+   SQL snippet outside the inspector. Same --sql-* palette as the
+   inspector so both surfaces are visually cohesive. */
 .sql-preview {
   background: var(--bg-0);
   border: 1px solid var(--border-default);
@@ -1185,14 +1673,17 @@ input { font: inherit; color: inherit; }
   font-family: var(--font-mono);
   font-size: 11px;
   line-height: 1.6;
-  color: var(--text-secondary);
+  color: var(--sql-ident, var(--text-primary));
   overflow-x: auto;
   white-space: pre;
 }
-.sql-kw { color: var(--cat-users); font-weight: 600; }
-.sql-type { color: var(--idx); }
-.sql-str { color: var(--pk); }
-.sql-comment { color: var(--text-muted); font-style: italic; }
+.sql-kw      { color: var(--sql-keyword); font-weight: 600; }
+.sql-type    { color: var(--sql-type); }
+.sql-str     { color: var(--sql-string); }
+.sql-num     { color: var(--sql-number); }
+.sql-fn      { color: var(--sql-function); }
+.sql-punct   { color: var(--sql-punctuation); }
+.sql-comment { color: var(--sql-comment); font-style: italic; }
 
 /* ============================================================
    Status bar

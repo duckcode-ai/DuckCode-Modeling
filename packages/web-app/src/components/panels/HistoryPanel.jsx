@@ -1,13 +1,15 @@
+/* HistoryPanel — captures in-memory snapshots of the active file and
+   lets the user restore a prior version. Adopts PanelFrame so the
+   header, action cluster, and empty state follow the Luna theme. */
 import React, { useState, useCallback } from "react";
 import {
   Clock,
   RotateCcw,
   Trash2,
-  CheckCircle2,
-  AlertCircle,
   FileCode2,
 } from "lucide-react";
 import useWorkspaceStore from "../../stores/workspaceStore";
+import { PanelFrame, PanelCard, PanelEmpty } from "./PanelFrame";
 
 function timeLabel(iso) {
   try {
@@ -34,98 +36,101 @@ export default function HistoryPanel() {
     setSelectedId(entry.id);
   }, []);
 
-  const restoreSnapshot = useCallback((entry) => {
-    if (entry?.content) {
-      updateContent(entry.content);
-    }
-  }, [updateContent]);
+  const restoreSnapshot = useCallback(
+    (entry) => {
+      if (entry?.content) updateContent(entry.content);
+    },
+    [updateContent]
+  );
 
   const clearHistory = useCallback(() => {
     setHistory([]);
     setSelectedId(null);
   }, []);
 
-  // Take snapshot of current state
   const takeSnapshot = useCallback(() => {
-    if (activeFileContent) {
-      addSnapshot("Manual snapshot", activeFileContent);
-    }
+    if (activeFileContent) addSnapshot("Manual snapshot", activeFileContent);
   }, [activeFileContent, addSnapshot]);
 
   const selected = history.find((h) => h.id === selectedId);
 
-  return (
-    <div className="flex flex-col h-full overflow-hidden">
-      {/* Header */}
-      <div className="flex items-center gap-3 px-3 py-2 border-b border-border-primary bg-bg-secondary/50">
-        <span className="text-xs font-semibold text-text-primary flex items-center gap-1.5">
-          <Clock size={12} />
-          History
-        </span>
-        <span className="text-[10px] text-text-muted">{history.length} snapshots</span>
-        <div className="flex items-center gap-1 ml-auto">
-          <button
-            onClick={takeSnapshot}
-            disabled={!activeFileContent}
-            className="flex items-center gap-1 px-2 py-0.5 rounded text-[10px] text-accent-blue hover:bg-accent-blue/10 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
-          >
-            <FileCode2 size={10} />
-            Snapshot
-          </button>
-          <button
-            onClick={() => selected && restoreSnapshot(selected)}
-            disabled={!selected}
-            className="flex items-center gap-1 px-2 py-0.5 rounded text-[10px] text-accent-green hover:bg-accent-green/10 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
-          >
-            <RotateCcw size={10} />
-            Restore
-          </button>
-          <button
-            onClick={clearHistory}
-            disabled={history.length === 0}
-            className="flex items-center gap-1 px-2 py-0.5 rounded text-[10px] text-text-muted hover:text-status-error hover:bg-red-50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
-          >
-            <Trash2 size={10} />
-            Clear
-          </button>
-        </div>
-      </div>
+  const headerBtn = (icon, label, onClick, disabled, color = "var(--text-secondary)") => (
+    <button
+      onClick={onClick}
+      disabled={disabled}
+      style={{
+        display: "inline-flex", alignItems: "center", gap: 4,
+        padding: "4px 8px", borderRadius: 6,
+        background: "transparent", border: "1px solid var(--border-default)",
+        color, fontSize: 10.5, cursor: disabled ? "not-allowed" : "pointer",
+        opacity: disabled ? 0.4 : 1,
+      }}
+    >
+      {icon}
+      {label}
+    </button>
+  );
 
-      {/* Content */}
-      <div className="flex-1 overflow-y-auto">
-        {history.length === 0 ? (
-          <div className="flex flex-col items-center justify-center h-full text-text-muted text-xs p-4">
-            <Clock size={28} className="mb-2 text-text-muted/50" />
-            <p className="text-sm mb-1">No history yet</p>
-            <p className="text-xs text-center">
-              Take snapshots to track changes over time
-            </p>
-          </div>
-        ) : (
-          <div className="divide-y divide-border-primary/50">
-            {history.map((entry) => (
-              <div
-                key={entry.id}
-                onClick={() => setSelectedId(entry.id)}
-                className={`flex items-center gap-3 px-3 py-2 cursor-pointer transition-colors ${
-                  selectedId === entry.id
-                    ? "bg-bg-active"
-                    : "hover:bg-bg-hover"
-                }`}
-              >
-                <div className="w-1.5 h-1.5 rounded-full bg-accent-blue shrink-0" />
-                <div className="min-w-0 flex-1">
-                  <div className="text-xs text-text-primary truncate">{entry.label}</div>
-                  <div className="text-[10px] text-text-muted">{timeLabel(entry.timestamp)}</div>
-                </div>
-                <span className="text-[10px] text-text-muted shrink-0">
-                  {entry.contentLength} chars
-                </span>
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
+  const actions = (
+    <div style={{ display: "flex", gap: 4 }}>
+      {headerBtn(<FileCode2 size={10} />, "Snapshot", takeSnapshot, !activeFileContent, "var(--accent)")}
+      {headerBtn(<RotateCcw size={10} />, "Restore", () => selected && restoreSnapshot(selected), !selected, "var(--cat-billing)")}
+      {headerBtn(<Trash2 size={10} />, "Clear", clearHistory, history.length === 0, "#ef4444")}
     </div>
+  );
+
+  return (
+    <PanelFrame
+      icon={<Clock size={14} />}
+      eyebrow="Timeline"
+      title="History"
+      subtitle={`${history.length} ${history.length === 1 ? "snapshot" : "snapshots"}`}
+      actions={actions}
+      bodyPadding={history.length === 0 ? 14 : 10}
+    >
+      {history.length === 0 ? (
+        <PanelEmpty
+          icon={Clock}
+          title="No history yet"
+          description="Take snapshots to track changes to the active file over time."
+        />
+      ) : (
+        <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+          {history.map((entry) => {
+            const isSelected = selectedId === entry.id;
+            return (
+              <PanelCard
+                key={entry.id}
+                tone={isSelected ? "accent" : "neutral"}
+                dense
+                onClick={() => setSelectedId(entry.id)}
+                style={{ cursor: "pointer" }}
+              >
+                <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                  <span
+                    style={{
+                      width: 8, height: 8, borderRadius: 4,
+                      background: isSelected ? "var(--accent)" : "var(--cat-users)",
+                      flexShrink: 0,
+                    }}
+                  />
+                  <div style={{ minWidth: 0, flex: 1 }}>
+                    <div style={{ fontSize: 12, color: "var(--text-primary)", fontWeight: 500, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                      {entry.label}
+                    </div>
+                    <div style={{ fontSize: 10, color: "var(--text-tertiary)", fontFamily: "var(--font-mono)" }}>
+                      {timeLabel(entry.timestamp)}
+                    </div>
+                  </div>
+                  <span style={{ fontSize: 10, color: "var(--text-tertiary)", flexShrink: 0, fontFamily: "var(--font-mono)" }}>
+                    {entry.contentLength.toLocaleString()} chars
+                  </span>
+                </div>
+              </PanelCard>
+            );
+          })}
+        </div>
+      )}
+    </PanelFrame>
   );
 }

@@ -1,10 +1,19 @@
-/* GitBranchDialog — list local branches, switch or create new ones. Opened
-   from the branch chip on the Luna project-tabs bar. */
+/* GitBranchDialog — list local branches, switch, or create new ones.
+   Opened from the branch chip on the project-tabs bar. Distinct from
+   CommitDialog (which handles stage+commit+push); this one is the branch
+   switcher. Ported to the shared `<Modal>` chrome. */
 import React, { useEffect, useState } from "react";
-import { X, GitBranch, Plus, RefreshCw, AlertCircle, Check } from "lucide-react";
+import {
+  GitBranch, Plus, RefreshCw, AlertCircle, Check,
+} from "lucide-react";
 import useUiStore from "../../stores/uiStore";
 import useWorkspaceStore from "../../stores/workspaceStore";
-import { fetchGitBranches, fetchGitStatus, createGitBranch } from "../../lib/api";
+import {
+  fetchGitBranches,
+  fetchGitStatus,
+  createGitBranch,
+} from "../../lib/api";
+import Modal from "./Modal";
 
 export default function GitBranchDialog() {
   const { closeModal, addToast } = useUiStore();
@@ -61,75 +70,89 @@ export default function GitBranchDialog() {
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm" onClick={closeModal}>
-      <div className="bg-bg-secondary border border-border-primary rounded-xl shadow-2xl w-[460px] max-w-[92vw] max-h-[85vh] flex flex-col overflow-hidden" onClick={(e) => e.stopPropagation()}>
-        <div className="flex items-center justify-between px-4 py-3 border-b border-border-primary">
-          <h3 className="text-sm font-semibold text-text-primary flex items-center gap-2">
-            <GitBranch size={16} className="text-accent-blue" />
-            Git Branches
-          </h3>
-          <button onClick={closeModal} className="p-1 rounded-md hover:bg-bg-hover text-text-muted hover:text-text-primary transition-colors">
-            <X size={16} />
-          </button>
+    <Modal
+      icon={<GitBranch size={14} />}
+      title="Git Branches"
+      subtitle={current ? `Current: ${current}` : "Switch or create a branch."}
+      size="md"
+      onClose={closeModal}
+      closeOnBackdrop={!busy}
+      closeOnEscape={!busy}
+      footer={
+        <button
+          type="button"
+          className="panel-btn"
+          onClick={closeModal}
+          disabled={busy}
+        >
+          Close
+        </button>
+      }
+    >
+      {error && (
+        <div className="dlx-modal-alert">
+          <AlertCircle size={12} style={{ marginTop: 1, flexShrink: 0 }} />
+          <span>{error}</span>
         </div>
-        <div className="p-4 space-y-3 overflow-y-auto">
-          {error && (
-            <div className="flex items-center gap-2 text-xs text-status-error bg-red-50 border border-red-200 rounded-md px-3 py-2">
-              <AlertCircle size={12} /> {error}
-            </div>
-          )}
+      )}
 
-          {loading ? (
-            <div className="text-xs text-text-muted flex items-center gap-2 py-4 justify-center">
-              <RefreshCw size={12} className="animate-spin" /> Loading branches…
-            </div>
-          ) : (
-            <>
-              <div className="text-[11px] text-text-muted uppercase tracking-wider font-semibold">Local branches</div>
-              <div className="max-h-[280px] overflow-auto border border-border-primary rounded-md">
-                {branches.length === 0 && (
-                  <div className="px-3 py-4 text-xs text-text-muted text-center">No branches found.</div>
-                )}
-                {branches.map((b) => (
+      {loading ? (
+        <div className="dlx-modal-hint" style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <RefreshCw size={12} className="animate-spin" /> Loading branches…
+        </div>
+      ) : (
+        <>
+          <div className="dlx-modal-section">
+            <div className="dlx-modal-section-heading">Local branches</div>
+            <div className="dlx-branch-list">
+              {branches.length === 0 && (
+                <div className="dlx-branch-empty">No branches found.</div>
+              )}
+              {branches.map((b) => {
+                const isCurrent = b === current;
+                return (
                   <button
                     key={b}
-                    onClick={() => b !== current && switchTo(b)}
-                    disabled={busy || b === current}
-                    className={`w-full flex items-center justify-between px-3 py-2 text-xs border-b border-border-primary/60 last:border-0 text-left transition-colors ${
-                      b === current
-                        ? "bg-accent-blue/10 text-text-primary cursor-default"
-                        : "hover:bg-bg-hover text-text-secondary disabled:opacity-40"
-                    }`}
+                    type="button"
+                    onClick={() => !isCurrent && switchTo(b)}
+                    disabled={busy || isCurrent}
+                    className={`dlx-branch-row ${isCurrent ? "current" : ""}`}
                   >
-                    <span className="flex items-center gap-2 font-mono">
-                      <GitBranch size={11} className={b === current ? "text-accent-blue" : "text-text-muted"} />
-                      {b}
-                    </span>
-                    {b === current && <Check size={12} className="text-accent-blue" />}
+                    <GitBranch size={11} />
+                    <span className="dlx-branch-name">{b}</span>
+                    {isCurrent && <Check size={12} className="dlx-branch-check" />}
                   </button>
-                ))}
-              </div>
+                );
+              })}
+            </div>
+          </div>
 
-              <form onSubmit={handleCreate} className="flex items-center gap-2 pt-2 border-t border-border-primary">
-                <Plus size={12} className="text-text-muted" />
-                <input
-                  value={newBranch}
-                  onChange={(e) => setNewBranch(e.target.value.replace(/\s/g, "-"))}
-                  placeholder="new-branch-name"
-                  className="flex-1 bg-bg-primary border border-border-primary rounded-md px-3 py-1.5 text-xs text-text-primary placeholder:text-text-muted outline-none focus:border-accent-blue font-mono"
-                />
-                <button
-                  type="submit"
-                  disabled={busy || !newBranch.trim()}
-                  className="px-3 py-1.5 rounded-md text-xs font-medium bg-accent-blue text-white hover:bg-accent-blue/80 transition-colors disabled:opacity-50"
-                >
-                  Create from {current || "HEAD"}
-                </button>
-              </form>
-            </>
-          )}
-        </div>
-      </div>
-    </div>
+          <form className="dlx-modal-section" onSubmit={handleCreate}>
+            <div className="dlx-modal-section-heading">New branch</div>
+            <div style={{ display: "flex", gap: 6 }}>
+              <input
+                className="panel-input"
+                style={{ flex: 1, fontFamily: "var(--font-mono, ui-monospace, Menlo, monospace)" }}
+                value={newBranch}
+                onChange={(e) => setNewBranch(e.target.value.replace(/\s/g, "-"))}
+                placeholder="feature/my-branch"
+              />
+              <button
+                type="submit"
+                className="panel-btn primary"
+                disabled={busy || !newBranch.trim()}
+                title={`Create from ${current || "HEAD"}`}
+              >
+                <Plus size={11} />
+                Create
+              </button>
+            </div>
+            <p className="dlx-modal-hint">
+              Creates a new branch from <code>{current || "HEAD"}</code> and switches to it.
+            </p>
+          </form>
+        </>
+      )}
+    </Modal>
   );
 }

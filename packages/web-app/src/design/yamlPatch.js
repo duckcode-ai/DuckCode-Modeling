@@ -164,3 +164,49 @@ export function deleteField(yamlText, entityName, fieldName) {
   );
   return dump(doc);
 }
+
+/* Patch a relationship by name. `patch` may set any of:
+     { name, from, to, cardinality, on_delete, on_update, identifying,
+       optional, description }.
+   Undefined keys ignored; null/empty string on string keys clears the
+   key. Returns new YAML or null when the doc can't be parsed / relation
+   not found. Used by the right-panel relationship editor. */
+export function patchRelationship(yamlText, relName, patch) {
+  const doc = loadDoc(yamlText);
+  if (!doc) return null;
+  if (!Array.isArray(doc.relationships)) return null;
+  const target = String(relName || "").toLowerCase();
+  if (!target) return null;
+  const rel = doc.relationships.find(
+    (r) => String(r?.name || "").toLowerCase() === target
+  );
+  if (!rel) return null;
+
+  if (patch.name != null && patch.name !== rel.name) rel.name = String(patch.name);
+  if (patch.from != null) rel.from = String(patch.from);
+  if (patch.to != null)   rel.to = String(patch.to);
+  if (patch.cardinality != null) rel.cardinality = String(patch.cardinality);
+  if (patch.description !== undefined) {
+    if (patch.description) rel.description = String(patch.description);
+    else delete rel.description;
+  }
+  if (patch.on_delete !== undefined) {
+    const v = String(patch.on_delete || "").trim();
+    if (v && v.toUpperCase() !== "NO ACTION") rel.on_delete = v;
+    else delete rel.on_delete;
+  }
+  if (patch.on_update !== undefined) {
+    const v = String(patch.on_update || "").trim();
+    if (v && v.toUpperCase() !== "NO ACTION") rel.on_update = v;
+    else delete rel.on_update;
+  }
+  if (patch.identifying !== undefined) {
+    if (patch.identifying) rel.identifying = true;
+    else delete rel.identifying;
+  }
+  if (patch.optional !== undefined) {
+    if (patch.optional) rel.optional = true;
+    else delete rel.optional;
+  }
+  return dump(doc);
+}

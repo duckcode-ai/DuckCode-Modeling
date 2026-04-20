@@ -1,36 +1,147 @@
+/* ModelGraphPanel — lists dbt models (or their DataLex equivalent) with
+   their owned entities, imports, and any cross-model relationships.
+
+   The previous version cycled through six hardcoded Tailwind pastels
+   (bg-blue-50, bg-emerald-50, …) which looked fine on Paper/Arctic but
+   glared on Midnight/Obsidian. This rewrite maps every model to one of
+   the six Luna categorical tokens (--cat-users/billing/product/system/
+   access/audit) which are defined for all four themes, so the badges
+   adopt the palette automatically. Each model is rendered inside a
+   PanelCard with a coloured left-border, and entities are laid out as
+   a responsive grid of StatusPills instead of a single run-on line. */
 import React, { useState, useEffect, useMemo } from "react";
 import {
-  Network,
-  FileText,
-  ArrowRight,
-  ExternalLink,
-  Package,
-  RefreshCw,
-  AlertCircle,
+  Network, ArrowRight, ExternalLink, Package, RefreshCw, AlertCircle,
 } from "lucide-react";
 import useWorkspaceStore from "../../stores/workspaceStore";
 import { fetchModelGraph } from "../../lib/api";
+import { PanelFrame, PanelSection, PanelCard, StatusPill, PanelEmpty } from "./PanelFrame";
 
-const MODEL_COLORS = [
-  { bg: "bg-blue-50", border: "border-blue-300", text: "text-blue-700", dot: "bg-blue-500" },
-  { bg: "bg-emerald-50", border: "border-emerald-300", text: "text-emerald-700", dot: "bg-emerald-500" },
-  { bg: "bg-purple-50", border: "border-purple-300", text: "text-purple-700", dot: "bg-purple-500" },
-  { bg: "bg-amber-50", border: "border-amber-300", text: "text-amber-700", dot: "bg-amber-500" },
-  { bg: "bg-rose-50", border: "border-rose-300", text: "text-rose-700", dot: "bg-rose-500" },
-  { bg: "bg-cyan-50", border: "border-cyan-300", text: "text-cyan-700", dot: "bg-cyan-500" },
-];
+/* Six Luna categorical tokens, cycled by model index. Every token is
+   theme-aware across midnight / obsidian / paper / arctic. */
+const CAT_TOKENS = ["users", "billing", "product", "system", "access", "audit"];
+function catFor(i) { return CAT_TOKENS[i % CAT_TOKENS.length]; }
+function catVars(cat) {
+  return {
+    "--cat-color": `var(--cat-${cat})`,
+    "--cat-soft":  `var(--cat-${cat}-soft)`,
+  };
+}
+
+function ModelCard({ model, idx, colorMap, onOpen }) {
+  const cat = colorMap[model.name] || catFor(idx);
+  return (
+    <div
+      className="panel-card"
+      style={{
+        borderLeft: `3px solid var(--cat-${cat})`,
+        background: `linear-gradient(to right, var(--cat-${cat}-soft), var(--bg-2) 120px)`,
+      }}
+    >
+      <div className="panel-card-header" style={{ marginBottom: 10 }}>
+        <div className="panel-card-heading">
+          <span
+            className="panel-card-icon"
+            style={{ background: `var(--cat-${cat}-soft)`, color: `var(--cat-${cat})` }}
+          >
+            <Network size={12} />
+          </span>
+          <div className="panel-card-title-col">
+            <div className="panel-card-title" style={{ fontFamily: "var(--font-mono)" }}>
+              {model.name}
+            </div>
+            <div className="panel-card-subtitle">
+              {model.entity_count} {model.entity_count === 1 ? "entity" : "entities"}
+              {model.path && <> · <code style={{ fontSize: 10 }}>{model.path}</code></>}
+            </div>
+          </div>
+        </div>
+        {model.file && (
+          <div className="panel-card-actions">
+            <button
+              onClick={() => onOpen(model.file)}
+              title={`Open ${model.path || model.file}`}
+              style={{
+                display: "inline-flex", alignItems: "center", gap: 4,
+                padding: "3px 8px", borderRadius: 6,
+                background: "transparent", border: "1px solid var(--border-default)",
+                color: "var(--text-secondary)", fontSize: 10.5, cursor: "pointer",
+              }}
+            >
+              <ExternalLink size={10} />
+              Open
+            </button>
+          </div>
+        )}
+      </div>
+
+      {/* Imports (small chip row, neutral tone so it stays visually below the primary colour) */}
+      {model.imports && model.imports.length > 0 && (
+        <div style={{ display: "flex", alignItems: "center", flexWrap: "wrap", gap: 6, marginBottom: 10 }}>
+          <Package size={10} style={{ color: "var(--text-tertiary)" }} />
+          <span style={{ fontSize: 10, color: "var(--text-tertiary)" }}>imports:</span>
+          {model.imports.map((imp) => {
+            const impCat = colorMap[imp] || catFor(idx);
+            return (
+              <span
+                key={imp}
+                className="status-pill"
+                style={{
+                  background: `var(--cat-${impCat}-soft)`,
+                  color: `var(--cat-${impCat})`,
+                  borderColor: `var(--cat-${impCat})`,
+                  fontFamily: "var(--font-mono)",
+                }}
+              >
+                {imp}
+              </span>
+            );
+          })}
+        </div>
+      )}
+
+      {/* Entity grid — auto-fill so a wide drawer shows 4–6 columns, narrow drawers drop to 2 */}
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "repeat(auto-fill, minmax(140px, 1fr))",
+          gap: 6,
+        }}
+      >
+        {model.entities.map((entity) => (
+          <div
+            key={entity}
+            style={{
+              padding: "4px 8px",
+              borderRadius: 6,
+              background: "var(--bg-2)",
+              border: "1px solid var(--border-default)",
+              color: "var(--text-secondary)",
+              fontSize: 11,
+              fontFamily: "var(--font-mono)",
+              whiteSpace: "nowrap",
+              overflow: "hidden",
+              textOverflow: "ellipsis",
+            }}
+            title={entity}
+          >
+            {entity}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
 
 export default function ModelGraphPanel() {
-  const { activeProjectId, offlineMode, projectFiles } = useWorkspaceStore();
-  const { openFile } = useWorkspaceStore();
+  const { activeProjectId, offlineMode, projectFiles, openFile } = useWorkspaceStore();
   const [graphData, setGraphData] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
 
   const loadGraph = async () => {
     if (!activeProjectId || offlineMode) return;
-    setLoading(true);
-    setError(null);
+    setLoading(true); setError(null);
     try {
       const data = await fetchModelGraph(activeProjectId);
       setGraphData(data);
@@ -41,186 +152,157 @@ export default function ModelGraphPanel() {
     }
   };
 
-  useEffect(() => {
-    loadGraph();
-  }, [activeProjectId]);
+  useEffect(() => { loadGraph(); }, [activeProjectId]);
 
   const colorMap = useMemo(() => {
     if (!graphData?.models) return {};
     const map = {};
-    graphData.models.forEach((m, i) => {
-      map[m.name] = MODEL_COLORS[i % MODEL_COLORS.length];
-    });
+    graphData.models.forEach((m, i) => { map[m.name] = catFor(i); });
     return map;
   }, [graphData]);
 
   const handleOpenFile = (filePath) => {
     const file = projectFiles.find((f) => f.fullPath === filePath);
-    if (file) {
-      openFile(file);
-    }
+    if (file) openFile(file);
   };
 
+  const refreshAction = (
+    <button
+      onClick={loadGraph}
+      title="Refresh"
+      aria-label="Refresh model graph"
+      style={{
+        width: 26, height: 26, display: "inline-flex", alignItems: "center", justifyContent: "center",
+        borderRadius: 6, background: "transparent", border: "1px solid var(--border-default)",
+        color: "var(--text-secondary)", cursor: "pointer",
+      }}
+    >
+      <RefreshCw size={12} className={loading ? "animate-spin" : ""} />
+    </button>
+  );
+
+  /* Zero / error / offline states all render through PanelFrame so they
+     inherit the same header + chrome as the loaded view. */
   if (offlineMode) {
     return (
-      <div className="flex items-center justify-center h-full text-text-muted text-xs p-4">
-        <AlertCircle size={12} className="mr-1" />
-        Model graph requires API server connection
-      </div>
+      <PanelFrame icon={<Network size={14} />} eyebrow="Overview" title="Model Graph" actions={refreshAction}>
+        <PanelEmpty icon={AlertCircle} title="API server offline" description="Model graph requires a live API connection." />
+      </PanelFrame>
     );
   }
-
-  if (loading) {
+  if (loading && !graphData) {
     return (
-      <div className="flex items-center justify-center h-full text-text-muted text-xs p-4">
-        <RefreshCw size={12} className="mr-1 animate-spin" />
-        Loading model graph...
-      </div>
+      <PanelFrame icon={<Network size={14} />} eyebrow="Overview" title="Model Graph" actions={refreshAction}>
+        <PanelEmpty icon={RefreshCw} title="Loading model graph…" description="Fetching models and their relationships." />
+      </PanelFrame>
     );
   }
-
   if (error) {
     return (
-      <div className="flex flex-col items-center justify-center h-full text-text-muted text-xs p-4 gap-2">
-        <span className="text-red-500">{error}</span>
-        <button
-          onClick={loadGraph}
-          className="flex items-center gap-1 px-2 py-1 rounded text-[10px] text-accent-blue hover:bg-accent-blue/10"
-        >
-          <RefreshCw size={10} />
-          Retry
-        </button>
-      </div>
+      <PanelFrame icon={<Network size={14} />} eyebrow="Overview" title="Model Graph" actions={refreshAction}>
+        <PanelEmpty
+          icon={AlertCircle}
+          title="Could not load model graph"
+          description={error}
+          action={
+            <button
+              onClick={loadGraph}
+              style={{
+                display: "inline-flex", alignItems: "center", gap: 6,
+                padding: "6px 12px", borderRadius: 6,
+                background: "var(--accent)", color: "#fff", border: "none",
+                fontSize: 11, fontWeight: 500, cursor: "pointer",
+              }}
+            >
+              <RefreshCw size={11} /> Retry
+            </button>
+          }
+        />
+      </PanelFrame>
     );
   }
-
   if (!graphData || !graphData.models || graphData.models.length === 0) {
     return (
-      <div className="flex items-center justify-center h-full text-text-muted text-xs p-4">
-        No model files found in this project
-      </div>
+      <PanelFrame icon={<Network size={14} />} eyebrow="Overview" title="Model Graph" actions={refreshAction}>
+        <PanelEmpty title="No models found" description="This project doesn’t have any model files yet." />
+      </PanelFrame>
     );
   }
 
   return (
-    <div className="flex flex-col h-full overflow-hidden">
-      {/* Header */}
-      <div className="flex items-center justify-between px-3 py-2 border-b border-border-primary bg-bg-secondary/50">
-        <div className="flex items-center gap-1.5">
-          <Network size={12} className="text-accent-blue" />
-          <span className="text-xs font-semibold text-text-primary">Model Graph</span>
-          <span className="text-[10px] text-text-muted">
-            ({graphData.model_count} models, {graphData.total_entities} entities)
-          </span>
-        </div>
-        <button
-          onClick={loadGraph}
-          className="p-1 rounded-md hover:bg-bg-hover text-text-muted hover:text-text-primary transition-colors"
-          title="Refresh"
-        >
-          <RefreshCw size={12} />
-        </button>
-      </div>
-
-      {/* Content */}
-      <div className="flex-1 overflow-y-auto p-3 space-y-3">
-        {/* Models */}
-        {graphData.models.map((model) => {
-          const colors = colorMap[model.name] || MODEL_COLORS[0];
-          return (
-            <div
+    <PanelFrame
+      icon={<Network size={14} />}
+      eyebrow="Overview"
+      title="Model Graph"
+      subtitle={`${graphData.model_count} models · ${graphData.total_entities} entities`}
+      actions={refreshAction}
+    >
+      <PanelSection title="Models" count={graphData.models.length}>
+        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+          {graphData.models.map((model, idx) => (
+            <ModelCard
               key={model.name}
-              className={`rounded-lg border ${colors.border} ${colors.bg} p-2.5`}
-            >
-              <div className="flex items-center justify-between mb-1.5">
-                <div className="flex items-center gap-1.5">
-                  <div className={`w-2 h-2 rounded-full ${colors.dot}`} />
-                  <span className={`text-xs font-semibold ${colors.text}`}>
-                    {model.name}
-                  </span>
-                  <span className="text-[10px] text-text-muted">
-                    {model.entity_count} entities
-                  </span>
-                </div>
-                {model.file && (
-                  <button
-                    onClick={() => handleOpenFile(model.file)}
-                    className="flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[9px] text-text-muted hover:text-accent-blue hover:bg-white/50 transition-colors"
-                    title={`Open ${model.path || model.file}`}
+              model={model}
+              idx={idx}
+              colorMap={colorMap}
+              onOpen={handleOpenFile}
+            />
+          ))}
+        </div>
+      </PanelSection>
+
+      {graphData.cross_model_relationships && graphData.cross_model_relationships.length > 0 && (
+        <PanelSection
+          title="Cross-Model Relationships"
+          count={graphData.cross_model_relationships.length}
+          icon={<ArrowRight size={11} />}
+        >
+          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+            {graphData.cross_model_relationships.map((rel, i) => {
+              const fromCat = colorMap[rel.from_model] || "users";
+              const toCat = colorMap[rel.to_model] || "users";
+              return (
+                <div
+                  key={i}
+                  style={{
+                    display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap",
+                    padding: "8px 10px",
+                    background: "var(--bg-2)",
+                    border: "1px solid var(--border-default)",
+                    borderRadius: 6,
+                    fontSize: 11.5,
+                    fontFamily: "var(--font-mono)",
+                  }}
+                >
+                  <StatusPill
+                    tone="neutral"
+                    style={{
+                      background: `var(--cat-${fromCat}-soft)`,
+                      color: `var(--cat-${fromCat})`,
+                      borderColor: `var(--cat-${fromCat})`,
+                    }}
                   >
-                    <ExternalLink size={9} />
-                    Open
-                  </button>
-                )}
-              </div>
-
-              {/* Imports */}
-              {model.imports && model.imports.length > 0 && (
-                <div className="flex items-center gap-1 mb-1.5 ml-3.5">
-                  <Package size={9} className="text-text-muted shrink-0" />
-                  <span className="text-[10px] text-text-muted">imports:</span>
-                  {model.imports.map((imp) => {
-                    const impColors = colorMap[imp] || MODEL_COLORS[0];
-                    return (
-                      <span
-                        key={imp}
-                        className={`px-1.5 py-0 rounded text-[9px] font-medium ${impColors.bg} ${impColors.text} border ${impColors.border}`}
-                      >
-                        {imp}
-                      </span>
-                    );
-                  })}
-                </div>
-              )}
-
-              {/* Entities */}
-              <div className="flex flex-wrap gap-1 ml-3.5">
-                {model.entities.map((entity) => (
-                  <span
-                    key={entity}
-                    className="px-1.5 py-0.5 rounded bg-white/60 border border-white/80 text-[10px] text-text-secondary font-mono"
+                    {rel.from_model}
+                  </StatusPill>
+                  <code style={{ color: "var(--text-primary)" }}>{rel.from_entity}</code>
+                  <ArrowRight size={11} style={{ color: "var(--text-tertiary)" }} />
+                  <StatusPill
+                    tone="neutral"
+                    style={{
+                      background: `var(--cat-${toCat}-soft)`,
+                      color: `var(--cat-${toCat})`,
+                      borderColor: `var(--cat-${toCat})`,
+                    }}
                   >
-                    {entity}
-                  </span>
-                ))}
-              </div>
-            </div>
-          );
-        })}
-
-        {/* Cross-model relationships */}
-        {graphData.cross_model_relationships &&
-          graphData.cross_model_relationships.length > 0 && (
-            <div>
-              <label className="text-[10px] text-text-muted uppercase tracking-wider font-semibold flex items-center gap-1 mb-1.5">
-                <ArrowRight size={10} />
-                Cross-Model Relationships ({graphData.cross_model_relationships.length})
-              </label>
-              <div className="space-y-1">
-                {graphData.cross_model_relationships.map((rel, i) => {
-                  const fromColors = colorMap[rel.from_model] || MODEL_COLORS[0];
-                  const toColors = colorMap[rel.to_model] || MODEL_COLORS[0];
-                  return (
-                    <div
-                      key={i}
-                      className="flex items-center gap-1.5 px-2 py-1.5 bg-bg-primary border border-border-primary rounded-md text-[11px]"
-                    >
-                      <span className={`px-1 py-0 rounded text-[9px] font-semibold ${fromColors.bg} ${fromColors.text}`}>
-                        {rel.from_model}
-                      </span>
-                      <code className="text-text-secondary">{rel.from_entity}</code>
-                      <ArrowRight size={10} className="text-text-muted shrink-0" />
-                      <span className={`px-1 py-0 rounded text-[9px] font-semibold ${toColors.bg} ${toColors.text}`}>
-                        {rel.to_model}
-                      </span>
-                      <code className="text-text-secondary">{rel.to_entity}</code>
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-          )}
-      </div>
-    </div>
+                    {rel.to_model}
+                  </StatusPill>
+                  <code style={{ color: "var(--text-primary)" }}>{rel.to_entity}</code>
+                </div>
+              );
+            })}
+          </div>
+        </PanelSection>
+      )}
+    </PanelFrame>
   );
 }

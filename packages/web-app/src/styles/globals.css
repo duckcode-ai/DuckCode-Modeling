@@ -440,39 +440,18 @@
 }
 
 /* ──────────────────────────────────────────────────────────────────────────
-   CodeMirror + React Flow adapters (token-driven)
+   CodeMirror + React Flow adapters
+
+   The YAML editor owns its own theme via EditorView.theme() in
+   YamlEditor.jsx and swaps between a light and dark palette based on the
+   current Luna theme (midnight/obsidian → dark, paper/arctic → light). We
+   only set sizing here — colors, selection, gutters, and cursor are all
+   handled in the editor theme so they can vary per Luna theme.
    ────────────────────────────────────────────────────────────────────────── */
 
 .cm-editor {
   height: 100% !important;
   font-size: 13px;
-  background: var(--color-bg-primary) !important;
-}
-
-.cm-editor .cm-gutters {
-  background: var(--color-bg-secondary) !important;
-  border-right: 1px solid var(--color-border-primary) !important;
-  color: var(--color-text-muted) !important;
-}
-
-.cm-editor .cm-content {
-  color: var(--color-text-primary) !important;
-}
-
-.cm-editor .cm-activeLine {
-  background: rgba(59, 130, 246, 0.06) !important;
-}
-
-.cm-editor .cm-activeLineGutter {
-  background: rgba(59, 130, 246, 0.08) !important;
-}
-
-.cm-editor .cm-selectionBackground {
-  background: rgba(59, 130, 246, 0.15) !important;
-}
-
-.cm-editor .cm-cursor {
-  border-left-color: var(--color-accent-blue) !important;
 }
 
 .react-flow__background {

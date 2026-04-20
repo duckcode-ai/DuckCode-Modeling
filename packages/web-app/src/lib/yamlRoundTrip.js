@@ -542,6 +542,61 @@ export function addEnum(yamlText, name, values) {
   });
 }
 
+/* Replace the value list on an existing enum. Used by EnumsView's inline
+   chip editor. Accepts a string[] or a csv/newline string. */
+export function updateEnumValues(yamlText, name, values) {
+  const enumValues = coerceStringList(values);
+  return mutateModel(yamlText, (model) => {
+    const enumName = String(name || "").trim();
+    if (!enumName || !Array.isArray(model.enums)) return;
+    const target = model.enums.find((item) => item?.name === enumName);
+    if (!target) return;
+    target.values = enumValues;
+  });
+}
+
+/* Remove an enum by name. No-op if missing. */
+export function removeEnum(yamlText, name) {
+  return mutateModel(yamlText, (model) => {
+    if (!Array.isArray(model.enums)) return;
+    const enumName = String(name || "").trim();
+    if (!enumName) return;
+    model.enums = model.enums.filter((item) => item?.name !== enumName);
+  });
+}
+
+/* Update fields on an existing index (name, fields, unique, type,
+   description). Missing index → no-op. Returns new YAML. Used by the
+   right-panel IndexesView inspector tab (addIndex/removeIndex are
+   defined below with the long-form signature used by EntityPanel). */
+export function updateIndex(yamlText, name, patch) {
+  return mutateModel(yamlText, (model) => {
+    if (!Array.isArray(model.indexes)) return;
+    const target = String(name || "").trim();
+    if (!target) return;
+    const ix = model.indexes.find((item) => item?.name === target);
+    if (!ix) return;
+    if (patch?.name != null && patch.name !== ix.name) ix.name = String(patch.name);
+    if (patch?.fields !== undefined) ix.fields = coerceStringList(patch.fields);
+    if (patch?.unique !== undefined) {
+      if (patch.unique) ix.unique = true;
+      else delete ix.unique;
+    }
+    if (patch?.type !== undefined) {
+      if (patch.type) ix.type = String(patch.type);
+      else delete ix.type;
+    }
+    if (patch?.description !== undefined) {
+      if (patch.description) ix.description = String(patch.description);
+      else delete ix.description;
+    }
+  });
+}
+
+/* deleteRelationship is a named alias for removeRelationship (defined above)
+   so the right-panel inspector can import the more explicit name. */
+export const deleteRelationship = removeRelationship;
+
 export function addSubjectArea(yamlText, name, description = "") {
   return mutateModel(yamlText, (model) => {
     if (!Array.isArray(model.subject_areas)) model.subject_areas = [];

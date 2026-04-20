@@ -1,3 +1,15 @@
+/* ValidationPanel — reports errors, warnings, dimensional-modeling
+   nudges, and a completeness score for the active file.
+
+   Redesigned on top of PanelFrame / PanelSection / PanelCard / StatusPill
+   so it inherits the Luna theme surface language across midnight,
+   obsidian, paper, and arctic. The completeness score is rendered as a
+   ring-gauge (SVG) instead of a flat Tailwind-coloured bar; every issue
+   row is a toned PanelCard with a left-border accent and severity icon.
+
+   Issue categorisation logic (NUDGE_CODES / DIMENSIONAL_CODES and the
+   runModelChecks integration) is preserved exactly — this rewrite is
+   chrome + layout, not semantics. */
 import React, { useMemo, useState } from "react";
 import {
   AlertCircle,
@@ -7,17 +19,21 @@ import {
   ChevronRight,
   Info,
   Gauge,
+  Layers,
 } from "lucide-react";
 import useWorkspaceStore from "../../stores/workspaceStore";
 import { runModelChecks } from "../../modelQuality";
+import {
+  PanelFrame,
+  PanelSection,
+  PanelCard,
+  StatusPill,
+  PanelEmpty,
+} from "./PanelFrame";
 
-const SEVERITY_CONFIG = {
-  error: { icon: AlertCircle, color: "text-status-error", bg: "bg-red-50 border-red-200" },
-  warn: { icon: AlertTriangle, color: "text-status-warning", bg: "bg-yellow-50 border-yellow-200" },
-  info: { icon: Info, color: "text-status-info", bg: "bg-blue-50 border-blue-200" },
-};
-
-// Nudge issue codes — shown in a dedicated Gaps section
+/* ────────────────────────────────────────────────────────────────── */
+/* Issue-code taxonomy (preserved from the previous implementation)   */
+/* ────────────────────────────────────────────────────────────────── */
 const NUDGE_CODES = new Set([
   "MISSING_ENTITY_DESCRIPTION",
   "MISSING_ENTITY_OWNER",
@@ -31,7 +47,6 @@ const NUDGE_CODES = new Set([
   "REPORT_ENTITY_NO_METRICS",
   "GLOSSARY_NO_FIELD_REFS",
   "ORPHAN_IMPORT_ENTITY",
-  // Dimensional modeling nudges
   "FACT_WITHOUT_DIMENSION_REFS",
   "DIM_WITHOUT_NATURAL_KEY",
   "SCD2_MISSING_SYSTEM_FIELDS",
@@ -39,7 +54,6 @@ const NUDGE_CODES = new Set([
   "DIMENSION_REF_NOT_FOUND",
 ]);
 
-// Dimensional-specific codes — shown in a dedicated Dimensional Modeling section
 const DIMENSIONAL_CODES = new Set([
   "FACT_WITHOUT_DIMENSION_REFS",
   "DIM_WITHOUT_NATURAL_KEY",
@@ -48,63 +62,183 @@ const DIMENSIONAL_CODES = new Set([
   "DIMENSION_REF_NOT_FOUND",
 ]);
 
-function scoreColor(score) {
-  if (score >= 80) return "text-green-600";
-  if (score >= 60) return "text-yellow-600";
-  return "text-red-500";
+/* ────────────────────────────────────────────────────────────────── */
+/* Semantic helpers                                                   */
+/* ────────────────────────────────────────────────────────────────── */
+function scoreBand(score) {
+  if (score >= 80) return { tone: "success", color: "var(--cat-billing)", label: "Good" };
+  if (score >= 60) return { tone: "warning", color: "var(--pk)", label: "Partial" };
+  return { tone: "error", color: "#ef4444", label: "Gaps" };
 }
 
-function scoreBarColor(score) {
-  if (score >= 80) return "bg-green-500";
-  if (score >= 60) return "bg-yellow-400";
-  return "bg-red-400";
+function severityConfig(severity) {
+  switch (severity) {
+    case "error":
+      return { tone: "error", Icon: AlertCircle, label: "Error" };
+    case "warn":
+      return { tone: "warning", Icon: AlertTriangle, label: "Warning" };
+    case "info":
+    default:
+      return { tone: "info", Icon: Info, label: "Info" };
+  }
 }
 
-function scoreLabel(score) {
-  if (score === 100) return { text: "Complete", cls: "bg-green-50 text-green-700" };
-  if (score >= 80) return { text: "Good", cls: "bg-green-50 text-green-600" };
-  if (score >= 60) return { text: "Partial", cls: "bg-yellow-50 text-yellow-600" };
-  return { text: "Gaps", cls: "bg-red-50 text-red-600" };
-}
-
-function ScoreBar({ score, height = "h-1.5" }) {
+/* ────────────────────────────────────────────────────────────────── */
+/* RingGauge — SVG circular progress for the completeness score.      */
+/* Stroke colour follows the score band so the gauge reads semantically
+   at a glance: green ≥80, amber 60-79, red <60. The ring is theme
+   aware because it uses Luna variables for the track.                */
+/* ────────────────────────────────────────────────────────────────── */
+function RingGauge({ value = 0, size = 72, stroke = 7 }) {
+  const pct = Math.max(0, Math.min(100, value));
+  const r = (size - stroke) / 2;
+  const c = 2 * Math.PI * r;
+  const offset = c * (1 - pct / 100);
+  const band = scoreBand(pct);
   return (
-    <div className={`w-full bg-gray-200 rounded-full ${height} overflow-hidden`}>
+    <div style={{ position: "relative", width: size, height: size, flexShrink: 0 }}>
+      <svg width={size} height={size}>
+        <circle
+          cx={size / 2}
+          cy={size / 2}
+          r={r}
+          fill="none"
+          stroke="var(--border-default)"
+          strokeWidth={stroke}
+        />
+        <circle
+          cx={size / 2}
+          cy={size / 2}
+          r={r}
+          fill="none"
+          stroke={band.color}
+          strokeWidth={stroke}
+          strokeLinecap="round"
+          strokeDasharray={c}
+          strokeDashoffset={offset}
+          transform={`rotate(-90 ${size / 2} ${size / 2})`}
+          style={{ transition: "stroke-dashoffset 400ms var(--ease, ease)" }}
+        />
+      </svg>
       <div
-        className={`${scoreBarColor(score)} ${height} rounded-full transition-all duration-300`}
-        style={{ width: `${score}%` }}
-      />
+        style={{
+          position: "absolute",
+          inset: 0,
+          display: "flex",
+          flexDirection: "column",
+          alignItems: "center",
+          justifyContent: "center",
+          lineHeight: 1,
+        }}
+      >
+        <div style={{ fontSize: 16, fontWeight: 700, color: band.color }}>{pct}</div>
+        <div style={{ fontSize: 9, color: "var(--text-tertiary)", marginTop: 2, letterSpacing: "0.05em" }}>
+          {band.label.toUpperCase()}
+        </div>
+      </div>
     </div>
   );
 }
 
+/* ────────────────────────────────────────────────────────────────── */
+/* EntityCompletenessRow — one row per entity in the completeness list */
+/* ────────────────────────────────────────────────────────────────── */
 function EntityCompletenessRow({ entity }) {
   const [open, setOpen] = useState(false);
-  const label = scoreLabel(entity.score);
+  const band = scoreBand(entity.score);
 
   return (
-    <div className="border border-border-primary rounded-md overflow-hidden">
+    <div
+      style={{
+        border: "1px solid var(--border-default)",
+        borderRadius: 6,
+        background: "var(--bg-1)",
+        overflow: "hidden",
+      }}
+    >
       <button
+        type="button"
         onClick={() => setOpen((v) => !v)}
-        className="w-full flex items-center gap-2 px-2.5 py-1.5 hover:bg-bg-hover transition-colors text-left"
+        style={{
+          width: "100%",
+          display: "flex",
+          alignItems: "center",
+          gap: 8,
+          padding: "7px 10px",
+          background: "transparent",
+          border: "none",
+          color: "var(--text-primary)",
+          cursor: "pointer",
+          textAlign: "left",
+        }}
       >
-        {open ? <ChevronDown size={11} className="shrink-0 text-text-muted" /> : <ChevronRight size={11} className="shrink-0 text-text-muted" />}
-        <span className="text-xs font-medium text-text-primary truncate flex-1">{entity.entityName}</span>
-        <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded ${label.cls} shrink-0`}>
-          {entity.score}%
+        {open ? (
+          <ChevronDown size={11} style={{ color: "var(--text-tertiary)", flexShrink: 0 }} />
+        ) : (
+          <ChevronRight size={11} style={{ color: "var(--text-tertiary)", flexShrink: 0 }} />
+        )}
+        <span
+          style={{
+            flex: 1,
+            fontSize: 11.5,
+            fontWeight: 500,
+            overflow: "hidden",
+            textOverflow: "ellipsis",
+            whiteSpace: "nowrap",
+            fontFamily: "var(--font-mono)",
+          }}
+          title={entity.entityName}
+        >
+          {entity.entityName}
         </span>
+        <StatusPill tone={band.tone}>{entity.score}%</StatusPill>
       </button>
 
-      {/* Mini progress bar always visible */}
-      <div className="px-2.5 pb-1.5">
-        <ScoreBar score={entity.score} height="h-1" />
+      {/* Thin progress bar always visible */}
+      <div style={{ padding: "0 10px 6px" }}>
+        <div
+          style={{
+            width: "100%",
+            height: 3,
+            background: "var(--border-subtle)",
+            borderRadius: 3,
+            overflow: "hidden",
+          }}
+        >
+          <div
+            style={{
+              width: `${entity.score}%`,
+              height: "100%",
+              background: band.color,
+              transition: "width 300ms var(--ease, ease)",
+            }}
+          />
+        </div>
       </div>
 
       {open && entity.missing.length > 0 && (
-        <div className="border-t border-border-primary bg-bg-secondary/40 px-2.5 py-2 space-y-1">
+        <div
+          style={{
+            borderTop: "1px solid var(--border-subtle)",
+            background: "var(--bg-0)",
+            padding: "8px 10px",
+            display: "flex",
+            flexDirection: "column",
+            gap: 4,
+          }}
+        >
           {entity.missing.map((m, i) => (
-            <div key={i} className="flex items-start gap-1.5 text-[11px] text-text-secondary">
-              <span className="text-yellow-500 shrink-0 mt-0.5">↳</span>
+            <div
+              key={i}
+              style={{
+                display: "flex",
+                alignItems: "flex-start",
+                gap: 6,
+                fontSize: 11,
+                color: "var(--text-secondary)",
+              }}
+            >
+              <span style={{ color: "var(--pk)", flexShrink: 0, marginTop: 1 }}>↳</span>
               <span>{m}</span>
             </div>
           ))}
@@ -112,7 +246,18 @@ function EntityCompletenessRow({ entity }) {
       )}
 
       {open && entity.missing.length === 0 && (
-        <div className="border-t border-border-primary bg-green-50/50 px-2.5 py-1.5 flex items-center gap-1.5 text-[11px] text-green-600">
+        <div
+          style={{
+            borderTop: "1px solid var(--border-subtle)",
+            background: "var(--bg-0)",
+            padding: "6px 10px",
+            display: "flex",
+            alignItems: "center",
+            gap: 6,
+            fontSize: 11,
+            color: "var(--cat-billing)",
+          }}
+        >
           <CheckCircle2 size={11} />
           All completeness checks passed
         </div>
@@ -121,76 +266,65 @@ function EntityCompletenessRow({ entity }) {
   );
 }
 
-function CompletenessSection({ completeness }) {
-  const [open, setOpen] = useState(true);
-  if (!completeness) return null;
-
-  const label = scoreLabel(completeness.modelScore);
-
-  return (
-    <div className="border border-border-primary rounded-lg overflow-hidden">
-      {/* Header */}
-      <button
-        onClick={() => setOpen((v) => !v)}
-        className="w-full flex items-center gap-2 px-3 py-2 bg-bg-secondary/60 hover:bg-bg-hover transition-colors text-left"
-      >
-        <Gauge size={13} className={scoreColor(completeness.modelScore)} />
-        <span className="text-xs font-semibold text-text-primary flex-1">Completeness</span>
-        <span className={`text-[10px] font-bold px-2 py-0.5 rounded ${label.cls}`}>
-          {completeness.modelScore}%
-        </span>
-        {open ? <ChevronDown size={11} className="text-text-muted" /> : <ChevronRight size={11} className="text-text-muted" />}
-      </button>
-
-      {open && (
-        <div className="p-2.5 space-y-2 bg-bg-primary">
-          {/* Overall bar */}
-          <div className="space-y-1">
-            <ScoreBar score={completeness.modelScore} height="h-2" />
-            <div className="flex justify-between text-[10px] text-text-muted">
-              <span>{completeness.fullyComplete}/{completeness.totalEntities} entities fully complete</span>
-              {completeness.needsAttention.length > 0 && (
-                <span className="text-red-500">{completeness.needsAttention.length} need attention</span>
-              )}
-            </div>
-          </div>
-
-          {/* Per-entity rows */}
-          <div className="space-y-1.5">
-            {completeness.entities.map((e) => (
-              <EntityCompletenessRow key={e.entityName} entity={e} />
-            ))}
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
-
+/* ────────────────────────────────────────────────────────────────── */
+/* IssueRow — one issue rendered as a toned PanelCard                 */
+/* ────────────────────────────────────────────────────────────────── */
 function IssueRow({ issue }) {
-  const config = SEVERITY_CONFIG[issue.severity] || SEVERITY_CONFIG.info;
-  const Icon = config.icon;
-
+  const { tone, Icon } = severityConfig(issue.severity);
   return (
-    <div className={`flex items-start gap-2 px-3 py-2 border rounded-md ${config.bg} transition-colors`}>
-      <Icon size={13} className={`${config.color} shrink-0 mt-0.5`} />
-      <div className="min-w-0 flex-1">
-        <div className="flex items-center gap-2">
-          <span className={`text-[10px] font-bold uppercase tracking-wider ${config.color}`}>
-            {issue.code}
-          </span>
-          {issue.path && issue.path !== "/" && (
-            <code className="text-[10px] text-text-muted bg-bg-primary px-1 py-0 rounded">
-              {issue.path}
-            </code>
-          )}
+    <PanelCard tone={tone} dense>
+      <div style={{ display: "flex", alignItems: "flex-start", gap: 10 }}>
+        <Icon
+          size={14}
+          style={{
+            color: `var(--cat-${
+              tone === "error" ? "users" : tone === "warning" ? "billing" : "product"
+            })`,
+            flexShrink: 0,
+            marginTop: 2,
+          }}
+        />
+        <div style={{ minWidth: 0, flex: 1 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+            <span
+              style={{
+                fontSize: 10,
+                fontWeight: 700,
+                letterSpacing: "0.06em",
+                textTransform: "uppercase",
+                color: "var(--text-primary)",
+                fontFamily: "var(--font-mono)",
+              }}
+            >
+              {issue.code}
+            </span>
+            {issue.path && issue.path !== "/" && (
+              <code
+                style={{
+                  fontSize: 10,
+                  color: "var(--text-tertiary)",
+                  background: "var(--bg-0)",
+                  padding: "1px 6px",
+                  borderRadius: 3,
+                  fontFamily: "var(--font-mono)",
+                }}
+              >
+                {issue.path}
+              </code>
+            )}
+          </div>
+          <p style={{ margin: "3px 0 0", fontSize: 11.5, color: "var(--text-secondary)", lineHeight: 1.45 }}>
+            {issue.message}
+          </p>
         </div>
-        <p className="text-xs text-text-secondary mt-0.5">{issue.message}</p>
       </div>
-    </div>
+    </PanelCard>
   );
 }
 
+/* ────────────────────────────────────────────────────────────────── */
+/* Main panel                                                          */
+/* ────────────────────────────────────────────────────────────────── */
 export default function ValidationPanel() {
   const { activeFileContent } = useWorkspaceStore();
 
@@ -206,114 +340,172 @@ export default function ValidationPanel() {
   const gaps = allNudges.filter((w) => !DIMENSIONAL_CODES.has(w.code));
   const completeness = currentCheck?.completeness || null;
 
-  return (
-    <div className="flex flex-col h-full overflow-hidden">
-      {/* Summary bar */}
-      <div className="flex items-center gap-3 px-3 py-2 border-b border-border-primary bg-bg-secondary/50 shrink-0">
-        <span className="text-xs font-semibold text-text-primary">Validation</span>
-        <div className="flex items-center gap-2 ml-auto flex-wrap">
-          {errors.length > 0 ? (
-            <span className="flex items-center gap-1 px-2 py-0.5 rounded-full bg-red-50 text-red-600 text-[10px] font-semibold">
-              <AlertCircle size={10} />
-              {errors.length} {errors.length === 1 ? "error" : "errors"}
-            </span>
-          ) : (
-            <span className="flex items-center gap-1 px-2 py-0.5 rounded-full bg-green-50 text-green-600 text-[10px] font-semibold">
-              <CheckCircle2 size={10} />
-              No errors
-            </span>
-          )}
-          {warnings.length > 0 && (
-            <span className="flex items-center gap-1 px-2 py-0.5 rounded-full bg-yellow-50 text-yellow-600 text-[10px] font-semibold">
-              <AlertTriangle size={10} />
-              {warnings.length} {warnings.length === 1 ? "warning" : "warnings"}
-            </span>
-          )}
-          {dimensionalIssues.length > 0 && (
-            <span className="flex items-center gap-1 px-2 py-0.5 rounded-full bg-sky-50 text-sky-700 text-[10px] font-semibold">
-              <Info size={10} />
-              {dimensionalIssues.length} dimensional
-            </span>
-          )}
-          {gaps.length > 0 && (
-            <span className="flex items-center gap-1 px-2 py-0.5 rounded-full bg-orange-50 text-orange-600 text-[10px] font-semibold">
-              <Gauge size={10} />
-              {gaps.length} {gaps.length === 1 ? "gap" : "gaps"}
-            </span>
-          )}
-        </div>
-      </div>
-
-      {/* Scrollable content */}
-      <div className="flex-1 overflow-y-auto p-3 space-y-3">
-        {!activeFileContent ? (
-          <div className="flex items-center justify-center h-full text-text-muted text-xs">
-            Open a file to see validation results
-          </div>
-        ) : (
-          <>
-            {/* Completeness section — always shown when a file is open */}
-            <CompletenessSection completeness={completeness} />
-
-            {/* Errors */}
-            {errors.length > 0 && (
-              <div className="space-y-1.5">
-                <h4 className="text-[10px] text-status-error uppercase tracking-wider font-semibold px-1">
-                  Errors ({errors.length})
-                </h4>
-                {errors.map((iss, idx) => (
-                  <IssueRow key={`err-${idx}`} issue={iss} />
-                ))}
-              </div>
-            )}
-
-            {/* Structural / semantic warnings */}
-            {warnings.length > 0 && (
-              <div className="space-y-1.5">
-                <h4 className="text-[10px] text-status-warning uppercase tracking-wider font-semibold px-1">
-                  Warnings ({warnings.length})
-                </h4>
-                {warnings.map((iss, idx) => (
-                  <IssueRow key={`warn-${idx}`} issue={iss} />
-                ))}
-              </div>
-            )}
-
-            {/* Dimensional Modeling nudges */}
-            {dimensionalIssues.length > 0 && (
-              <div className="space-y-1.5">
-                <h4 className="text-[10px] text-sky-600 uppercase tracking-wider font-semibold px-1">
-                  Dimensional Modeling ({dimensionalIssues.length})
-                </h4>
-                {dimensionalIssues.map((iss, idx) => (
-                  <IssueRow key={`dim-${idx}`} issue={iss} />
-                ))}
-              </div>
-            )}
-
-            {/* Gap / completeness nudges */}
-            {gaps.length > 0 && (
-              <div className="space-y-1.5">
-                <h4 className="text-[10px] text-orange-500 uppercase tracking-wider font-semibold px-1">
-                  Gaps ({gaps.length})
-                </h4>
-                {gaps.map((iss, idx) => (
-                  <IssueRow key={`gap-${idx}`} issue={iss} />
-                ))}
-              </div>
-            )}
-
-            {/* All clean */}
-            {errors.length === 0 && warnings.length === 0 && gaps.length === 0 && dimensionalIssues.length === 0 && (
-              <div className="flex flex-col items-center justify-center py-6 text-center">
-                <CheckCircle2 size={28} className="text-green-500 mb-2" />
-                <p className="text-sm text-text-primary font-medium">All checks passed</p>
-                <p className="text-xs text-text-muted mt-1">No validation issues found in the current model</p>
-              </div>
-            )}
-          </>
-        )}
-      </div>
+  /* Summary cluster shown in the header's `actions` slot. One status
+     pill per category; zero-count categories collapse to a single
+     "No errors" success pill so the header never feels empty. */
+  const totalIssues = errors.length + warnings.length + dimensionalIssues.length + gaps.length;
+  const headerStatus = activeFileContent ? (
+    <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
+      {errors.length > 0 ? (
+        <StatusPill tone="error" icon={<AlertCircle size={10} />}>
+          {errors.length} {errors.length === 1 ? "error" : "errors"}
+        </StatusPill>
+      ) : (
+        <StatusPill tone="success" icon={<CheckCircle2 size={10} />}>
+          No errors
+        </StatusPill>
+      )}
+      {warnings.length > 0 && (
+        <StatusPill tone="warning" icon={<AlertTriangle size={10} />}>
+          {warnings.length} {warnings.length === 1 ? "warning" : "warnings"}
+        </StatusPill>
+      )}
+      {dimensionalIssues.length > 0 && (
+        <StatusPill tone="info" icon={<Layers size={10} />}>
+          {dimensionalIssues.length} dimensional
+        </StatusPill>
+      )}
+      {gaps.length > 0 && (
+        <StatusPill tone="accent" icon={<Gauge size={10} />}>
+          {gaps.length} {gaps.length === 1 ? "gap" : "gaps"}
+        </StatusPill>
+      )}
     </div>
+  ) : null;
+
+  /* Empty state: no active file */
+  if (!activeFileContent) {
+    return (
+      <PanelFrame icon={<CheckCircle2 size={14} />} eyebrow="Quality" title="Validation">
+        <PanelEmpty
+          icon={Info}
+          title="No file open"
+          description="Open a .dlx or dbt file in the editor to see validation results."
+        />
+      </PanelFrame>
+    );
+  }
+
+  return (
+    <PanelFrame
+      icon={<CheckCircle2 size={14} />}
+      eyebrow="Quality"
+      title="Validation"
+      subtitle={totalIssues === 0 ? "All checks passed" : `${totalIssues} total findings`}
+      actions={headerStatus}
+    >
+      {/* Completeness gauge + per-entity list */}
+      {completeness && (
+        <PanelSection
+          title="Completeness"
+          icon={<Gauge size={11} />}
+          action={
+            <StatusPill tone={scoreBand(completeness.modelScore).tone}>
+              {completeness.fullyComplete}/{completeness.totalEntities} complete
+            </StatusPill>
+          }
+        >
+          <div style={{ display: "flex", alignItems: "center", gap: 14, marginBottom: 10 }}>
+            <RingGauge value={completeness.modelScore} />
+            <div style={{ minWidth: 0, flex: 1, display: "flex", flexDirection: "column", gap: 4 }}>
+              <div style={{ fontSize: 12, fontWeight: 600, color: "var(--text-primary)" }}>
+                Model score {completeness.modelScore}%
+              </div>
+              <div style={{ fontSize: 11, color: "var(--text-secondary)", lineHeight: 1.45 }}>
+                {completeness.fullyComplete} of {completeness.totalEntities} entities are fully complete
+                {completeness.needsAttention.length > 0 && (
+                  <>
+                    {" · "}
+                    <span style={{ color: "#ef4444" }}>
+                      {completeness.needsAttention.length} need attention
+                    </span>
+                  </>
+                )}
+                .
+              </div>
+            </div>
+          </div>
+
+          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+            {completeness.entities.map((e) => (
+              <EntityCompletenessRow key={e.entityName} entity={e} />
+            ))}
+          </div>
+        </PanelSection>
+      )}
+
+      {/* Errors */}
+      {errors.length > 0 && (
+        <PanelSection
+          title="Errors"
+          count={errors.length}
+          icon={<AlertCircle size={11} style={{ color: "var(--cat-users)" }} />}
+          description="Blocking issues that will fail the semantic gate."
+        >
+          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+            {errors.map((iss, idx) => (
+              <IssueRow key={`err-${idx}`} issue={iss} />
+            ))}
+          </div>
+        </PanelSection>
+      )}
+
+      {/* Structural / semantic warnings (non-nudge) */}
+      {warnings.length > 0 && (
+        <PanelSection
+          title="Warnings"
+          count={warnings.length}
+          icon={<AlertTriangle size={11} style={{ color: "var(--cat-billing)" }} />}
+          description="Structural concerns that should be resolved before release."
+        >
+          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+            {warnings.map((iss, idx) => (
+              <IssueRow key={`warn-${idx}`} issue={iss} />
+            ))}
+          </div>
+        </PanelSection>
+      )}
+
+      {/* Dimensional modeling nudges */}
+      {dimensionalIssues.length > 0 && (
+        <PanelSection
+          title="Dimensional Modeling"
+          count={dimensionalIssues.length}
+          icon={<Layers size={11} style={{ color: "var(--cat-product)" }} />}
+          description="Fact / dimension hygiene — surrogate keys, grain clarity, metric coverage."
+        >
+          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+            {dimensionalIssues.map((iss, idx) => (
+              <IssueRow key={`dim-${idx}`} issue={iss} />
+            ))}
+          </div>
+        </PanelSection>
+      )}
+
+      {/* Gaps / completeness nudges */}
+      {gaps.length > 0 && (
+        <PanelSection
+          title="Gaps"
+          count={gaps.length}
+          icon={<Gauge size={11} style={{ color: "var(--cat-system)" }} />}
+          description="Recommended improvements that raise the completeness score."
+        >
+          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+            {gaps.map((iss, idx) => (
+              <IssueRow key={`gap-${idx}`} issue={iss} />
+            ))}
+          </div>
+        </PanelSection>
+      )}
+
+      {/* All clean */}
+      {totalIssues === 0 && (
+        <PanelEmpty
+          icon={CheckCircle2}
+          title="All checks passed"
+          description="No validation issues found in the current model."
+        />
+      )}
+    </PanelFrame>
   );
 }

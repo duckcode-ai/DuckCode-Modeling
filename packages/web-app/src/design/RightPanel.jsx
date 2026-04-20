@@ -1,384 +1,250 @@
-/* Right inspector panel — supports table OR relationship selection. Ported
-   from DataLex design prototype and extended with a YAML tab that edits
-   the active file directly via the workspace store. */
+/* RightPanel — entity / relationship inspector.
+   Uses the shared PanelFrame primitives so its visual language matches
+   the bottom drawer (same header, same paddings, same tone colours). The
+   five tabs (COLUMNS / RELATIONS / INDEXES / SQL / YAML) each live in
+   their own file under `./inspector/` and are lazy-loaded — YAML pulls
+   in CodeMirror, so we keep it behind Suspense.
+
+   Features added in PR 8:
+     - PanelFrame port (away from the older .insp-* namespace).
+     - ArrowLeft/Right tab navigation (see InspectorTabs).
+     - Persisted tab + width via uiStore.rightPanelTab / rightPanelWidth.
+     - Drag-resize strip on the left edge (commits width on mouse-up).
+     - Live SQL preview (client-side DDL generator, no save required).
+     - Working relationship editor (ON DELETE/UPDATE + edit + delete).
+     - Editable indexes (addIndex / removeIndex). */
 import React from "react";
-import Icon from "./icons";
-import { NOTATION } from "./notation";
-import useWorkspaceStore from "../stores/workspaceStore";
-import { patchField } from "./yamlPatch";
+import {
+  Box, Copy, Trash2, Pencil, GitBranch, Database,
+} from "lucide-react";
+import {
+  PanelFrame, PanelEmpty, StatusPill,
+} from "../components/panels/PanelFrame";
+import useUiStore from "../stores/uiStore";
+import InspectorTabs from "./inspector/InspectorTabs";
 
-// Lazy-loaded — CodeMirror pulls a large chunk we don't need until the user
-// opens the YAML tab.
-const YamlEditor = React.lazy(() => import("../components/editor/YamlEditor"));
+/* Per-tab bodies are split into their own chunks. The common path
+   (COLUMNS on a freshly selected entity) is the cheapest one — the
+   others only load the first time the user clicks their tab. */
+const ColumnsView     = React.lazy(() => import("./inspector/ColumnsView"));
+const RelationsView   = React.lazy(() => import("./inspector/RelationsView"));
+const IndexesView     = React.lazy(() => import("./inspector/IndexesView"));
+const SqlView         = React.lazy(() => import("./inspector/SqlView"));
+const YamlEditorShell = React.lazy(() => import("./inspector/YamlEditorShell"));
 
-function renderSQL(t) {
-  const kw = (s) => `<span class="sql-kw">${s}</span>`;
-  const ty = (s) => `<span class="sql-type">${s}</span>`;
-  const co = (s) => `<span class="sql-comment">${s}</span>`;
-  let out = "";
-  out += co(`-- ${t.subject} / ${t.name}\n`);
-  out += `${kw("CREATE TABLE")} ${t.schema}.${t.name} (\n`;
-  t.columns.forEach((c, i) => {
-    const parts = [`  ${c.name}`, ty(c.type)];
-    if (c.pk) parts.push(kw("PRIMARY KEY"));
-    if (c.nn && !c.pk) parts.push(kw("NOT NULL"));
-    if (c.unique && !c.pk) parts.push(kw("UNIQUE"));
-    out += parts.join(" ") + (i < t.columns.length - 1 ? "," : "") + "\n";
-  });
-  out += ");\n";
-  t.columns.filter((c) => c.fk).forEach((c) => {
-    out += `${kw("ALTER TABLE")} ${t.schema}.${t.name}\n  ${kw("ADD FOREIGN KEY")} (${c.name}) ${kw("REFERENCES")} ${c.fk.split(".")[0]}(${c.fk.split(".")[1]});\n`;
-  });
-  return out;
-}
+const TABS = [
+  { id: "COLUMNS",   label: "Columns" },
+  { id: "RELATIONS", label: "Relations" },
+  { id: "INDEXES",   label: "Indexes" },
+  { id: "SQL",       label: "SQL" },
+  { id: "YAML",      label: "YAML" },
+];
 
-function RelInspector({ rel }) {
-  const I = Icon;
-  const N = NOTATION;
-  const kind = N.kind(rel.from, rel.to);
-  const KindIcon = { "1:1": I.OneToOne, "1:N": I.OneToMany, "N:1": I.ManyToOne, "N:M": I.ManyToMany }[kind] || I.OneToMany;
-  const actions = N.onDeleteActions;
+/* Drag-resize handle on the LEFT edge of the right panel. Writes the
+   pixel width directly to `--right-w` on the root during drag (via RAF)
+   so the grid reflows without React re-renders, then commits the final
+   value to uiStore.rightPanelWidth on mouse-up. */
+function ResizeHandle({ initialWidth, onCommit }) {
+  const [dragging, setDragging] = React.useState(false);
+
+  const onMouseDown = React.useCallback(
+    (e) => {
+      e.preventDefault();
+      const root = document.documentElement;
+      const startX = e.clientX;
+      const startW = initialWidth;
+      let nextW = startW;
+      let raf = 0;
+
+      const onMove = (ev) => {
+        const delta = startX - ev.clientX;
+        nextW = startW + delta;
+        if (raf) return;
+        raf = requestAnimationFrame(() => {
+          raf = 0;
+          const clamped = Math.max(280, Math.min(window.innerWidth - 400, nextW));
+          root.style.setProperty("--right-w", `${clamped}px`);
+        });
+      };
+
+      const onUp = () => {
+        document.removeEventListener("mousemove", onMove);
+        document.removeEventListener("mouseup", onUp);
+        const clamped = Math.max(280, Math.min(window.innerWidth - 400, nextW));
+        onCommit(clamped);
+        setDragging(false);
+      };
+
+      document.addEventListener("mousemove", onMove);
+      document.addEventListener("mouseup", onUp);
+      setDragging(true);
+    },
+    [initialWidth, onCommit]
+  );
 
   return (
-    <div className="right">
-      <div className="insp-header">
-        <div className="insp-eyebrow">
-          <span className="pill" style={{ background: "var(--accent-dim)", color: "var(--accent)" }}>Relationship</span>
-          {rel.identifying && <span className="pill" style={{ background: "rgba(245,181,68,0.14)", color: "var(--pk)" }}>Identifying</span>}
-          {rel.dashed && <span className="pill" style={{ background: "rgba(107,115,133,0.18)", color: "var(--text-secondary)" }}>Optional</span>}
-        </div>
-        <div className="insp-title">
-          <h2 style={{ fontSize: 14 }}>{rel.name}</h2>
-          <button className="copy-btn" style={{ marginLeft: "auto" }}><I.Edit /></button>
-          <button className="copy-btn"><I.Trash /></button>
-        </div>
-        <div style={{ marginTop: 8 }}>
-          <span className="rel-insp-kind"><KindIcon /> {kind}</span>
-        </div>
-      </div>
-
-      <div className="insp-body">
-        <div className="insp-section">
-          <div className="insp-section-title"><span>Endpoints</span></div>
-          <div className="rel-route">
-            <div className="rel-route-col">
-              <span className="rel-route-table">{rel.from.table}</span>
-              <span className="rel-route-field">{rel.from.col}</span>
-              <span className="rel-route-card">{N.cardinalityLabel(rel.from.min, rel.from.max)}</span>
-            </div>
-            <I.Arrow className="rel-route-arrow" />
-            <div className="rel-route-col">
-              <span className="rel-route-table">{rel.to.table}</span>
-              <span className="rel-route-field">{rel.to.col}</span>
-              <span className="rel-route-card">{N.cardinalityLabel(rel.to.min, rel.to.max)}</span>
-            </div>
-          </div>
-        </div>
-
-        <div className="insp-section">
-          <div className="insp-section-title"><span>ON DELETE</span></div>
-          <div className="action-picker">
-            {actions.map((a) => (
-              <div key={a.k} className={`action ${rel.onDelete === a.k ? "on" : ""}`} title={a.desc}>
-                <span className="dot" style={{ background: a.color }} />{a.k}
-              </div>
-            ))}
-          </div>
-        </div>
-
-        <div className="insp-section">
-          <div className="insp-section-title"><span>ON UPDATE</span></div>
-          <div className="action-picker">
-            {actions.map((a) => (
-              <div key={a.k} className={`action ${rel.onUpdate === a.k ? "on" : ""}`} title={a.desc}>
-                <span className="dot" style={{ background: a.color }} />{a.k}
-              </div>
-            ))}
-          </div>
-        </div>
-
-        <div className="insp-section">
-          <div className="insp-section-title"><span>Options</span></div>
-          <div className="field-flags">
-            {[
-              { k: "id",    l: "IDENTIFYING", on: !!rel.identifying },
-              { k: "df",    l: "DEFERRABLE",  on: false },
-              { k: "idx",   l: "FK INDEX",    on: true },
-              { k: "match", l: "MATCH FULL",  on: false },
-            ].map((f) => (
-              <div key={f.k} className={`flag ${f.on ? "on" : ""}`}>
-                <div className="check">{f.on && <I.Check />}</div>
-                <span>{f.l}</span>
-              </div>
-            ))}
-          </div>
-        </div>
-      </div>
-    </div>
+    <div
+      className={`right-resize ${dragging ? "dragging" : ""}`}
+      onMouseDown={onMouseDown}
+      role="separator"
+      aria-orientation="vertical"
+      aria-label="Resize inspector panel"
+      title="Drag to resize"
+    />
   );
 }
 
-export default function RightPanel({ table, rel, tables, selectedCol, setSelectedCol, onDeleteEntity }) {
-  const I = Icon;
-  const [tab, setTab] = React.useState("COLUMNS");
-  const activeFile = useWorkspaceStore((s) => s.activeFile);
+export default function RightPanel({
+  table, rel, tables, selectedCol, setSelectedCol,
+  relationships = [], indexes = [], onDeleteEntity, onSelectRel, onExportDdl,
+}) {
+  const rightPanelTab = useUiStore((s) => s.rightPanelTab);
+  const setRightPanelTab = useUiStore((s) => s.setRightPanelTab);
+  const rightPanelWidth = useUiStore((s) => s.rightPanelWidth);
+  const setRightPanelWidth = useUiStore((s) => s.setRightPanelWidth);
 
-  // YAML tab is always available (even with no table selected) because it
-  // edits the whole active file, not a single entity.
+  // Coerce to a known tab id.
+  const tab = TABS.some((t) => t.id === rightPanelTab) ? rightPanelTab : "COLUMNS";
+
+  /* ── Header content varies by selection kind ──────────────── */
+  const header = React.useMemo(() => {
+    if (rel) {
+      return {
+        icon: <GitBranch size={14} />,
+        eyebrow: "Relationship",
+        title: rel.name,
+        subtitle: `${rel.from.table}.${rel.from.col} → ${rel.to.table}.${rel.to.col}`,
+        statusTone: "accent",
+        statusLabel: "Relationship",
+      };
+    }
+    if (table) {
+      return {
+        icon: <Box size={14} />,
+        eyebrow: table.subject || table.cat || null,
+        title: table.name,
+        subtitle: `${table.schema}.${table.name} · ${table.columns.length} columns${table.rowCount ? ` · ${table.rowCount}` : ""}`,
+        statusTone: table.kind === "ENUM" ? "warning" : "accent",
+        statusLabel: table.kind || "Table",
+      };
+    }
+    return {
+      icon: <Database size={14} />,
+      eyebrow: null,
+      title: "Inspector",
+      subtitle: "No selection",
+      statusTone: "neutral",
+      statusLabel: null,
+    };
+  }, [table, rel]);
+
+  /* ── Header trailing actions (copy / edit / delete) ───────── */
+  const headerActions = table && !rel ? (
+    <div className="panel-btn-row">
+      <button
+        className="panel-btn"
+        title="Copy table name"
+        onClick={() => navigator.clipboard?.writeText(table.name).catch(() => {})}
+      >
+        <Copy size={12} /> Copy
+      </button>
+      <button
+        className="panel-btn danger"
+        title="Delete entity"
+        onClick={() => onDeleteEntity && onDeleteEntity(table.name)}
+      >
+        <Trash2 size={12} /> Delete
+      </button>
+    </div>
+  ) : null;
+
+  /* ── No-selection state ───────────────────────────────────── */
+  const noSelection = !table && !rel;
+
+  /* ── Tab body ─────────────────────────────────────────────── */
+  let body;
   if (tab === "YAML") {
-    return (
-      <div className="right" style={{ display: "flex", flexDirection: "column", minHeight: 0 }}>
-        <div className="insp-tabs" style={{ borderBottom: "1px solid var(--border-default)" }}>
-          {["COLUMNS", "RELATIONS", "INDEXES", "SQL", "YAML"].map((t) => (
-            <button key={t} className={`insp-tab ${tab === t ? "active" : ""}`} onClick={() => setTab(t)}>
-              {t === "YAML" ? "YAML" : t[0] + t.slice(1).toLowerCase()}
-            </button>
-          ))}
-        </div>
-        <div style={{ flex: 1, minHeight: 0, overflow: "hidden", background: "var(--bg-canvas)" }}>
-          {activeFile ? (
-            <React.Suspense fallback={<div style={{ padding: 20, fontSize: 12, color: "var(--text-tertiary)" }}>Loading editor…</div>}>
-              <YamlEditor />
-            </React.Suspense>
-          ) : (
-            <div style={{ padding: "40px 20px", textAlign: "center", color: "var(--text-tertiary)", fontSize: 12 }}>
-              Open a file to edit its YAML.
-            </div>
-          )}
-        </div>
-      </div>
+    body = <YamlEditorShell />;
+  } else if (noSelection) {
+    body = (
+      <PanelEmpty
+        icon={Database}
+        title="No selection"
+        description="Pick a table or relationship on the canvas to inspect it. The YAML tab is always available to edit the file directly."
+      />
     );
-  }
-
-  if (rel) return <RelInspector rel={rel} tables={tables} />;
-
-  if (!table) {
-    return (
-      <div className="right">
-        <div style={{ padding: "40px 20px", textAlign: "center", color: "var(--text-tertiary)", fontSize: 12 }}>
-          <div style={{ marginBottom: 12, opacity: 0.3 }}>
-            <svg width="48" height="48" viewBox="0 0 48 48" fill="none" stroke="currentColor" strokeWidth="1.2">
-              <rect x="8" y="10" width="32" height="28" rx="3" />
-              <path d="M8 18h32 M8 26h32 M18 10v28 M28 10v28" />
-            </svg>
-          </div>
-          Select a table or relationship
-        </div>
-      </div>
+  } else if (tab === "COLUMNS") {
+    const col = table
+      ? (table.columns.find((c) => c.name === selectedCol) || table.columns[0])
+      : null;
+    body = table
+      ? <ColumnsView table={table} col={col} setSelectedCol={setSelectedCol} entityName={table.name} />
+      : <PanelEmpty icon={Box} title="Columns" description="Select a table to view its columns." />;
+  } else if (tab === "RELATIONS") {
+    body = (
+      <RelationsView
+        table={table}
+        rel={rel}
+        relationships={relationships}
+        onSelect={onSelectRel}
+      />
     );
+  } else if (tab === "INDEXES") {
+    body = table
+      ? <IndexesView table={table} indexes={indexes} />
+      : <PanelEmpty icon={Database} title="Indexes" description="Select a table to view its indexes." />;
+  } else if (tab === "SQL") {
+    body = table
+      ? <SqlView table={table} onExport={onExportDdl} />
+      : <PanelEmpty icon={Database} title="SQL preview" description="Select a table to see its CREATE statement." />;
   }
-
-  const col = table.columns.find((c) => c.name === selectedCol) || table.columns[0];
-
-  // Column edit → patch YAML and push through workspaceStore.updateContent.
-  // Patches are best-effort: if the parse fails we silently skip (user's YAML
-  // is invalid; edits should go through the YAML tab).
-  const applyColPatch = (patch) => {
-    const s = useWorkspaceStore.getState();
-    const next = patchField(s.activeFileContent, table.name, col.name, patch);
-    if (next != null) s.updateContent(next);
-  };
-  const toggleFlag = (k) => {
-    if (k === "pk")  applyColPatch({ primary_key: !col.pk });
-    if (k === "nn")  applyColPatch({ nullable: col.nn ? undefined : false });
-    if (k === "uq")  applyColPatch({ unique: !col.unique });
-    if (k === "idx") { /* indexes are declared separately; no-op for now */ }
-  };
 
   return (
     <div className="right">
-      <div className="insp-header">
-        <div className="insp-eyebrow">
-          <span className="pill" style={{
-            background: `var(--cat-${table.cat}-soft)`,
-            color: `var(--cat-${table.cat})`,
-          }}>{table.subject}</span>
-          <span>Table</span>
-        </div>
-        <div className="insp-title">
-          <h2>{table.name}</h2>
-          <button className="copy-btn" title="Copy name"><I.Copy /></button>
-          <button className="copy-btn" title="Edit" style={{ marginLeft: "auto" }}><I.Edit /></button>
-          <button
-            className="copy-btn"
-            title="Delete entity"
-            onClick={() => onDeleteEntity && onDeleteEntity(table.name)}
+      <ResizeHandle initialWidth={rightPanelWidth} onCommit={setRightPanelWidth} />
+      <PanelFrame
+        icon={header.icon}
+        eyebrow={header.eyebrow}
+        title={header.title}
+        subtitle={header.subtitle}
+        status={header.statusLabel && (
+          <StatusPill tone={header.statusTone}>{header.statusLabel}</StatusPill>
+        )}
+        actions={headerActions}
+        toolbar={
+          <InspectorTabs
+            tab={tab}
+            setTab={setRightPanelTab}
+            tabs={TABS}
+          />
+        }
+        bodyPadding={0}
+      >
+        {/* The body itself handles its own padding (sections have their
+            own spacing). YAML tab fills edge-to-edge for the editor. */}
+        <div
+          id={`inspector-panel-${tab}`}
+          role="tabpanel"
+          aria-labelledby={`inspector-tab-${tab}`}
+          style={{
+            height: "100%",
+            minHeight: 0,
+            display: "flex",
+            flexDirection: "column",
+            padding: tab === "YAML" ? 0 : 14,
+          }}
+        >
+          <React.Suspense
+            fallback={
+              <div style={{ padding: 20, fontSize: 12, color: "var(--text-tertiary)" }}>
+                Loading…
+              </div>
+            }
           >
-            <I.Trash />
-          </button>
+            {body}
+          </React.Suspense>
         </div>
-        <div className="insp-sub">
-          {table.schema}.{table.name} · {table.columns.length} columns{table.rowCount ? ` · ${table.rowCount}${typeof table.rowCount === "number" ? " rows" : ""}` : ""}
-        </div>
-      </div>
-
-      <div className="insp-tabs">
-        {["COLUMNS", "RELATIONS", "INDEXES", "SQL", "YAML"].map((t) => (
-          <button key={t} className={`insp-tab ${tab === t ? "active" : ""}`} onClick={() => setTab(t)}>
-            {t === "YAML" ? "YAML" : t[0] + t.slice(1).toLowerCase()}
-          </button>
-        ))}
-      </div>
-
-      <div className="insp-body">
-        {tab === "COLUMNS" && (
-          <>
-            <div className="insp-section">
-              <div className="insp-section-title"><span>Selected column</span></div>
-              <div className="field"><div className="field-row">
-                <span className="field-label">Name</span>
-                <input
-                  key={`name-${col?.name}`}
-                  className="field-input"
-                  defaultValue={col?.name}
-                  onBlur={(e) => {
-                    const v = e.target.value.trim();
-                    if (v && v !== col.name) applyColPatch({ name: v });
-                  }}
-                />
-              </div></div>
-              <div className="field"><div className="field-row">
-                <span className="field-label">Type</span>
-                <input
-                  key={`type-${col?.name}`}
-                  className="field-input"
-                  defaultValue={col?.type}
-                  list="datalex-types"
-                  onBlur={(e) => {
-                    const v = e.target.value.trim();
-                    if (v && v !== col.type) applyColPatch({ type: v });
-                  }}
-                />
-                <datalist id="datalex-types">
-                  <option value="string" /><option value="integer" /><option value="bigint" />
-                  <option value="boolean" /><option value="float" /><option value="decimal" />
-                  <option value="date" /><option value="timestamp" /><option value="timestamptz" />
-                  <option value="json" /><option value="jsonb" /><option value="text" />
-                  <option value="uuid" /><option value="varchar(255)" />
-                </datalist>
-              </div></div>
-              <div className="field"><div className="field-row">
-                <span className="field-label">Default</span>
-                <input
-                  key={`default-${col?.name}`}
-                  className="field-input"
-                  placeholder="NULL"
-                  defaultValue={col?.default || ""}
-                  onBlur={(e) => applyColPatch({ default: e.target.value })}
-                />
-              </div></div>
-              <div className="field"><div className="field-row">
-                <span className="field-label">Comment</span>
-                <input
-                  key={`desc-${col?.name}`}
-                  className="field-input"
-                  placeholder="—"
-                  defaultValue={col?.description || ""}
-                  onBlur={(e) => applyColPatch({ description: e.target.value })}
-                />
-              </div></div>
-              <div className="field"><div className="field-row">
-                <span className="field-label">Flags</span>
-                <div className="field-flags">
-                  {[
-                    { k: "pk",  l: "PK",       on: !!col?.pk,     clickable: true },
-                    { k: "nn",  l: "NOT NULL", on: !!col?.nn,     clickable: true },
-                    { k: "uq",  l: "UNIQUE",   on: !!col?.unique, clickable: true },
-                    { k: "fk",  l: "FK",       on: !!col?.fk,     clickable: false },
-                    { k: "idx", l: "INDEX",    on: false,         clickable: false },
-                  ].map((f) => (
-                    <div key={f.k}
-                         className={`flag ${f.on ? "on" : ""}`}
-                         onClick={f.clickable ? () => toggleFlag(f.k) : undefined}
-                         style={f.clickable ? { cursor: "pointer" } : {}}
-                         title={f.clickable ? `Toggle ${f.l}` : undefined}>
-                      <div className="check">{f.on && <I.Check />}</div>
-                      <span>{f.l}</span>
-                    </div>
-                  ))}
-                </div>
-              </div></div>
-            </div>
-
-            <div className="insp-section">
-              <div className="insp-section-title">
-                <span>All columns</span>
-                <span className="count">{table.columns.length}</span>
-              </div>
-              <div className="col-list">
-                {table.columns.map((c) => (
-                  <div key={c.name}
-                       className={`col-item ${c.name === col?.name ? "active" : ""}`}
-                       onClick={() => setSelectedCol(c.name)}>
-                    <div className={`col-item-key ${c.pk ? "pk" : ""} ${c.fk ? "fk" : ""}`}>
-                      {c.pk ? <I.Key /> : c.fk ? <I.Link /> : (
-                        <span style={{ width: 3, height: 3, borderRadius: "50%", background: "var(--text-muted)" }} />
-                      )}
-                    </div>
-                    <div className="col-item-name">{c.name}</div>
-                    <div className="col-item-type">{c.type}</div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          </>
-        )}
-
-        {tab === "RELATIONS" && (
-          <div className="insp-section">
-            <div className="insp-section-title">
-              <span>Incoming & outgoing</span>
-              <button className="icon-btn"><I.Plus /></button>
-            </div>
-            {table.columns.filter((c) => c.fk).map((c) => (
-              <div key={c.name} className="rel-card">
-                <div className="rel-title">
-                  <I.Link style={{ width: 12, height: 12, color: "var(--fk)" }} />
-                  {table.name}.{c.name}
-                  <span className="rel-cardinality">N : 1</span>
-                </div>
-                <div className="rel-sub">→ {c.fk}</div>
-              </div>
-            ))}
-            {table.columns.filter((c) => c.fk).length === 0 && (
-              <div style={{ fontSize: 12, color: "var(--text-tertiary)", padding: "20px 0", textAlign: "center" }}>
-                No relationships
-              </div>
-            )}
-          </div>
-        )}
-
-        {tab === "INDEXES" && (
-          <div className="insp-section">
-            <div className="insp-section-title"><span>Indexes</span><button className="icon-btn"><I.Plus /></button></div>
-            {[
-              { name: `${table.name}_pkey`, cols: table.columns.filter((c) => c.pk).map((c) => c.name), unique: true, kind: "btree" },
-              ...(table.columns.some((c) => c.unique)
-                ? [{ name: `${table.name}_unique_idx`, cols: table.columns.filter((c) => c.unique).map((c) => c.name), unique: true, kind: "btree" }]
-                : []),
-            ].filter((ix) => ix.cols.length).map((ix) => (
-              <div key={ix.name} className="rel-card">
-                <div className="rel-title">
-                  <I.Hash style={{ width: 12, height: 12, color: "var(--idx)" }} />
-                  {ix.name}
-                  {ix.unique && <span className="rel-cardinality">UNIQUE</span>}
-                </div>
-                <div className="rel-sub">{ix.kind}({ix.cols.join(", ")})</div>
-              </div>
-            ))}
-          </div>
-        )}
-
-        {tab === "SQL" && (
-          <div className="insp-section">
-            <div className="insp-section-title">
-              <span>CREATE statement</span>
-              <button className="icon-btn"><I.Copy /></button>
-            </div>
-            <pre className="sql-preview"><code dangerouslySetInnerHTML={{ __html: renderSQL(table) }} /></pre>
-          </div>
-        )}
-      </div>
+      </PanelFrame>
     </div>
   );
 }

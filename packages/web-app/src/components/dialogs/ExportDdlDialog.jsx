@@ -1,11 +1,21 @@
-/* Export DDL dialog — lets users pick a dialect and generate forward SQL
-   for the active model file. Result is shown inline and optionally saved
-   to disk (api-server handles the write). */
+/* Export DDL dialog — streamlined.
+
+   The previous iteration bundled dialect selector + file path + Generate
+   button + output area + save-to-disk + copy into one wide surface, which
+   felt noisy for what is fundamentally a "pick dialect → press Run" task.
+
+   This version keeps the Run button as the primary action up top, hides
+   the output pane until there's actually something to show, and routes
+   chrome through the shared `<Modal>`. Save-to-disk stays available once
+   generation succeeds. */
 import React, { useState } from "react";
-import { X, Download, RefreshCw, AlertCircle, Copy, Check } from "lucide-react";
+import {
+  Download, Play, RefreshCw, AlertCircle, Copy, Check, FileCode2,
+} from "lucide-react";
 import useUiStore from "../../stores/uiStore";
 import useWorkspaceStore from "../../stores/workspaceStore";
 import { generateForwardSql, saveFileContent } from "../../lib/api";
+import Modal from "./Modal";
 
 const DIALECTS = [
   { id: "snowflake",  label: "Snowflake" },
@@ -18,16 +28,23 @@ const DIALECTS = [
 export default function ExportDdlDialog() {
   const { closeModal } = useUiStore();
   const { activeFile, projectPath, projectConfig } = useWorkspaceStore();
-  const [dialect, setDialect] = useState(() => String(projectConfig?.defaultDialect || "snowflake").toLowerCase());
+  const [dialect, setDialect] = useState(
+    () => String(projectConfig?.defaultDialect || "snowflake").toLowerCase()
+  );
   const [sql, setSql] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [savedPath, setSavedPath] = useState("");
   const [copied, setCopied] = useState(false);
 
+  const fileLabel = activeFile?.fullPath
+    ? String(activeFile.fullPath).split("/").slice(-2).join("/")
+    : null;
+  const canRun = !!activeFile?.fullPath && !busy;
+
   const run = async () => {
     if (!activeFile?.fullPath) { setError("Open a .model.yaml file first."); return; }
-    setBusy(true); setError(""); setSql(""); setSavedPath("");
+    setBusy(true); setError(""); setSavedPath(""); setCopied(false);
     try {
       const res = await generateForwardSql(activeFile.fullPath, dialect);
       setSql(String(res?.sql || res?.output || "").trim());
@@ -42,7 +59,9 @@ export default function ExportDdlDialog() {
     if (!sql || !activeFile?.fullPath || !projectPath) return;
     setBusy(true); setError("");
     try {
-      const fileName = String(activeFile.fullPath).split("/").pop().replace(/\.model\.ya?ml$/i, "") || "model";
+      const fileName = String(activeFile.fullPath)
+        .split("/").pop()
+        .replace(/\.model\.ya?ml$/i, "") || "model";
       const configured = projectConfig?.ddlDialects?.[dialect] || `ddl/${dialect}`;
       const folder = String(configured).replace(/^\/+|\/+$/g, "");
       const outPath = `${String(projectPath).replace(/\/+$/, "")}/${folder}/${fileName}.sql`;
@@ -61,66 +80,98 @@ export default function ExportDdlDialog() {
     setTimeout(() => setCopied(false), 1400);
   };
 
+  const lineCount = sql ? sql.split("\n").length : 0;
+  const hasOutput = !!sql;
+
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm" onClick={closeModal}>
-      <div className="bg-bg-secondary border border-border-primary rounded-xl shadow-2xl w-[720px] max-w-[92vw] max-h-[85vh] flex flex-col" onClick={(e) => e.stopPropagation()}>
-        <div className="flex items-center justify-between px-4 py-3 border-b border-border-primary">
-          <h3 className="text-sm font-semibold text-text-primary flex items-center gap-2">
-            <Download size={16} className="text-accent-blue" />
-            Export DDL
-          </h3>
-          <button onClick={closeModal} className="p-1 rounded-md hover:bg-bg-hover text-text-muted hover:text-text-primary transition-colors">
-            <X size={16} />
+    <Modal
+      icon={<FileCode2 size={14} />}
+      title="Export DDL"
+      subtitle={fileLabel ? `Forward-engineer ${fileLabel}` : "Open a model file to generate SQL."}
+      size={hasOutput ? "xl" : "md"}
+      onClose={closeModal}
+      footer={
+        <>
+          <button type="button" className="panel-btn" onClick={closeModal}>
+            Close
           </button>
+          {hasOutput && (
+            <button
+              type="button"
+              className="panel-btn"
+              onClick={saveToDisk}
+              disabled={busy}
+            >
+              <Download size={11} />
+              Save to disk
+            </button>
+          )}
+        </>
+      }
+    >
+      {/* Primary action row — dialect picker + Run, nothing else. */}
+      <div className="dlx-export-action-row">
+        <select
+          className="panel-select"
+          value={dialect}
+          onChange={(e) => setDialect(e.target.value)}
+          disabled={busy}
+        >
+          {DIALECTS.map((d) => <option key={d.id} value={d.id}>{d.label}</option>)}
+        </select>
+        <button
+          type="button"
+          className="panel-btn primary"
+          onClick={run}
+          disabled={!canRun}
+          style={{ minWidth: 96, justifyContent: "center" }}
+        >
+          {busy
+            ? <><RefreshCw size={12} className="animate-spin" /> Running…</>
+            : <><Play size={12} /> Run</>}
+        </button>
+      </div>
+
+      {error && (
+        <div className="dlx-modal-alert">
+          <AlertCircle size={12} style={{ marginTop: 1, flexShrink: 0 }} />
+          <span>{error}</span>
         </div>
-        <div className="p-4 space-y-3 overflow-auto">
-          <div className="flex items-center gap-3">
-            <label className="text-xs text-text-muted font-medium">Dialect</label>
-            <select value={dialect} onChange={(e) => setDialect(e.target.value)}
-                    className="bg-bg-primary border border-border-primary rounded-md px-3 py-1.5 text-sm text-text-primary outline-none focus:border-accent-blue">
-              {DIALECTS.map((d) => <option key={d.id} value={d.id}>{d.label}</option>)}
-            </select>
-            <div className="flex-1 text-xs text-text-muted font-mono truncate">
-              {activeFile?.fullPath || "— no file —"}
-            </div>
-            <button onClick={run} disabled={busy || !activeFile}
-                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium bg-accent-blue text-white hover:bg-accent-blue/80 transition-colors disabled:opacity-50">
-              {busy ? <RefreshCw size={11} className="animate-spin" /> : <Download size={11} />}
-              Generate
+      )}
+
+      {savedPath && (
+        <div className="dlx-modal-alert info">
+          <Check size={12} style={{ marginTop: 1, flexShrink: 0 }} />
+          <span>Saved to <code>{savedPath}</code></span>
+        </div>
+      )}
+
+      {hasOutput && (
+        <div className="dlx-export-output">
+          <div className="dlx-export-output-header">
+            <span className="dlx-export-output-label">
+              Output · <strong>{lineCount}</strong> line{lineCount === 1 ? "" : "s"} · {dialect}
+            </span>
+            <button
+              type="button"
+              className="panel-btn"
+              onClick={copy}
+              style={{ padding: "3px 8px" }}
+            >
+              {copied ? <Check size={11} /> : <Copy size={11} />}
+              {copied ? "Copied" : "Copy"}
             </button>
           </div>
-
-          {error && (
-            <div className="flex items-center gap-2 text-xs text-status-error bg-red-50 border border-red-200 rounded-md px-3 py-2">
-              <AlertCircle size={12} /> {error}
-            </div>
-          )}
-
-          {sql && (
-            <>
-              <div className="flex items-center gap-2">
-                <span className="text-xs text-text-muted font-medium">Output ({sql.split("\n").length} lines)</span>
-                <div className="flex-1" />
-                <button onClick={copy} className="flex items-center gap-1 px-2 py-1 rounded text-xs text-text-muted hover:text-text-primary border border-border-primary">
-                  {copied ? <Check size={10} /> : <Copy size={10} />} {copied ? "Copied" : "Copy"}
-                </button>
-                <button onClick={saveToDisk} disabled={busy}
-                        className="flex items-center gap-1 px-2 py-1 rounded text-xs font-medium bg-bg-hover text-text-primary border border-border-primary hover:bg-bg-primary disabled:opacity-50">
-                  <Download size={10} /> Save to disk
-                </button>
-              </div>
-              <pre className="text-[11px] bg-bg-primary border border-border-primary rounded-md p-3 overflow-auto font-mono text-text-primary" style={{ maxHeight: 380 }}>
-                {sql}
-              </pre>
-              {savedPath && (
-                <div className="text-[11px] text-green-700 bg-green-50 border border-green-200 rounded-md px-3 py-2">
-                  Saved to <code className="font-mono">{savedPath}</code>
-                </div>
-              )}
-            </>
-          )}
+          <pre className="dlx-export-output-pre">{sql}</pre>
         </div>
-      </div>
-    </div>
+      )}
+
+      {!hasOutput && !error && (
+        <p className="dlx-modal-hint" style={{ marginTop: 0 }}>
+          Pick a SQL dialect and press <strong>Run</strong> to generate forward DDL for the current model.
+          Nothing is written to disk until you click <strong>Save to disk</strong>.
+        </p>
+      )}
+    </Modal>
   );
 }

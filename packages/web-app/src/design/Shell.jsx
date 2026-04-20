@@ -11,11 +11,13 @@ import {
   Wand2, LibraryBig, Map, BookOpen, RefreshCw, ChevronUp,
 } from "lucide-react";
 
+import yaml from "js-yaml";
 import { TopBar, ProjectTabs, StatusBar } from "./Chrome";
 import LeftPanel from "./LeftPanel";
 import Canvas from "./Canvas";
 import RightPanel from "./RightPanel";
 import CommandPalette from "./CommandPalette";
+import BottomDrawer from "./BottomDrawer";
 import { DEMO_SCHEMA } from "./demoSchema";
 import { THEMES } from "./notation";
 import { adaptDataLexYaml } from "./schemaAdapter";
@@ -49,6 +51,12 @@ const ExportDdlDialog     = React.lazy(() => import("../components/dialogs/Expor
 const PanelDialog         = React.lazy(() => import("../components/dialogs/PanelDialog"));
 const GitBranchDialog     = React.lazy(() => import("../components/dialogs/GitBranchDialog"));
 const ViewerWelcome       = React.lazy(() => import("../components/viewer/ViewerWelcome"));
+
+// The three main-canvas alternatives to the diagram. Lazy-loaded so the
+// initial bundle stays tight when the user only ever uses the diagram.
+const TableView           = React.lazy(() => import("./views/TableView"));
+const ViewsView           = React.lazy(() => import("./views/ViewsView"));
+const EnumsView           = React.lazy(() => import("./views/EnumsView"));
 
 import useWorkspaceStore from "../stores/workspaceStore";
 import useAuthStore from "../stores/authStore";
@@ -173,6 +181,18 @@ export default function Shell() {
     document.documentElement.setAttribute("data-theme", theme);
     localStorage.setItem(THEME_STORAGE, theme);
   }, [theme]);
+
+  // External theme-change trigger — fired by SettingsDialog (and anywhere
+  // else that mutates the theme directly) so the shell state stays in sync
+  // with the DOM without either side needing to know about the other.
+  React.useEffect(() => {
+    const onExternal = (e) => {
+      const next = e?.detail?.theme;
+      if (next && THEMES.some((t) => t.id === next)) setTheme(next);
+    };
+    window.addEventListener("datalex:theme-change", onExternal);
+    return () => window.removeEventListener("datalex:theme-change", onExternal);
+  }, []);
   React.useEffect(() => {
     document.documentElement.setAttribute("data-density", density);
     localStorage.setItem(DENSITY_STORAGE, density);
@@ -203,9 +223,17 @@ export default function Shell() {
   const {
     activeModal, openModal, closeModal,
     bottomPanelOpen, bottomPanelTab, setBottomPanelTab, toggleBottomPanel,
-    rightPanelOpen, commandPaletteOpen, setCommandPaletteOpen,
+    rightPanelOpen, rightPanelWidth, commandPaletteOpen, setCommandPaletteOpen,
+    shellViewMode,
     addToast,
   } = useUiStore();
+
+  /* Keep the `--right-w` CSS var in sync with the store so the grid knows
+     how wide the right slot is on first paint and after the drag-resize
+     strip commits a new width. */
+  React.useEffect(() => {
+    document.documentElement.style.setProperty("--right-w", `${rightPanelWidth}px`);
+  }, [rightPanelWidth]);
 
   const { selectedEntityId } = useDiagramStore();
 
@@ -285,6 +313,17 @@ export default function Shell() {
   const adapted = React.useMemo(() => adaptDataLexYaml(activeFileContent), [activeFileContent]);
   const schema = adapted || DEMO_SCHEMA;
   const isDemo = !adapted;
+
+  /* Raw index list straight from the YAML, used by the inspector's
+     IndexesView. Parsed lazily and cached per content change — js-yaml
+     is already a dep so no extra cost. */
+  const rawIndexes = React.useMemo(() => {
+    if (!activeFileContent) return [];
+    try {
+      const doc = yaml.load(activeFileContent);
+      return doc && Array.isArray(doc.indexes) ? doc.indexes : [];
+    } catch (_e) { return []; }
+  }, [activeFileContent]);
 
   /* ── Layout persistence (localStorage; keyed per project+file) ─── */
   const layoutKey = React.useMemo(() => {
@@ -374,7 +413,7 @@ export default function Shell() {
       .map((p) => ({
         id: p.id,
         name: p.name?.endsWith(".dlx") ? p.name : `${p.name}`,
-        color: "#5b8cff",
+        color: "var(--accent)",
         dirty: p.id === activeProjectId ? isDirty : false,
       }));
   }, [projects, openProjects, activeProjectId, isDirty]);
@@ -488,7 +527,7 @@ export default function Shell() {
 
   /* ── Shell render ──────────────────────────────────────────────── */
   return (
-    <div className={`app ${bottomPanelOpen ? "with-bottom" : ""}`}>
+    <div className={`app ${bottomPanelOpen ? "with-bottom" : ""} ${rightPanelOpen ? "" : "no-right"}`}>
       <TopBar
         onOpenCmd={() => setCommandPaletteOpen(true)}
         theme={theme}
@@ -509,7 +548,8 @@ export default function Shell() {
         onCommit={() => openModal("commit")}
         onRunSql={() => openModal("exportDdl")}
         onImport={() => openModal("importDialog")}
-        onSearch={() => openModal("searchDialog")}
+        onSearch={() => setCommandPaletteOpen(true)}
+        onOpenShortcuts={() => setShowShortcuts(true)}
         isDirty={isDirty}
         canSave={!!activeFile}
         userInitials={userInitials}
@@ -539,18 +579,45 @@ export default function Shell() {
         onAddEntity={handleAddEntity}
       />
 
-      <Canvas
-        tables={tables}
-        setTables={setTables}
-        relationships={schema.relationships}
-        areas={schema.subjectAreas || []}
-        selected={selected}
-        onSelect={handleSelect}
-        title={schema.name}
-        engine={schema.engine}
-        legendOpen={legendOpen}
-        setLegendOpen={setLegendOpen}
-      />
+      {/* Main canvas cell swaps based on the top-bar ViewSwitcher.
+          Only one surface mounts at a time; the others lazy-load on first
+          click so the diagram path is not penalised. */}
+      {shellViewMode === "diagram" && (
+        <Canvas
+          tables={tables}
+          setTables={setTables}
+          relationships={schema.relationships}
+          areas={schema.subjectAreas || []}
+          selected={selected}
+          onSelect={handleSelect}
+          title={schema.name}
+          engine={schema.engine}
+          legendOpen={legendOpen}
+          setLegendOpen={setLegendOpen}
+        />
+      )}
+      {shellViewMode === "table" && (
+        <React.Suspense fallback={<div className="shell-view" style={{ padding: 20, color: "var(--text-tertiary)", fontSize: 12 }}>Loading table view…</div>}>
+          <TableView
+            tables={tables}
+            relationships={schema.relationships}
+            activeTableId={selected?.type === "table" ? selected.id : null}
+            onSelectTable={(id) => handleSelect({ type: "table", id })}
+          />
+        </React.Suspense>
+      )}
+      {shellViewMode === "views" && (
+        <React.Suspense fallback={<div className="shell-view" style={{ padding: 20, color: "var(--text-tertiary)", fontSize: 12 }}>Loading views…</div>}>
+          <ViewsView
+            onSelectTable={(id) => handleSelect({ type: "table", id })}
+          />
+        </React.Suspense>
+      )}
+      {shellViewMode === "enums" && (
+        <React.Suspense fallback={<div className="shell-view" style={{ padding: 20, color: "var(--text-tertiary)", fontSize: 12 }}>Loading enums…</div>}>
+          <EnumsView />
+        </React.Suspense>
+      )}
 
       {rightPanelOpen && (
         <RightPanel
@@ -559,31 +626,18 @@ export default function Shell() {
           tables={tables}
           selectedCol={selectedCol}
           setSelectedCol={setSelectedCol}
+          relationships={schema.relationships}
+          indexes={rawIndexes}
+          onSelectRel={handleSelect}
           onDeleteEntity={handleDeleteEntity}
+          onExportDdl={() => openModal("exportDdl")}
         />
       )}
 
       {bottomPanelOpen && (
-        <div className="bottom-drawer">
-          <div className="bottom-drawer-tabs">
-            {activeBottomTabs.map(({ id, label, icon: Icon }) => (
-              <button key={id}
-                      className={`bottom-drawer-tab ${bottomPanelTab === id ? "active" : ""}`}
-                      onClick={() => setBottomPanelTab(id)}>
-                <Icon />
-                {label}
-              </button>
-            ))}
-            <button className="bottom-drawer-close" onClick={toggleBottomPanel} title="Close panel (⌘J)">
-              <X size={14} />
-            </button>
-          </div>
-          <div className="bottom-drawer-body">
-            <div className="legacy-panel-root">
-              <BottomPanelContent tab={bottomPanelTab} />
-            </div>
-          </div>
-        </div>
+        <BottomDrawer tabs={activeBottomTabs}>
+          <BottomPanelContent tab={bottomPanelTab} />
+        </BottomDrawer>
       )}
 
       {!bottomPanelOpen && (
@@ -600,6 +654,8 @@ export default function Shell() {
         engine={schema.engine}
         saved={isDemo ? "Demo schema" : (isDirty ? "Unsaved" : `${openTabs.length} open`)}
         connectionState={isDemo ? "Demo mode" : "Connected"}
+        bottomPanelOpen={bottomPanelOpen}
+        onTogglePanel={toggleBottomPanel}
       />
 
       {/* Luna-style palette with real handlers for built-in actions. Extra
@@ -638,7 +694,6 @@ export default function Shell() {
         {activeModal === "commit"             && <CommitDialog />}
         {activeModal === "exportDdl"          && <ExportDdlDialog />}
         {activeModal === "importDialog"       && <PanelDialog kind="import" />}
-        {activeModal === "searchDialog"       && <PanelDialog kind="search" />}
         {activeModal === "gitBranch"          && <GitBranchDialog />}
         {activeModal === "welcome"            && <WelcomeModal onClose={closeModal} />}
       </React.Suspense>

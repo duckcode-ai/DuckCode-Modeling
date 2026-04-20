@@ -1,10 +1,11 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { Boxes, ArrowRightLeft, Shapes, Layers3 } from "lucide-react";
+import { Boxes, ArrowRightLeft, Shapes, Layers3, Wand2 } from "lucide-react";
 import useWorkspaceStore from "../../stores/workspaceStore";
 import useDiagramStore from "../../stores/diagramStore";
 import useUiStore from "../../stores/uiStore";
 import useAuthStore from "../../stores/authStore";
 import { addEntityWithOptions, addRelationship } from "../../lib/yamlRoundTrip";
+import { PanelFrame, PanelSection, PanelEmpty } from "./PanelFrame";
 
 const VIEW_MODES = [
   { id: "conceptual", label: "Conceptual", description: "Business concepts and high-level relationships." },
@@ -103,7 +104,15 @@ export default function ModelerPanel() {
   }, [toEntityFields, toField]);
 
   if (!model) {
-    return <div className="flex items-center justify-center h-full text-text-muted text-xs p-4">Open a model to use the modeler workspace.</div>;
+    return (
+      <PanelFrame icon={<Wand2 size={14} />} eyebrow="Workspace" title="Modeler">
+        <PanelEmpty
+          icon={Wand2}
+          title="No model open"
+          description="Open a model to use the modeler workspace."
+        />
+      </PanelFrame>
+    );
   }
 
   const handleCreateEntity = () => {
@@ -144,45 +153,36 @@ export default function ModelerPanel() {
   };
 
   return (
-    <div className="h-full overflow-y-auto p-3 space-y-4">
-      <section className="rounded-xl border border-border-primary bg-bg-surface">
-        <div className="px-3 py-2 border-b border-border-primary bg-bg-secondary/40">
-          <div className="text-[10px] text-text-muted uppercase tracking-wider font-semibold flex items-center gap-1.5">
-            <Layers3 size={11} />
-            Model Views
-          </div>
+    <PanelFrame
+      icon={<Wand2 size={14} />}
+      eyebrow="Workspace"
+      title="Modeler"
+      subtitle={`${entities.length} ${entities.length === 1 ? "entity" : "entities"} · ${modelKind}`}
+    >
+      <PanelSection title="Model Views" icon={<Layers3 size={11} />}>
+        <div className="grid grid-cols-3 gap-2">
+          {VIEW_MODES.map((view) => (
+            <button
+              key={view.id}
+              onClick={() => setModelingViewMode(view.id)}
+              className={`rounded-lg border px-2 py-2 text-left transition-colors ${
+                modelingViewMode === view.id
+                  ? "border-accent-blue bg-accent-blue/10 text-text-primary"
+                  : "border-border-primary bg-bg-primary text-text-secondary hover:bg-bg-hover"
+              }`}
+            >
+              <div className="text-[11px] font-semibold">{view.label}</div>
+              <div className="text-[10px] text-text-muted mt-1 leading-snug">{view.description}</div>
+            </button>
+          ))}
         </div>
-        <div className="p-3 space-y-2">
-          <div className="grid grid-cols-3 gap-2">
-            {VIEW_MODES.map((view) => (
-              <button
-                key={view.id}
-                onClick={() => setModelingViewMode(view.id)}
-                className={`rounded-lg border px-2 py-2 text-left transition-colors ${
-                  modelingViewMode === view.id
-                    ? "border-accent-blue bg-accent-blue/10 text-text-primary"
-                    : "border-border-primary bg-bg-primary text-text-secondary hover:bg-bg-hover"
-                }`}
-              >
-                <div className="text-[11px] font-semibold">{view.label}</div>
-                <div className="text-[10px] text-text-muted mt-1 leading-snug">{view.description}</div>
-              </button>
-            ))}
-          </div>
-          <div className="text-[11px] text-text-muted">
-            Model kind: <span className="font-medium text-text-secondary">{modelKind}</span>
-          </div>
+        <div className="text-[11px] text-text-muted mt-2">
+          Model kind: <span className="font-medium text-text-secondary">{modelKind}</span>
         </div>
-      </section>
+      </PanelSection>
 
-      <section className="rounded-xl border border-border-primary bg-bg-surface">
-        <div className="px-3 py-2 border-b border-border-primary bg-bg-secondary/40">
-          <div className="text-[10px] text-text-muted uppercase tracking-wider font-semibold flex items-center gap-1.5">
-            <Shapes size={11} />
-            Palette
-          </div>
-        </div>
-        <div className="p-3 grid grid-cols-2 gap-2">
+      <PanelSection title="Palette" icon={<Shapes size={11} />}>
+        <div className="grid grid-cols-2 gap-2">
           {entityOptions.map((type) => (
             <button
               key={type}
@@ -198,16 +198,10 @@ export default function ModelerPanel() {
             </button>
           ))}
         </div>
-      </section>
+      </PanelSection>
 
-      <section className="rounded-xl border border-border-primary bg-bg-surface">
-        <div className="px-3 py-2 border-b border-border-primary bg-bg-secondary/40">
-          <div className="text-[10px] text-text-muted uppercase tracking-wider font-semibold flex items-center gap-1.5">
-            <Boxes size={11} />
-            Quick Create
-          </div>
-        </div>
-        <div className="p-3 space-y-2">
+      <PanelSection title="Quick Create" icon={<Boxes size={11} />}>
+        <div className="space-y-2">
           <input
             value={entityName}
             onChange={(e) => setEntityName(e.target.value)}
@@ -249,16 +243,10 @@ export default function ModelerPanel() {
             Add {ENTITY_TYPES[entityType]?.label || entityType}
           </button>
         </div>
-      </section>
+      </PanelSection>
 
-      <section className="rounded-xl border border-border-primary bg-bg-surface">
-        <div className="px-3 py-2 border-b border-border-primary bg-bg-secondary/40">
-          <div className="text-[10px] text-text-muted uppercase tracking-wider font-semibold flex items-center gap-1.5">
-            <ArrowRightLeft size={11} />
-            Relationship Tool
-          </div>
-        </div>
-        <div className="p-3 space-y-2">
+      <PanelSection title="Relationship Tool" icon={<ArrowRightLeft size={11} />}>
+        <div className="space-y-2">
           <input
             value={relationshipName}
             onChange={(e) => setRelationshipName(e.target.value)}
@@ -298,7 +286,7 @@ export default function ModelerPanel() {
             Create Relationship
           </button>
         </div>
-      </section>
-    </div>
+      </PanelSection>
+    </PanelFrame>
   );
 }

@@ -1,10 +1,11 @@
 import React, { useMemo, useState } from "react";
-import { Map as MapIcon, Filter, CheckSquare, Square } from "lucide-react";
+import { Map as MapIcon, Filter, CheckSquare, Square, Compass } from "lucide-react";
 import useWorkspaceStore from "../../stores/workspaceStore";
 import useDiagramStore from "../../stores/diagramStore";
 import useUiStore from "../../stores/uiStore";
 import useAuthStore from "../../stores/authStore";
 import { bulkAssignSubjectArea } from "../../lib/yamlRoundTrip";
+import { PanelFrame, PanelSection, PanelEmpty } from "./PanelFrame";
 
 const UNASSIGNED_SUBJECT_AREA_FILTER = "__unassigned_subject_area__";
 
@@ -34,7 +35,15 @@ export default function SubjectAreasPanel() {
   const [targetArea, setTargetArea] = useState("");
 
   if (!model) {
-    return <div className="flex items-center justify-center h-full text-text-muted text-xs p-4">Open a model to explore subject areas.</div>;
+    return (
+      <PanelFrame icon={<Compass size={14} />} eyebrow="Organisation" title="Subject Areas">
+        <PanelEmpty
+          icon={Compass}
+          title="No model open"
+          description="Open a model to explore and assign subject areas."
+        />
+      </PanelFrame>
+    );
   }
 
   const toggleEntity = (entityName) => {
@@ -58,12 +67,14 @@ export default function SubjectAreasPanel() {
   };
 
   return (
-    <div className="h-full overflow-y-auto p-3 space-y-4">
-      <section className="rounded-xl border border-border-primary bg-bg-surface p-3 space-y-2">
-        <div className="text-[10px] text-text-muted uppercase tracking-wider font-semibold flex items-center gap-1.5">
-          <MapIcon size={11} />
-          Explorer
-        </div>
+    <PanelFrame
+      icon={<Compass size={14} />}
+      eyebrow="Organisation"
+      title="Subject Areas"
+      subtitle={`${summaries.length} areas · ${entities.length} entities`}
+    >
+      <PanelSection title="Explorer" icon={<MapIcon size={11} />}>
+        <div className="space-y-2">
         <div className="grid grid-cols-2 gap-2">
           {summaries.map((item) => (
             <button
@@ -91,13 +102,11 @@ export default function SubjectAreasPanel() {
             ? `Diagram filtered to ${activeSchemaFilter === UNASSIGNED_SUBJECT_AREA_FILTER ? "unassigned entities" : activeSchemaFilter}`
             : "Diagram not filtered by subject area"}
         </div>
-      </section>
-
-      <section className="rounded-xl border border-border-primary bg-bg-surface p-3 space-y-3">
-        <div className="text-[10px] text-text-muted uppercase tracking-wider font-semibold flex items-center gap-1.5">
-          <CheckSquare size={11} />
-          Bulk Assign
         </div>
+      </PanelSection>
+
+      <PanelSection title="Bulk Assign" icon={<CheckSquare size={11} />}>
+        <div className="space-y-3">
         <input
           value={targetArea}
           onChange={(e) => setTargetArea(e.target.value)}
@@ -146,7 +155,8 @@ export default function SubjectAreasPanel() {
         >
           Apply To Selected ({selectedNames.length})
         </button>
-      </section>
-    </div>
+        </div>
+      </PanelSection>
+    </PanelFrame>
   );
 }

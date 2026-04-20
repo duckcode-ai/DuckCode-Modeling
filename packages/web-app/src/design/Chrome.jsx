@@ -2,11 +2,51 @@
 import React from "react";
 import Icon from "./icons";
 import { THEMES } from "./notation";
+import useUiStore from "../stores/uiStore";
+import BellMenu from "./BellMenu";
+import UserMenu from "./UserMenu";
+
+/* Segmented view-mode switcher. Drives `uiStore.shellViewMode`, which the
+   Shell inspects to decide whether to render the diagram, the table list,
+   the views manager, or the enums manager in the main canvas cell. */
+const VIEW_MODES = [
+  { id: "diagram", label: "Diagram", Icon: Icon.Layers, tooltip: "Visual ER diagram" },
+  { id: "table",   label: "Table",   Icon: Icon.Table,  tooltip: "Tabular entity list" },
+  { id: "views",   label: "Views",   Icon: Icon.View,   tooltip: "Database views & matviews" },
+  { id: "enums",   label: "Enums",   Icon: Icon.Enum,   tooltip: "Enumerations" },
+];
+
+function ViewSwitcher() {
+  const shellViewMode = useUiStore((s) => s.shellViewMode);
+  const setShellViewMode = useUiStore((s) => s.setShellViewMode);
+  return (
+    <div className="view-switcher" role="tablist" aria-label="Main view">
+      {VIEW_MODES.map((m) => {
+        const Ico = m.Icon;
+        const active = shellViewMode === m.id;
+        return (
+          <button
+            key={m.id}
+            type="button"
+            role="tab"
+            aria-selected={active}
+            className={`view-seg ${active ? "active" : ""}`}
+            onClick={() => setShellViewMode(m.id)}
+            title={m.tooltip}
+          >
+            <Ico />
+            {m.label}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
 
 export function TopBar({
   onOpenCmd, theme, setTheme, onNewTable, onNewFile, onOpenFile, onSave,
   onUndo, onRedo, onRunSql, onSettings, onConnections, onCommit,
-  onImport, onSearch,
+  onImport, onSearch, onOpenShortcuts,
   isDirty = false, canSave = true,
   userInitials = "DL", userName = "User",
 }) {
@@ -42,25 +82,28 @@ export function TopBar({
           </button>
         </div>
         <div className="tool-group">
-          <button className="tool-btn" onClick={onNewTable}><I.Table />Table</button>
+          <button className="tool-btn" onClick={onNewTable} title="Create a new table / entity"><I.Plus /><I.Table />Table</button>
           <button className="tool-btn" onClick={onConnections} title="Manage connections"><I.Db />Connect</button>
-          <button className="tool-btn"><I.View />View</button>
-          <button className="tool-btn"><I.Enum />Enum</button>
         </div>
         <div className="tool-group">
           <button className="tool-btn" title="Undo" onClick={onUndo}><I.Undo /></button>
           <button className="tool-btn" title="Redo" onClick={onRedo}><I.Redo /></button>
         </div>
+        {/* View-mode switcher replaces the old Diagram/View/Enum triple. */}
+        <ViewSwitcher />
         <div className="tool-group">
           <button className="tool-btn" onClick={onRunSql}><I.Play />Run SQL</button>
-          <button className="tool-btn active"><I.Layers />Diagram</button>
           <button className="tool-btn" title="Commit (git)" onClick={onCommit}><I.Branch /></button>
           <button className="tool-btn" title="Settings" onClick={onSettings}><I.Settings /></button>
         </div>
       </div>
-      <button className="search-launcher" onClick={onSearch || onOpenCmd}>
-        <I.Search />
-        <span>Search tables, columns, commands…</span>
+      <button
+        className="search-launcher"
+        onClick={onSearch || onOpenCmd}
+        title="Search tables, columns, commands (⌘K)"
+      >
+        <span className="search-launcher-icon"><I.Search /></span>
+        <span className="search-launcher-text">Search tables, columns, commands…</span>
         <span className="kbd">⌘K</span>
       </button>
 
@@ -107,11 +150,14 @@ export function TopBar({
         )}
       </div>
 
-      <button className="tool-btn" title="Notifications"><I.Bell /></button>
-      <div className="user-chip">
-        <div className="avatar">{userInitials}</div>
-        <span>{userName}</span>
-      </div>
+      <BellMenu />
+      <UserMenu
+        userInitials={userInitials}
+        userName={userName}
+        theme={theme}
+        setTheme={setTheme}
+        onOpenShortcuts={onOpenShortcuts}
+      />
     </div>
   );
 }
@@ -127,7 +173,7 @@ export function ProjectTabs({ projects = [], activeId, onSelect, onClose, onNew,
         <div key={p.id}
              className={`tab ${p.id === activeId ? "active" : ""} ${p.dirty ? "unsaved" : ""}`}
              onClick={() => onSelect && onSelect(p.id)}>
-          <span className="tab-dot" style={{ color: p.color || "#5b8cff" }} />
+          <span className="tab-dot" style={{ color: p.color || "var(--accent)" }} />
           {p.name}
           <button className="tab-close" onClick={(e) => { e.stopPropagation(); onClose && onClose(p.id); }}>×</button>
         </div>
@@ -141,7 +187,13 @@ export function ProjectTabs({ projects = [], activeId, onSelect, onClose, onNew,
   );
 }
 
-export function StatusBar({ density, setDensity, tableCount, relCount, engine = "PostgreSQL 16.1", saved = "Saved 2m ago", zoom = 100, connectionState = "Connected" }) {
+export function StatusBar({
+  density, setDensity, tableCount, relCount,
+  engine = "PostgreSQL 16.1", saved = "Saved 2m ago",
+  zoom = 100, connectionState = "Connected",
+  bottomPanelOpen = false, onTogglePanel,
+}) {
+  const I = Icon;
   return (
     <div className="status">
       <div className="status-item"><span className="dot" /> {connectionState}</div>
@@ -149,6 +201,24 @@ export function StatusBar({ density, setDensity, tableCount, relCount, engine = 
       <div className="status-item">public · <span className="k">{tableCount} tables</span> · <span className="k">{relCount} relationships</span></div>
       <div className="status-item">{saved}</div>
       <div className="status-spacer" />
+      {/* Always-visible panel toggle — the belt-and-suspenders way back
+          to the drawer when a user hits the close (X) button. */}
+      {onTogglePanel && (
+        <div className="status-item">
+          <button
+            type="button"
+            className={`status-panel-toggle ${bottomPanelOpen ? "open" : ""}`}
+            onClick={onTogglePanel}
+            title={bottomPanelOpen ? "Close bottom panel (⌘J)" : "Open bottom panel (⌘J)"}
+            aria-label={bottomPanelOpen ? "Close bottom panel" : "Open bottom panel"}
+          >
+            <span style={{ display: "inline-flex", transform: bottomPanelOpen ? "none" : "rotate(180deg)" }}>
+              <I.ChevronDown />
+            </span>
+            Panel
+          </button>
+        </div>
+      )}
       <div className="status-item">
         <span style={{ color: "var(--text-muted)", marginRight: 6 }}>Density</span>
         <div className="density-toggle">

@@ -1,22 +1,31 @@
+/* DictionaryPanel — the "Dictionary" tab in the bottom drawer. Shows the
+   data-dictionary view of the active model: entities + their fields /
+   indexes / relationships, plus the metric contracts catalog and the
+   business glossary.
+
+   The previous version relied on hardcoded Tailwind palette classes
+   (bg-blue-50, text-purple-600, bg-amber-100, etc.) which didn't play
+   well on dark Luna themes. This rewrite:
+
+   • Wraps the whole panel in PanelFrame with a proper search toolbar.
+   • Splits content into three PanelSections — Entities, Metric
+     Contracts, Business Glossary.
+   • Every entity renders inside a PanelCard with a type-semantic tone
+     (table → info, view → success, materialized_view → accent,
+     external_table → warning, snapshot → neutral).
+   • Field attributes (PK / FK / UQ / NN / COMP / sensitivity) become
+     StatusPills with semantic tones rather than raw pastels.
+   • The field grid uses the shared `.panel-table` class — sticky
+     header, zebra rows, hover, theme-safe on all four palettes. */
 import React, { useState, useMemo } from "react";
 import {
-  BookOpen,
-  Search,
-  Table2,
-  Eye,
-  Layers,
-  HardDrive,
-  Camera,
-  Tag,
-  Key,
-  Shield,
-  ChevronDown,
-  ChevronRight,
-  ArrowRightLeft,
-  ListOrdered,
-  Gauge,
+  BookOpen, Search, Table2, Eye, Layers, HardDrive, Camera,
+  ChevronDown, ChevronRight, ArrowRightLeft, ListOrdered, Gauge,
 } from "lucide-react";
 import useDiagramStore from "../../stores/diagramStore";
+import {
+  PanelFrame, PanelSection, PanelCard, StatusPill, PanelEmpty,
+} from "./PanelFrame";
 
 const TYPE_ICONS = {
   table: Table2,
@@ -26,26 +35,35 @@ const TYPE_ICONS = {
   snapshot: Camera,
 };
 
-const TYPE_COLORS = {
-  table: "bg-blue-50 text-blue-700",
-  view: "bg-green-50 text-green-700",
-  materialized_view: "bg-purple-50 text-purple-700",
-  external_table: "bg-orange-50 text-orange-700",
-  snapshot: "bg-rose-50 text-rose-700",
-};
-
-function FieldBadge({ label, className }) {
-  return (
-    <span className={`inline-block px-1 py-0 rounded text-[8px] font-semibold ${className}`}>
-      {label}
-    </span>
-  );
+/* Map entity types to semantic PanelCard tones (theme-aware). */
+function toneForType(etype) {
+  switch (etype) {
+    case "table":              return "info";
+    case "view":               return "success";
+    case "materialized_view":  return "accent";
+    case "external_table":     return "warning";
+    case "snapshot":           return "neutral";
+    default:                   return "info";
+  }
 }
 
-function EntitySection({ entity, classifications, indexes, relationships, isExpanded, onToggle, onSelectEntity }) {
+/* Field-attribute pills. We map the most common attrs to the tone that
+   best matches their visual language across themes. */
+function attrTone(attr) {
+  switch (attr) {
+    case "PK":    return "warning"; // --pk (yellow / gold)
+    case "UQ":    return "info";    // indicates constraint
+    case "FK":    return "accent";
+    case "NN":    return "error";   // not-null = enforced
+    case "COMP":  return "success";
+    default:      return "warning"; // sensitivity etc.
+  }
+}
+
+function EntityCard({ entity, classifications, indexes, relationships, isExpanded, onToggle }) {
   const etype = entity.type || "table";
   const TypeIcon = TYPE_ICONS[etype] || Table2;
-  const typeColor = TYPE_COLORS[etype] || TYPE_COLORS.table;
+  const tone = toneForType(etype);
   const fields = entity.fields || [];
   const tags = entity.tags || [];
   const entityIndexes = indexes.filter((idx) => idx.entity === entity.name);
@@ -56,49 +74,63 @@ function EntitySection({ entity, classifications, indexes, relationships, isExpa
   });
 
   return (
-    <div className="border border-border-primary rounded-lg overflow-hidden bg-bg-primary">
+    <PanelCard tone={tone} dense>
       <button
         onClick={onToggle}
-        className="flex items-center gap-2 w-full px-3 py-2 text-left hover:bg-bg-hover transition-colors"
+        style={{
+          width: "100%", background: "transparent", border: "none", padding: 0, margin: 0,
+          display: "flex", alignItems: "center", gap: 8, cursor: "pointer", textAlign: "left",
+          color: "var(--text-primary)",
+        }}
       >
         {isExpanded ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
-        <TypeIcon size={13} className="shrink-0" />
-        <span className="text-xs font-semibold text-text-primary">{entity.name}</span>
-        <span className={`px-1.5 py-0 rounded text-[9px] font-semibold ${typeColor}`}>{etype}</span>
-        <span className="ml-auto text-[10px] text-text-muted">{fields.length} fields</span>
+        <TypeIcon size={13} style={{ color: "var(--text-secondary)", flexShrink: 0 }} />
+        <span style={{ fontSize: 12.5, fontWeight: 600, fontFamily: "var(--font-mono, inherit)" }}>{entity.name}</span>
+        <StatusPill tone={tone}>{etype}</StatusPill>
+        {entity.subject_area && (
+          <StatusPill tone="neutral">{entity.subject_area}</StatusPill>
+        )}
+        <span style={{ marginLeft: "auto", fontSize: 10.5, color: "var(--text-tertiary)" }}>
+          {fields.length} {fields.length === 1 ? "field" : "fields"}
+        </span>
       </button>
 
       {isExpanded && (
-        <div className="border-t border-border-primary">
-          {/* Meta */}
-          {(entity.description || entity.schema || entity.subject_area || entity.owner || tags.length > 0 || (entity.grain || []).length > 0) && (
-            <div className="px-3 py-1.5 text-[11px] text-text-muted space-y-0.5 border-b border-border-primary bg-bg-secondary/30">
-              {entity.description && <div>{entity.description}</div>}
-              <div className="flex flex-wrap gap-2">
-                {entity.schema && <span>Schema: <strong>{entity.schema}</strong></span>}
-                {entity.subject_area && <span>Area: <strong>{entity.subject_area}</strong></span>}
-                {entity.owner && <span>Owner: <strong>{entity.owner}</strong></span>}
-                {(entity.grain || []).length > 0 && <span>Grain: <strong>{(entity.grain || []).join(", ")}</strong></span>}
+        <div style={{ marginTop: 10 }}>
+          {/* Meta row */}
+          {(entity.description || entity.schema || entity.owner || tags.length > 0 || (entity.grain || []).length > 0) && (
+            <div style={{
+              padding: "8px 10px", marginBottom: 10,
+              background: "var(--bg-1)", border: "1px solid var(--border-default)", borderRadius: 6,
+              fontSize: 11, color: "var(--text-secondary)",
+            }}>
+              {entity.description && (
+                <div style={{ marginBottom: 6 }}>{entity.description}</div>
+              )}
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 10, fontSize: 10.5 }}>
+                {entity.schema && <span>Schema: <strong style={{ color: "var(--text-primary)" }}>{entity.schema}</strong></span>}
+                {entity.owner && <span>Owner: <strong style={{ color: "var(--text-primary)" }}>{entity.owner}</strong></span>}
+                {(entity.grain || []).length > 0 && <span>Grain: <strong style={{ color: "var(--text-primary)" }}>{(entity.grain || []).join(", ")}</strong></span>}
               </div>
               {tags.length > 0 && (
-                <div className="flex gap-1 flex-wrap">
+                <div style={{ display: "flex", gap: 4, flexWrap: "wrap", marginTop: 6 }}>
                   {tags.map((t) => (
-                    <span key={t} className="px-1 py-0 rounded bg-bg-primary border border-border-primary text-[9px]">{t}</span>
+                    <StatusPill key={t} tone="neutral">{t}</StatusPill>
                   ))}
                 </div>
               )}
             </div>
           )}
 
-          {/* Fields */}
-          <div className="overflow-x-auto">
-            <table className="w-full text-[11px]">
+          {/* Fields table */}
+          <div style={{ overflowX: "auto" }}>
+            <table className="panel-table">
               <thead>
-                <tr className="bg-bg-secondary/50">
-                  <th className="text-left px-3 py-1 font-semibold text-text-muted">Field</th>
-                  <th className="text-left px-2 py-1 font-semibold text-text-muted">Type</th>
-                  <th className="text-left px-2 py-1 font-semibold text-text-muted">Attrs</th>
-                  <th className="text-left px-2 py-1 font-semibold text-text-muted">Description</th>
+                <tr>
+                  <th>Field</th>
+                  <th>Type</th>
+                  <th>Attrs</th>
+                  <th>Description</th>
                 </tr>
               </thead>
               <tbody>
@@ -106,19 +138,24 @@ function EntitySection({ entity, classifications, indexes, relationships, isExpa
                   const clsKey = `${entity.name}.${f.name}`;
                   const cls = classifications[clsKey];
                   return (
-                    <tr key={f.name} className={`border-t border-border-primary hover:bg-bg-hover ${f.deprecated ? "opacity-50 line-through" : ""}`}>
-                      <td className="px-3 py-1 font-mono font-medium text-text-primary">{f.name}</td>
-                      <td className="px-2 py-1 font-mono text-purple-600">{f.type}</td>
-                      <td className="px-2 py-1 space-x-0.5">
-                        {f.primary_key && <FieldBadge label="PK" className="bg-amber-100 text-amber-800" />}
-                        {f.unique && <FieldBadge label="UQ" className="bg-cyan-100 text-cyan-800" />}
-                        {f.foreign_key && <FieldBadge label="FK" className="bg-blue-100 text-blue-800" />}
-                        {f.nullable === false && <FieldBadge label="NN" className="bg-rose-100 text-rose-800" />}
-                        {f.computed && <FieldBadge label="COMP" className="bg-green-100 text-green-800" />}
-                        {f.sensitivity && <FieldBadge label={f.sensitivity} className="bg-amber-100 text-amber-800" />}
-                        {cls && <FieldBadge label={cls} className="bg-amber-100 text-amber-800" />}
+                    <tr
+                      key={f.name}
+                      style={f.deprecated ? { opacity: 0.5, textDecoration: "line-through" } : undefined}
+                    >
+                      <td style={{ fontFamily: "var(--font-mono, inherit)", fontWeight: 500 }}>{f.name}</td>
+                      <td style={{ fontFamily: "var(--font-mono, inherit)", color: "var(--cat-users)" }}>{f.type}</td>
+                      <td>
+                        <div style={{ display: "inline-flex", flexWrap: "wrap", gap: 3 }}>
+                          {f.primary_key && <StatusPill tone={attrTone("PK")}>PK</StatusPill>}
+                          {f.unique       && <StatusPill tone={attrTone("UQ")}>UQ</StatusPill>}
+                          {f.foreign_key  && <StatusPill tone={attrTone("FK")}>FK</StatusPill>}
+                          {f.nullable === false && <StatusPill tone={attrTone("NN")}>NN</StatusPill>}
+                          {f.computed     && <StatusPill tone={attrTone("COMP")}>COMP</StatusPill>}
+                          {f.sensitivity  && <StatusPill tone="warning">{f.sensitivity}</StatusPill>}
+                          {cls            && <StatusPill tone="warning">{cls}</StatusPill>}
+                        </div>
                       </td>
-                      <td className="px-2 py-1 text-text-muted">{f.description || ""}</td>
+                      <td style={{ color: "var(--text-tertiary)" }}>{f.description || ""}</td>
                     </tr>
                   );
                 })}
@@ -128,15 +165,22 @@ function EntitySection({ entity, classifications, indexes, relationships, isExpa
 
           {/* Indexes */}
           {entityIndexes.length > 0 && (
-            <div className="px-3 py-1.5 border-t border-border-primary">
-              <div className="text-[10px] text-text-muted font-semibold uppercase mb-1 flex items-center gap-1">
+            <div style={{ marginTop: 10 }}>
+              <div style={{
+                fontSize: 10, fontWeight: 600, letterSpacing: "0.08em",
+                textTransform: "uppercase", color: "var(--text-tertiary)",
+                display: "inline-flex", alignItems: "center", gap: 4, marginBottom: 4,
+              }}>
                 <ListOrdered size={10} /> Indexes ({entityIndexes.length})
               </div>
               {entityIndexes.map((idx) => (
-                <div key={idx.name} className="flex items-center gap-1.5 text-[10px] text-text-secondary py-0.5">
-                  <code className="font-mono">{idx.name}</code>
-                  <span className="text-text-muted">({(idx.fields || []).join(", ")})</span>
-                  {idx.unique && <FieldBadge label="UNIQUE" className="bg-cyan-100 text-cyan-800" />}
+                <div key={idx.name} style={{
+                  display: "flex", alignItems: "center", gap: 6,
+                  fontSize: 10.5, color: "var(--text-secondary)", padding: "2px 0",
+                }}>
+                  <code style={{ fontFamily: "var(--font-mono, inherit)", color: "var(--text-primary)" }}>{idx.name}</code>
+                  <span style={{ color: "var(--text-tertiary)" }}>({(idx.fields || []).join(", ")})</span>
+                  {idx.unique && <StatusPill tone="info">UNIQUE</StatusPill>}
                 </div>
               ))}
             </div>
@@ -144,24 +188,31 @@ function EntitySection({ entity, classifications, indexes, relationships, isExpa
 
           {/* Relationships */}
           {entityRels.length > 0 && (
-            <div className="px-3 py-1.5 border-t border-border-primary">
-              <div className="text-[10px] text-text-muted font-semibold uppercase mb-1 flex items-center gap-1">
+            <div style={{ marginTop: 10 }}>
+              <div style={{
+                fontSize: 10, fontWeight: 600, letterSpacing: "0.08em",
+                textTransform: "uppercase", color: "var(--text-tertiary)",
+                display: "inline-flex", alignItems: "center", gap: 4, marginBottom: 4,
+              }}>
                 <ArrowRightLeft size={10} /> Relationships ({entityRels.length})
               </div>
               {entityRels.map((rel) => (
-                <div key={rel.name} className="flex items-center gap-1.5 text-[10px] text-text-secondary py-0.5">
-                  <span className="font-semibold">{rel.name}</span>
-                  <code className="font-mono text-purple-600">{rel.from}</code>
-                  <span className="text-text-muted">→</span>
-                  <code className="font-mono text-purple-600">{rel.to}</code>
-                  <span className="text-[9px] text-text-muted">({(rel.cardinality || "").replace(/_/g, ":")})</span>
+                <div key={rel.name} style={{
+                  display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap",
+                  fontSize: 10.5, color: "var(--text-secondary)", padding: "2px 0",
+                }}>
+                  <span style={{ fontWeight: 600, color: "var(--text-primary)" }}>{rel.name}</span>
+                  <code style={{ fontFamily: "var(--font-mono, inherit)", color: "var(--cat-users)" }}>{rel.from}</code>
+                  <span style={{ color: "var(--text-tertiary)" }}>→</span>
+                  <code style={{ fontFamily: "var(--font-mono, inherit)", color: "var(--cat-users)" }}>{rel.to}</code>
+                  <span style={{ fontSize: 10, color: "var(--text-tertiary)" }}>({(rel.cardinality || "").replace(/_/g, ":")})</span>
                 </div>
               ))}
             </div>
           )}
         </div>
       )}
-    </div>
+    </PanelCard>
   );
 }
 
@@ -197,38 +248,33 @@ export default function DictionaryPanel() {
   const filteredGlossary = useMemo(() => {
     if (!search.trim()) return glossary;
     const q = search.toLowerCase();
-    return glossary.filter((t) => {
-      return (
-        (t.term || "").toLowerCase().includes(q) ||
-        (t.definition || "").toLowerCase().includes(q) ||
-        (t.abbreviation || "").toLowerCase().includes(q)
-      );
-    });
+    return glossary.filter((t) => (
+      (t.term || "").toLowerCase().includes(q) ||
+      (t.definition || "").toLowerCase().includes(q) ||
+      (t.abbreviation || "").toLowerCase().includes(q)
+    ));
   }, [glossary, search]);
 
   const filteredMetrics = useMemo(() => {
     if (!search.trim()) return metrics;
     const q = search.toLowerCase();
-    return metrics.filter((metric) => {
-      return (
-        (metric.name || "").toLowerCase().includes(q) ||
-        (metric.entity || "").toLowerCase().includes(q) ||
-        (metric.description || "").toLowerCase().includes(q) ||
-        (metric.expression || "").toLowerCase().includes(q) ||
-        (metric.aggregation || "").toLowerCase().includes(q) ||
-        (metric.time_dimension || "").toLowerCase().includes(q) ||
-        (metric.grain || []).some((item) => String(item).toLowerCase().includes(q)) ||
-        (metric.dimensions || []).some((item) => String(item).toLowerCase().includes(q)) ||
-        (metric.tags || []).some((item) => String(item).toLowerCase().includes(q))
-      );
-    });
+    return metrics.filter((metric) => (
+      (metric.name || "").toLowerCase().includes(q) ||
+      (metric.entity || "").toLowerCase().includes(q) ||
+      (metric.description || "").toLowerCase().includes(q) ||
+      (metric.expression || "").toLowerCase().includes(q) ||
+      (metric.aggregation || "").toLowerCase().includes(q) ||
+      (metric.time_dimension || "").toLowerCase().includes(q) ||
+      (metric.grain || []).some((item) => String(item).toLowerCase().includes(q)) ||
+      (metric.dimensions || []).some((item) => String(item).toLowerCase().includes(q)) ||
+      (metric.tags || []).some((item) => String(item).toLowerCase().includes(q))
+    ));
   }, [metrics, search]);
 
   const toggleEntity = (name) => {
     setExpandedEntities((prev) => {
       const next = new Set(prev);
-      if (next.has(name)) next.delete(name);
-      else next.add(name);
+      if (next.has(name)) next.delete(name); else next.add(name);
       return next;
     });
   };
@@ -238,156 +284,177 @@ export default function DictionaryPanel() {
 
   if (!model || entities.length === 0) {
     return (
-      <div className="flex items-center justify-center h-full text-text-muted text-xs p-4">
-        <BookOpen size={12} className="mr-1" />
-        Open a model file to view its data dictionary
-      </div>
+      <PanelFrame icon={<BookOpen size={14} />} eyebrow="Overview" title="Data Dictionary">
+        <PanelEmpty
+          icon={BookOpen}
+          title="No model loaded"
+          description="Open a model file to view its data dictionary."
+        />
+      </PanelFrame>
     );
   }
 
   const totalFields = entities.reduce((sum, e) => sum + (e.fields || []).length, 0);
 
-  return (
-    <div className="flex flex-col h-full overflow-hidden">
-      {/* Header */}
-      <div className="flex items-center justify-between px-3 py-2 border-b border-border-primary bg-bg-secondary/50 shrink-0">
-        <div className="flex items-center gap-1.5">
-          <BookOpen size={12} className="text-accent-blue" />
-          <span className="text-xs font-semibold text-text-primary">Data Dictionary</span>
-          {modelLayer && (
-            <span className="px-1.5 py-0 rounded text-[9px] font-semibold bg-blue-50 text-blue-700 border border-blue-200">
-              {modelLayer}
-            </span>
-          )}
-          <span className="text-[10px] text-text-muted">
-            {entities.length} entities · {totalFields} fields · {metrics.length} metrics
-          </span>
-        </div>
-        <div className="flex items-center gap-1">
-          <button onClick={expandAll} className="px-1.5 py-0.5 rounded text-[9px] text-text-muted hover:text-text-primary hover:bg-bg-hover">
-            Expand All
-          </button>
-          <button onClick={collapseAll} className="px-1.5 py-0.5 rounded text-[9px] text-text-muted hover:text-text-primary hover:bg-bg-hover">
-            Collapse
-          </button>
-        </div>
+  /* Header toolbar — search box + expand/collapse actions */
+  const toolbar = (
+    <div style={{ display: "flex", alignItems: "center", gap: 8, width: "100%" }}>
+      <div style={{ position: "relative", flex: 1 }}>
+        <Search
+          size={12}
+          style={{
+            position: "absolute", left: 10, top: "50%", transform: "translateY(-50%)",
+            color: "var(--text-tertiary)", pointerEvents: "none",
+          }}
+        />
+        <input
+          type="text"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          placeholder="Search entities, fields, tags, metrics, glossary…"
+          style={{
+            width: "100%",
+            padding: "6px 10px 6px 28px",
+            borderRadius: 6,
+            background: "var(--bg-1)",
+            border: "1px solid var(--border-default)",
+            color: "var(--text-primary)",
+            fontSize: 12,
+            outline: "none",
+          }}
+        />
       </div>
-
-      {/* Search */}
-      <div className="px-3 py-2 border-b border-border-primary shrink-0">
-        <div className="relative">
-          <Search size={12} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-text-muted" />
-          <input
-            type="text"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search entities, fields, tags, glossary..."
-            className="w-full pl-7 pr-3 py-1.5 bg-bg-primary border border-border-primary rounded-md text-xs text-text-primary placeholder:text-text-muted outline-none focus:border-accent-blue"
-          />
-        </div>
-      </div>
-
-      {/* Content */}
-      <div className="flex-1 overflow-y-auto p-3 space-y-2">
-        {/* Entities */}
-        {filtered.map((entity) => (
-          <EntitySection
-            key={entity.name}
-            entity={entity}
-            classifications={classifications}
-            indexes={indexes}
-            relationships={relationships}
-            isExpanded={expandedEntities.has(entity.name)}
-            onToggle={() => toggleEntity(entity.name)}
-          />
-        ))}
-
-        {filtered.length === 0 && search && (
-          <div className="text-xs text-text-muted text-center py-4">
-            No entities match "{search}"
-          </div>
-        )}
-
-        {/* Metrics */}
-        {filteredMetrics.length > 0 && (
-          <div className="mt-3">
-            <div className="text-[10px] text-text-muted uppercase tracking-wider font-semibold flex items-center gap-1 mb-1.5">
-              <Gauge size={10} />
-              Metric Contracts ({filteredMetrics.length})
-            </div>
-            <div className="space-y-1.5">
-              {filteredMetrics.map((metric) => (
-                <div key={metric.name} className="border border-border-primary rounded-lg p-2.5 bg-bg-primary">
-                  <div className="flex items-center gap-1.5 mb-0.5">
-                    <span className="text-xs font-semibold text-text-primary">{metric.name}</span>
-                    {metric.aggregation && (
-                      <span className="px-1 py-0 rounded text-[9px] font-semibold bg-green-50 text-green-700 border border-green-200">
-                        {metric.aggregation}
-                      </span>
-                    )}
-                    {metric.entity && (
-                      <code className="text-[9px] font-mono px-1 py-0 rounded bg-bg-secondary border border-border-primary text-purple-600">
-                        {metric.entity}
-                      </code>
-                    )}
-                  </div>
-                  {metric.description && (
-                    <p className="text-[11px] text-text-muted">{metric.description}</p>
-                  )}
-                  <div className="text-[10px] text-text-secondary mt-1 space-y-0.5">
-                    {(metric.grain || []).length > 0 && <div>Grain: {(metric.grain || []).join(", ")}</div>}
-                    {(metric.dimensions || []).length > 0 && <div>Dimensions: {(metric.dimensions || []).join(", ")}</div>}
-                    {metric.time_dimension && <div>Time: {metric.time_dimension}</div>}
-                  </div>
-                  {(metric.tags || []).length > 0 && (
-                    <div className="flex flex-wrap gap-1 mt-1">
-                      {(metric.tags || []).map((tag) => (
-                        <span key={`${metric.name}-${tag}`} className="px-1 py-0 rounded bg-bg-secondary border border-border-primary text-[9px]">
-                          {tag}
-                        </span>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
-
-        {/* Glossary */}
-        {filteredGlossary.length > 0 && (
-          <div className="mt-3">
-            <div className="text-[10px] text-text-muted uppercase tracking-wider font-semibold flex items-center gap-1 mb-1.5">
-              <BookOpen size={10} />
-              Business Glossary ({filteredGlossary.length})
-            </div>
-            <div className="space-y-1.5">
-              {filteredGlossary.map((term) => (
-                <div key={term.term} className="border border-border-primary rounded-lg p-2.5 bg-bg-primary">
-                  <div className="flex items-center gap-1.5 mb-0.5">
-                    <span className="text-xs font-semibold text-text-primary">{term.term}</span>
-                    {term.abbreviation && (
-                      <span className="text-[10px] text-text-muted">({term.abbreviation})</span>
-                    )}
-                  </div>
-                  {term.definition && (
-                    <p className="text-[11px] text-text-muted">{term.definition}</p>
-                  )}
-                  {(term.related_fields || []).length > 0 && (
-                    <div className="flex flex-wrap gap-1 mt-1">
-                      {term.related_fields.map((f) => (
-                        <code key={f} className="text-[9px] font-mono px-1 py-0 rounded bg-bg-secondary border border-border-primary text-purple-600">
-                          {f}
-                        </code>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
+      <div style={{ display: "flex", gap: 4 }}>
+        <button
+          onClick={expandAll}
+          style={{
+            padding: "4px 8px", borderRadius: 5,
+            background: "transparent", border: "1px solid var(--border-default)",
+            color: "var(--text-secondary)", fontSize: 10.5, cursor: "pointer",
+          }}
+        >Expand all</button>
+        <button
+          onClick={collapseAll}
+          style={{
+            padding: "4px 8px", borderRadius: 5,
+            background: "transparent", border: "1px solid var(--border-default)",
+            color: "var(--text-secondary)", fontSize: 10.5, cursor: "pointer",
+          }}
+        >Collapse</button>
       </div>
     </div>
+  );
+
+  const titleStatus = modelLayer ? <StatusPill tone="info">{modelLayer}</StatusPill> : null;
+
+  return (
+    <PanelFrame
+      icon={<BookOpen size={14} />}
+      eyebrow="Reference"
+      title="Data Dictionary"
+      subtitle={`${entities.length} entities · ${totalFields} fields · ${metrics.length} metrics`}
+      status={titleStatus}
+      toolbar={toolbar}
+    >
+      {/* Entities */}
+      <PanelSection title="Entities" count={filtered.length}>
+        {filtered.length === 0 && search ? (
+          <PanelEmpty title={`No entities match “${search}”`} />
+        ) : (
+          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+            {filtered.map((entity) => (
+              <EntityCard
+                key={entity.name}
+                entity={entity}
+                classifications={classifications}
+                indexes={indexes}
+                relationships={relationships}
+                isExpanded={expandedEntities.has(entity.name)}
+                onToggle={() => toggleEntity(entity.name)}
+              />
+            ))}
+          </div>
+        )}
+      </PanelSection>
+
+      {/* Metric Contracts */}
+      {filteredMetrics.length > 0 && (
+        <PanelSection title="Metric Contracts" count={filteredMetrics.length} icon={<Gauge size={11} />}>
+          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+            {filteredMetrics.map((metric) => (
+              <PanelCard key={metric.name} tone="success" dense>
+                <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+                  <span style={{ fontSize: 12.5, fontWeight: 600, color: "var(--text-primary)" }}>{metric.name}</span>
+                  {metric.aggregation && <StatusPill tone="success">{metric.aggregation}</StatusPill>}
+                  {metric.entity && (
+                    <code style={{
+                      fontSize: 10.5, padding: "1px 6px", borderRadius: 4,
+                      background: "var(--bg-1)", border: "1px solid var(--border-default)",
+                      color: "var(--cat-users)", fontFamily: "var(--font-mono, inherit)",
+                    }}>{metric.entity}</code>
+                  )}
+                </div>
+                {metric.description && (
+                  <p style={{ fontSize: 11.5, color: "var(--text-tertiary)", margin: "4px 0 0 0" }}>
+                    {metric.description}
+                  </p>
+                )}
+                <div style={{ fontSize: 10.5, color: "var(--text-secondary)", marginTop: 4, lineHeight: 1.6 }}>
+                  {(metric.grain || []).length > 0 && <div>Grain: {(metric.grain || []).join(", ")}</div>}
+                  {(metric.dimensions || []).length > 0 && <div>Dimensions: {(metric.dimensions || []).join(", ")}</div>}
+                  {metric.time_dimension && <div>Time: {metric.time_dimension}</div>}
+                </div>
+                {(metric.tags || []).length > 0 && (
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: 4, marginTop: 6 }}>
+                    {(metric.tags || []).map((tag) => (
+                      <StatusPill key={`${metric.name}-${tag}`} tone="neutral">{tag}</StatusPill>
+                    ))}
+                  </div>
+                )}
+              </PanelCard>
+            ))}
+          </div>
+        </PanelSection>
+      )}
+
+      {/* Business Glossary */}
+      {filteredGlossary.length > 0 && (
+        <PanelSection title="Business Glossary" count={filteredGlossary.length} icon={<BookOpen size={11} />}>
+          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+            {filteredGlossary.map((term) => (
+              <PanelCard key={term.term} tone="accent" dense>
+                <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                  <span style={{ fontSize: 12.5, fontWeight: 600, color: "var(--text-primary)" }}>{term.term}</span>
+                  {term.abbreviation && (
+                    <span style={{ fontSize: 10.5, color: "var(--text-tertiary)" }}>({term.abbreviation})</span>
+                  )}
+                </div>
+                {term.definition && (
+                  <p style={{ fontSize: 11.5, color: "var(--text-tertiary)", margin: "4px 0 0 0" }}>
+                    {term.definition}
+                  </p>
+                )}
+                {(term.related_fields || []).length > 0 && (
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: 4, marginTop: 6 }}>
+                    {term.related_fields.map((f) => (
+                      <code
+                        key={f}
+                        style={{
+                          fontSize: 10, padding: "1px 6px", borderRadius: 4,
+                          background: "var(--bg-1)", border: "1px solid var(--border-default)",
+                          color: "var(--cat-users)", fontFamily: "var(--font-mono, inherit)",
+                        }}
+                      >
+                        {f}
+                      </code>
+                    ))}
+                  </div>
+                )}
+              </PanelCard>
+            ))}
+          </div>
+        </PanelSection>
+      )}
+    </PanelFrame>
   );
 }

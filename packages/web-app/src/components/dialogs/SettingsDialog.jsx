@@ -1,118 +1,119 @@
-import React, { useState } from "react";
+/* SettingsDialog — user-facing workspace settings.
+   Ported to the shared `<Modal>` chrome with a Luna-aware sidebar, theme
+   tiles (Midnight / Obsidian / Paper / Arctic), and consistent spacing.
+
+   Theme changes are broadcast via a `datalex:theme-change` CustomEvent so
+   the shell picks them up without either side knowing about the other. */
+import React from "react";
 import {
-  X,
-  Sun,
-  Moon,
-  Monitor,
-  Keyboard,
-  Info,
-  SlidersHorizontal,
-  Plug,
+  Sun, Moon, Sparkles, Snowflake,
+  Keyboard, Info, SlidersHorizontal, Plug, Check,
 } from "lucide-react";
 import useUiStore from "../../stores/uiStore";
+import { THEMES } from "../../design/notation";
+import Modal from "./Modal";
 
-/**
- * Consolidated Settings dialog. Sections are lightweight and mostly surface
- * existing store state — deeper tools (Editor / Canvas / Git / Keymap remap)
- * land in later phases.
- */
 const TABS = [
-  { id: "appearance", label: "Appearance", icon: SlidersHorizontal },
-  { id: "keyboard", label: "Keyboard", icon: Keyboard },
+  { id: "appearance",  label: "Appearance",  icon: SlidersHorizontal },
+  { id: "keyboard",    label: "Keyboard",    icon: Keyboard },
   { id: "connections", label: "Connections", icon: Plug },
-  { id: "about", label: "About", icon: Info },
+  { id: "about",       label: "About",       icon: Info },
 ];
+
+const THEME_STORAGE = "datalex.theme";
+
+const THEME_ICONS = {
+  midnight: Moon,
+  obsidian: Sparkles,
+  paper:    Sun,
+  arctic:   Snowflake,
+};
 
 export default function SettingsDialog() {
   const { closeModal } = useUiStore();
-  const [active, setActive] = useState("appearance");
+  const [active, setActive] = React.useState("appearance");
+  const [currentTheme, setCurrentTheme] = React.useState(
+    () => localStorage.getItem(THEME_STORAGE) || "midnight"
+  );
+
+  const pickTheme = (id) => {
+    localStorage.setItem(THEME_STORAGE, id);
+    document.documentElement.setAttribute("data-theme", id);
+    setCurrentTheme(id);
+    window.dispatchEvent(
+      new CustomEvent("datalex:theme-change", { detail: { theme: id } })
+    );
+  };
 
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm"
-      onClick={closeModal}
+    <Modal
+      title="Settings"
+      subtitle="Personalize the workspace — appearance, shortcuts, connections."
+      size="lg"
+      onClose={closeModal}
+      bodyClassName="pad-0"
+      cardClassName="dlx-settings-card"
+      footer={
+        <button type="button" className="panel-btn primary" onClick={closeModal}>
+          Done
+        </button>
+      }
     >
-      <div
-        className="w-[760px] max-w-[94vw] h-[520px] max-h-[90vh] rounded-xl border border-border-primary bg-bg-surface shadow-2xl flex flex-col overflow-hidden"
-        onClick={(e) => e.stopPropagation()}
-      >
-        {/* Header */}
-        <div className="flex items-center justify-between px-4 h-12 border-b border-border-primary bg-bg-secondary shrink-0">
-          <h2 className="t-subtitle text-text-primary">Settings</h2>
-          <button onClick={closeModal} className="dl-toolbar-btn dl-toolbar-btn--ghost-icon" title="Close">
-            <X size={14} />
-          </button>
-        </div>
+      <div className="dlx-settings-grid">
+        {/* Sidebar */}
+        <nav className="dlx-settings-nav" role="tablist" aria-label="Settings sections">
+          {TABS.map(({ id, label, icon: Icon }) => (
+            <button
+              key={id}
+              role="tab"
+              aria-selected={active === id}
+              className={`dlx-settings-nav-item ${active === id ? "active" : ""}`}
+              onClick={() => setActive(id)}
+            >
+              <Icon size={14} />
+              {label}
+            </button>
+          ))}
+        </nav>
 
-        {/* Body: sidebar + content */}
-        <div className="flex-1 flex min-h-0">
-          {/* Sidebar */}
-          <nav className="w-[180px] shrink-0 border-r border-border-primary bg-bg-secondary/50 py-2">
-            {TABS.map(({ id, label, icon: Icon }) => (
-              <button
-                key={id}
-                onClick={() => setActive(id)}
-                className={`w-full flex items-center gap-2 px-3 py-2 text-sm text-left transition-colors ${
-                  active === id
-                    ? "bg-bg-active text-text-accent font-medium"
-                    : "text-text-secondary hover:bg-bg-hover hover:text-text-primary"
-                }`}
-              >
-                <Icon size={14} />
-                {label}
-              </button>
-            ))}
-          </nav>
-
-          {/* Content */}
-          <div className="flex-1 overflow-y-auto p-5">
-            {active === "appearance" && <AppearancePane />}
-            {active === "keyboard" && <KeyboardPane />}
-            {active === "connections" && <ConnectionsPane />}
-            {active === "about" && <AboutPane />}
-          </div>
+        {/* Content */}
+        <div className="dlx-settings-content">
+          {active === "appearance"  && <AppearancePane currentTheme={currentTheme} onPickTheme={pickTheme} />}
+          {active === "keyboard"    && <KeyboardPane />}
+          {active === "connections" && <ConnectionsPane />}
+          {active === "about"       && <AboutPane />}
         </div>
       </div>
-    </div>
+    </Modal>
   );
 }
 
-function AppearancePane() {
-  const { theme, toggleTheme } = useUiStore();
-  const current = theme || "light";
+/* ─────────────────────────── Appearance ─────────────────────────── */
+function AppearancePane({ currentTheme, onPickTheme }) {
   return (
-    <div className="space-y-5">
+    <div className="dlx-settings-pane">
       <header>
-        <h3 className="t-title text-text-primary">Appearance</h3>
-        <p className="t-caption text-text-muted">Theme and density for the workspace.</p>
+        <h3 className="dlx-settings-pane-title">Appearance</h3>
+        <p className="dlx-settings-pane-sub">Theme and density for the workspace.</p>
       </header>
 
       <section>
-        <div className="t-overline text-text-muted mb-2">Theme</div>
-        <div className="grid grid-cols-3 gap-2 max-w-[420px]">
-          <ThemeCard
-            label="Light"
-            icon={Sun}
-            active={current === "light"}
-            onClick={() => {
-              if (current !== "light") toggleTheme();
-            }}
-          />
-          <ThemeCard
-            label="Dark"
-            icon={Moon}
-            active={current === "dark"}
-            onClick={() => {
-              if (current !== "dark") toggleTheme();
-            }}
-          />
-          <ThemeCard label="System" icon={Monitor} disabled />
+        <div className="dlx-modal-section-heading" style={{ marginBottom: 8 }}>Theme</div>
+        <div className="dlx-theme-grid">
+          {THEMES.map((t) => (
+            <ThemeTile
+              key={t.id}
+              theme={t}
+              active={currentTheme === t.id}
+              onClick={() => onPickTheme(t.id)}
+            />
+          ))}
         </div>
       </section>
 
       <section>
-        <div className="t-overline text-text-muted mb-2">Density</div>
-        <p className="t-caption text-text-muted max-w-[420px]">
+        <div className="dlx-modal-section-heading" style={{ marginBottom: 8 }}>Density</div>
+        <p className="dlx-settings-pane-sub" style={{ maxWidth: 420 }}>
           Density tuning arrives in a later phase. Defaults currently favor a comfortable
           grid for modeling sessions.
         </p>
@@ -121,51 +122,68 @@ function AppearancePane() {
   );
 }
 
-function ThemeCard({ label, icon: Icon, active, disabled, onClick }) {
+function ThemeTile({ theme, active, onClick }) {
+  const Icon = THEME_ICONS[theme.id] || Sun;
+  const [bg, accent, accent2, ok] = theme.colors || [];
   return (
     <button
-      onClick={disabled ? undefined : onClick}
-      disabled={disabled}
-      className={`flex flex-col items-center gap-2 px-3 py-4 rounded-lg border transition-all ${
-        active
-          ? "border-accent-blue bg-accent-blue-soft text-text-accent"
-          : "border-border-primary bg-bg-primary text-text-secondary hover:bg-bg-hover"
-      } ${disabled ? "opacity-40 cursor-not-allowed" : "cursor-pointer"}`}
+      type="button"
+      onClick={onClick}
+      className={`dlx-theme-tile ${active ? "active" : ""}`}
+      aria-pressed={active}
+      title={theme.sub}
     >
-      <Icon size={18} />
-      <span className="text-sm font-medium">{label}</span>
+      <div
+        className="dlx-theme-swatch"
+        style={{
+          background: bg,
+          borderColor: active ? accent : "var(--border-default)",
+        }}
+      >
+        <div className="dlx-theme-swatch-dots">
+          <span style={{ background: accent }} />
+          <span style={{ background: accent2 }} />
+          <span style={{ background: ok }} />
+        </div>
+        {active && (
+          <span className="dlx-theme-swatch-check" style={{ background: accent }}>
+            <Check size={10} />
+          </span>
+        )}
+      </div>
+      <div className="dlx-theme-label">
+        <Icon size={12} />
+        <span>{theme.name}</span>
+      </div>
+      <div className="dlx-theme-sub">{theme.sub}</div>
     </button>
   );
 }
 
+/* ─────────────────────────── Keyboard ─────────────────────────── */
 function KeyboardPane() {
   const shortcuts = [
-    ["Save", "⌘S"],
-    ["Global search", "⌘K"],
-    ["Toggle sidebar", "⌘\\"],
+    ["Save",                "⌘S"],
+    ["Global search",       "⌘K"],
+    ["Toggle sidebar",      "⌘\\"],
     ["Toggle bottom panel", "⌘J"],
-    ["Toggle dark mode", "⌘D"],
-    ["Show shortcuts", "?"],
-    ["Model activity", "⌘1"],
-    ["Connect activity", "⌘2"],
-    ["Settings activity", "⌘3"],
+    ["Toggle dark mode",    "⌘D"],
+    ["Show shortcuts",      "?"],
+    ["Model activity",      "⌘1"],
+    ["Connect activity",    "⌘2"],
+    ["Settings activity",   "⌘3"],
   ];
   return (
-    <div className="space-y-4">
+    <div className="dlx-settings-pane">
       <header>
-        <h3 className="t-title text-text-primary">Keyboard shortcuts</h3>
-        <p className="t-caption text-text-muted">Remapping lands in Phase E.</p>
+        <h3 className="dlx-settings-pane-title">Keyboard shortcuts</h3>
+        <p className="dlx-settings-pane-sub">Remapping lands in a later phase.</p>
       </header>
-      <div className="rounded-lg border border-border-primary overflow-hidden">
+      <div className="dlx-shortcut-list">
         {shortcuts.map(([label, key]) => (
-          <div
-            key={label}
-            className="flex items-center justify-between px-3 py-2 border-b border-border-primary/60 last:border-b-0"
-          >
-            <span className="text-sm text-text-secondary">{label}</span>
-            <code className="px-2 py-0.5 rounded bg-bg-tertiary border border-border-subtle font-mono text-xs text-text-primary">
-              {key}
-            </code>
+          <div key={label} className="dlx-shortcut-row">
+            <span>{label}</span>
+            <code>{key}</code>
           </div>
         ))}
       </div>
@@ -173,39 +191,41 @@ function KeyboardPane() {
   );
 }
 
+/* ─────────────────────────── Connections ─────────────────────────── */
 function ConnectionsPane() {
   const { openModal } = useUiStore();
   return (
-    <div className="space-y-4">
+    <div className="dlx-settings-pane">
       <header>
-        <h3 className="t-title text-text-primary">Connections</h3>
-        <p className="t-caption text-text-muted">
+        <h3 className="dlx-settings-pane-title">Connections</h3>
+        <p className="dlx-settings-pane-sub">
           Manage warehouse credentials and schema imports.
         </p>
       </header>
       <button
+        className="panel-btn primary"
         onClick={() => openModal("connectionsManager")}
-        className="dl-toolbar-btn dl-toolbar-btn--primary"
       >
-        <Plug size={14} />
+        <Plug size={12} />
         Open connections manager
       </button>
     </div>
   );
 }
 
+/* ─────────────────────────── About ─────────────────────────── */
 function AboutPane() {
   return (
-    <div className="space-y-4">
+    <div className="dlx-settings-pane">
       <header>
-        <h3 className="t-title text-text-primary">DataLex Visual Studio</h3>
-        <p className="t-caption text-text-muted">Open-source data modeling workspace.</p>
+        <h3 className="dlx-settings-pane-title">DataLex Visual Studio</h3>
+        <p className="dlx-settings-pane-sub">Open-source data modeling workspace.</p>
       </header>
-      <div className="rounded-lg border border-border-primary p-3 space-y-2">
+      <div className="dlx-about-card">
         <Row label="Frontend" value="React 18 · Vite · Tailwind 4" />
-        <Row label="Canvas" value="React Flow 12 · ELK.js" />
-        <Row label="Editor" value="CodeMirror 6" />
-        <Row label="License" value="Apache 2.0" />
+        <Row label="Canvas"   value="React Flow 12 · ELK.js" />
+        <Row label="Editor"   value="CodeMirror 6" />
+        <Row label="License"  value="Apache 2.0" />
       </div>
     </div>
   );
@@ -213,9 +233,9 @@ function AboutPane() {
 
 function Row({ label, value }) {
   return (
-    <div className="flex items-center justify-between text-sm">
-      <span className="text-text-muted">{label}</span>
-      <span className="text-text-primary">{value}</span>
+    <div className="dlx-about-row">
+      <span>{label}</span>
+      <span>{value}</span>
     </div>
   );
 }

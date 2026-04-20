@@ -13,11 +13,13 @@ import {
   User,
   Clock,
   ListOrdered,
+  Box,
 } from "lucide-react";
 import useDiagramStore from "../../stores/diagramStore";
 import useWorkspaceStore from "../../stores/workspaceStore";
 import useUiStore from "../../stores/uiStore";
 import useAuthStore from "../../stores/authStore";
+import { PanelFrame, PanelEmpty, StatusPill, PanelCard } from "./PanelFrame";
 import {
   updateEntityMeta,
   updateEntityTags,
@@ -131,9 +133,13 @@ export default function EntityPanel() {
 
   if (!selectedEntity) {
     return (
-      <div className="flex items-center justify-center h-full text-text-muted text-xs p-4">
-        Select an entity in the diagram to view properties
-      </div>
+      <PanelFrame icon={<Box size={14} />} eyebrow="Inspector" title="Entity">
+        <PanelEmpty
+          icon={Box}
+          title="No entity selected"
+          description="Select an entity in the diagram to view and edit its properties."
+        />
+      </PanelFrame>
     );
   }
 
@@ -282,52 +288,68 @@ export default function EntityPanel() {
     addToast?.({ type: "success", message: `Removed index ${indexName}.` });
   };
 
+  /* Entity-type pill tone: maps table/view/etc. to a semantic tone so
+     the inspector header reads consistently across themes. */
+  const entityTypeTone =
+    entityType === "view" ? "success" :
+    entityType === "materialized_view" ? "accent" :
+    entityType === "external_table" ? "warning" :
+    entityType === "snapshot" ? "neutral" :
+    "info";
+
+  const headerActions = (
+    <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+      {canEdit && (
+        <button
+          onClick={handleRenameEntity}
+          title="Rename entity"
+          style={{
+            width: 26, height: 26, display: "inline-flex", alignItems: "center", justifyContent: "center",
+            borderRadius: 6, background: "transparent", border: "1px solid var(--border-default)",
+            color: "var(--text-secondary)", cursor: "pointer",
+          }}
+        >
+          <Pencil size={12} />
+        </button>
+      )}
+      {canEdit && (
+        <button
+          onClick={handleDeleteEntity}
+          title="Delete entity"
+          style={{
+            width: 26, height: 26, display: "inline-flex", alignItems: "center", justifyContent: "center",
+            borderRadius: 6, background: "transparent", border: "1px solid var(--border-default)",
+            color: "#ef4444", cursor: "pointer",
+          }}
+        >
+          <Trash2 size={12} />
+        </button>
+      )}
+      <button
+        onClick={clearSelection}
+        title="Close"
+        style={{
+          width: 26, height: 26, display: "inline-flex", alignItems: "center", justifyContent: "center",
+          borderRadius: 6, background: "transparent", border: "1px solid var(--border-default)",
+          color: "var(--text-secondary)", cursor: "pointer",
+        }}
+      >
+        <X size={12} />
+      </button>
+    </div>
+  );
+
   return (
     <>
-      <div className="flex flex-col h-full overflow-hidden">
-      {/* Header */}
-      <div className="flex items-center justify-between px-3 py-2 border-b border-border-primary bg-bg-secondary/50">
-        <div className="min-w-0">
-          <h3 className="text-sm font-semibold text-text-primary truncate">{selectedEntity.name}</h3>
-          <span className="text-[10px] text-text-muted uppercase tracking-wider">
-            {selectedEntity.type || "table"}
-          </span>
-        </div>
-        <div className="flex items-center gap-1">
-          {canEdit && (
-            <button
-              onClick={() => {
-                handleRenameEntity();
-              }}
-              className="p-1 rounded-md hover:bg-bg-hover text-text-muted hover:text-text-primary transition-colors"
-              title="Rename entity"
-            >
-              <Pencil size={14} />
-            </button>
-          )}
-          {canEdit && (
-            <button
-              onClick={() => {
-                handleDeleteEntity();
-              }}
-              className="p-1 rounded-md hover:bg-red-50 text-text-muted hover:text-red-600 transition-colors"
-              title="Delete entity"
-            >
-              <Trash2 size={14} />
-            </button>
-          )}
-          <button
-            onClick={clearSelection}
-            className="p-1 rounded-md hover:bg-bg-hover text-text-muted hover:text-text-primary transition-colors"
-            title="Close"
-          >
-            <X size={14} />
-          </button>
-        </div>
-      </div>
-
+      <PanelFrame
+        icon={<Box size={14} />}
+        eyebrow="Inspector"
+        title={selectedEntity.name}
+        status={<StatusPill tone={entityTypeTone}>{entityType}</StatusPill>}
+        actions={headerActions}
+      >
       {/* Content */}
-      <div className="flex-1 overflow-y-auto p-3 space-y-3">
+      <div className="flex flex-col" style={{ gap: 12 }}>
         {/* Entity Summary */}
         <div>
           <label className="text-[10px] text-text-muted uppercase tracking-wider font-semibold flex items-center gap-1 mb-1">
@@ -787,7 +809,12 @@ export default function EntityPanel() {
                       {canEdit && (
                         <button
                           onClick={() => applyMutation(removeField, selectedEntityId, field.name)}
-                          className="p-0.5 rounded hover:bg-red-50 text-text-muted hover:text-red-500 transition-colors"
+                          title="Remove field"
+                          style={{
+                            padding: 2, borderRadius: 4,
+                            background: "transparent", border: "none",
+                            color: "#ef4444", cursor: "pointer",
+                          }}
                         >
                           <Trash2 size={10} />
                         </button>
@@ -830,44 +857,36 @@ export default function EntityPanel() {
                 return (
                   <div
                     key={rel.name}
-                    className={`flex items-center gap-2 px-2 py-1.5 border rounded-md text-[11px] ${
-                      isCrossModel
-                        ? "bg-indigo-50 border-indigo-200"
-                        : "bg-bg-primary border-border-primary"
-                    }`}
+                    style={{
+                      display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap",
+                      padding: "6px 10px",
+                      borderRadius: 6,
+                      fontSize: 11,
+                      background: isCrossModel ? "var(--cat-product-soft)" : "var(--bg-1)",
+                      border: `1px solid ${isCrossModel ? "var(--cat-product)" : "var(--border-default)"}`,
+                    }}
                   >
-                    <span className="text-text-primary font-medium">{rel.name}</span>
-                    <span className="text-text-muted">
+                    <span style={{ color: "var(--text-primary)", fontWeight: 600, fontFamily: "var(--font-mono)" }}>
+                      {rel.name}
+                    </span>
+                    <span style={{ color: "var(--text-tertiary)", fontFamily: "var(--font-mono)" }}>
                       {rel.from} → {rel.to}
                     </span>
-                    {isCrossModel && (
-                      <span className="px-1 py-0 rounded text-[8px] font-semibold bg-indigo-100 text-indigo-600">
-                        CROSS-MODEL
-                      </span>
-                    )}
-                    {pkToFk && (
-                      <span className="px-1 py-0 rounded text-[8px] font-semibold bg-cyan-100 text-cyan-700">
-                        PK→FK
-                      </span>
-                    )}
-                    {fkToPk && (
-                      <span className="px-1 py-0 rounded text-[8px] font-semibold bg-purple-100 text-purple-700">
-                        FK→PK
-                      </span>
-                    )}
-                    {isSelf && (
-                      <span className="px-1 py-0 rounded text-[8px] font-semibold bg-amber-100 text-amber-700">
-                        SELF
-                      </span>
-                    )}
-                    <span className={`ml-auto px-1.5 py-0 rounded text-[9px] font-semibold ${
-                      rel.cardinality === "one_to_one" ? "bg-green-50 text-green-700" :
-                      rel.cardinality === "one_to_many" ? "bg-blue-50 text-blue-700" :
-                      rel.cardinality === "many_to_one" ? "bg-purple-50 text-purple-700" :
-                      "bg-orange-50 text-orange-700"
-                    }`}>
+                    {isCrossModel && <StatusPill tone="accent">CROSS-MODEL</StatusPill>}
+                    {pkToFk && <StatusPill tone="info">PK→FK</StatusPill>}
+                    {fkToPk && <StatusPill tone="accent">FK→PK</StatusPill>}
+                    {isSelf && <StatusPill tone="warning">SELF</StatusPill>}
+                    <StatusPill
+                      tone={
+                        rel.cardinality === "one_to_one" ? "success" :
+                        rel.cardinality === "one_to_many" ? "info" :
+                        rel.cardinality === "many_to_one" ? "accent" :
+                        "warning"
+                      }
+                      style={{ marginLeft: "auto", fontFamily: "var(--font-mono)" }}
+                    >
                       {cardinalityLabel}
-                    </span>
+                    </StatusPill>
                   </div>
                 );
               })}
@@ -932,17 +951,19 @@ export default function EntityPanel() {
                 >
                   <code className="text-text-primary font-mono">{idx.name}</code>
                   <span className="text-text-muted">{(idx.fields || []).join(", ")}</span>
-                  {idx.unique && (
-                    <span className="px-1.5 py-0 rounded text-[9px] font-semibold bg-cyan-50 text-cyan-700">UNIQUE</span>
-                  )}
+                  {idx.unique && <StatusPill tone="info">UNIQUE</StatusPill>}
                   {idx.type && idx.type !== "btree" && (
-                    <span className="px-1.5 py-0 rounded text-[9px] font-semibold bg-slate-100 text-slate-600">{idx.type}</span>
+                    <StatusPill tone="neutral">{idx.type}</StatusPill>
                   )}
                   {canEdit && (
                     <button
                       onClick={() => handleRemoveIndex(idx.name)}
-                      className="ml-auto p-0.5 rounded hover:bg-red-50 text-text-muted hover:text-red-500 transition-colors"
                       title="Remove index"
+                      style={{
+                        marginLeft: "auto", padding: 2, borderRadius: 4,
+                        background: "transparent", border: "none",
+                        color: "#ef4444", cursor: "pointer",
+                      }}
                     >
                       <Trash2 size={10} />
                     </button>
@@ -964,16 +985,30 @@ export default function EntityPanel() {
               {Object.entries(classifications)
                 .filter(([k]) => k.startsWith(`${selectedEntityId}.`))
                 .map(([key, value]) => (
-                  <div key={key} className="flex items-center gap-2 px-2 py-1 bg-red-50 border border-red-200 rounded-md text-[11px]">
-                    <code className="text-text-secondary">{key.split(".")[1]}</code>
-                    <span className="ml-auto text-red-600 font-semibold">{value}</span>
+                  <div
+                    key={key}
+                    style={{
+                      display: "flex", alignItems: "center", gap: 8,
+                      padding: "6px 10px",
+                      borderRadius: 6,
+                      fontSize: 11,
+                      background: "rgba(239, 68, 68, 0.08)",
+                      border: "1px solid rgba(239, 68, 68, 0.35)",
+                    }}
+                  >
+                    <code style={{ color: "var(--text-secondary)", fontFamily: "var(--font-mono)" }}>
+                      {key.split(".")[1]}
+                    </code>
+                    <span style={{ marginLeft: "auto", color: "#ef4444", fontWeight: 600 }}>
+                      {value}
+                    </span>
                   </div>
                 ))}
             </div>
           </div>
         )}
       </div>
-      </div>
+      </PanelFrame>
       {renameEntityOpen && (
         <NameModal
           title="Rename Entity"

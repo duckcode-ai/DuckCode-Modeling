@@ -102,7 +102,7 @@ export default function LeftPanel({ activeTable, onSelectTable, tables, theme, s
               <div style={{ fontSize: 12, fontFamily: "var(--font-mono)" }}>{connectionLabel}</div>
               <div style={{ fontSize: 10, color: "var(--text-tertiary)" }}>{connectionDsn}</div>
             </div>
-            <span className="dot" style={{ width: 6, height: 6, borderRadius: "50%", background: "#10b981" }} />
+            <span className="dot" style={{ width: 6, height: 6, borderRadius: "50%", background: "var(--status-success)" }} />
           </div>
           <div style={{ fontSize: 11, color: "var(--text-tertiary)", marginBottom: 10, letterSpacing: "0.06em", textTransform: "uppercase" }}>Schemas</div>
           {schemaList.map((s, i) => (

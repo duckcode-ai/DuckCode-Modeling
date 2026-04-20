@@ -1,34 +1,30 @@
+/* DiffPanel — the "Diff & Gate" tab in the bottom drawer. Shows two
+   things: a semantic-diff gate against a baseline (entities / relationships
+   / indexes / metrics added-removed-changed, breaking changes, metric
+   contract changes) and a full git workspace console (status, staging,
+   unified diff, commit, push/pull, create branch, open PR).
+
+   Laid out on the shared panel-form-* primitives so every input,
+   select, button, and label renders through one Luna-aware style
+   (same look across midnight / obsidian / paper / arctic). Sections
+   are separated by PanelSection; each labelled field follows the
+   .panel-form-row > .panel-form-label + .panel-input pattern, and
+   every button is a .panel-btn (primary when it is the main action). */
 import React, { useMemo, useState, useEffect, useCallback } from "react";
 import {
-  AlertCircle,
-  CheckCircle2,
-  Plus,
-  Minus,
-  RefreshCw,
-  Shield,
-  GitBranch,
-  Loader2,
-  Clock3,
-  FileDiff,
-  Upload,
-  ArrowUpToLine,
-  ArrowDownToLine,
-  } from "lucide-react";
-  import useWorkspaceStore from "../../stores/workspaceStore";
-  import useUiStore from "../../stores/uiStore";
-  import { runGate } from "../../modelQuality";
-  import {
-  fetchGitStatus,
-  fetchGitDiff,
-  commitGit,
-  fetchGitLog,
-  stageGitFiles,
-  unstageGitFiles,
-  createGitBranch,
-  pushGitBranch,
-  pullGitBranch,
-  createGitHubPr,
+  AlertCircle, CheckCircle2, Plus, Minus, RefreshCw, Shield, GitBranch,
+  Loader2, Clock3, FileDiff, Upload, ArrowUpToLine, ArrowDownToLine,
+} from "lucide-react";
+import useWorkspaceStore from "../../stores/workspaceStore";
+import useUiStore from "../../stores/uiStore";
+import { runGate } from "../../modelQuality";
+import {
+  fetchGitStatus, fetchGitDiff, commitGit, fetchGitLog, stageGitFiles,
+  unstageGitFiles, createGitBranch, pushGitBranch, pullGitBranch, createGitHubPr,
 } from "../../lib/api";
+import {
+  PanelFrame, PanelSection, PanelCard, StatusPill, KeyValueGrid, PanelEmpty,
+} from "./PanelFrame";
 
 function summarizeFileStatus(file) {
   if (!file) return "";
@@ -39,6 +35,87 @@ function summarizeFileStatus(file) {
   return tags.join(" · ") || "clean";
 }
 
+/* Colourise unified-diff lines using Luna tokens so both themes are happy. */
+function DiffBlock({ text, loading }) {
+  if (loading) {
+    return (
+      <div style={{
+        padding: "10px 12px", fontSize: 11, color: "var(--text-tertiary)",
+        display: "inline-flex", alignItems: "center", gap: 6,
+      }}>
+        <Loader2 size={12} className="animate-spin" /> Loading diff…
+      </div>
+    );
+  }
+  if (!text) {
+    return (
+      <div style={{ padding: "10px 12px", fontSize: 11, color: "var(--text-tertiary)" }}>
+        No diff output for the current selection.
+      </div>
+    );
+  }
+  const lines = text.split("\n");
+  return (
+    <pre
+      style={{
+        margin: 0, padding: 8,
+        fontFamily: "var(--font-mono, ui-monospace, 'SF Mono', Menlo, monospace)",
+        fontSize: 11, lineHeight: 1.5,
+        color: "var(--text-primary)",
+        maxHeight: 260, overflow: "auto",
+        background: "var(--bg-canvas, var(--bg-1))",
+        whiteSpace: "pre",
+      }}
+    >
+      {lines.map((ln, i) => {
+        let bg = "transparent";
+        let color = "var(--text-secondary)";
+        if (ln.startsWith("+++") || ln.startsWith("---")) {
+          color = "var(--text-tertiary)";
+        } else if (ln.startsWith("@@")) {
+          color = "var(--accent)";
+          bg = "var(--accent-dim)";
+        } else if (ln.startsWith("+")) {
+          color = "var(--cat-billing)";
+          bg = "var(--cat-billing-soft)";
+        } else if (ln.startsWith("-")) {
+          color = "#ef4444";
+          bg = "rgba(239, 68, 68, 0.10)";
+        }
+        return (
+          <div key={i} style={{ background: bg, color, padding: "0 6px" }}>
+            {ln || " "}
+          </div>
+        );
+      })}
+    </pre>
+  );
+}
+
+/* Little stat box used in the diff-summary grid */
+function DiffStat({ label, stats }) {
+  return (
+    <div className="panel-summary-card" style={{ padding: "8px 10px" }}>
+      <div className="label">{label}</div>
+      <div style={{ display: "flex", alignItems: "center", gap: 10, fontSize: 12, marginTop: 4 }}>
+        {stats.map((s, i) => {
+          const color = s.tone === "success" ? "var(--cat-billing)"
+                      : s.tone === "error"   ? "#ef4444"
+                      : s.tone === "warning" ? "var(--pk)"
+                      : "var(--text-secondary)";
+          const Icon = s.icon;
+          return (
+            <span key={i} style={{ display: "inline-flex", alignItems: "center", gap: 3, color }}>
+              <Icon size={10} /> {s.value}
+            </span>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+/* ──────────────────────────────────────────────────────────────────────── */
 export default function DiffPanel() {
   const { activeFileContent, baselineContent, activeProjectId, activeFile, offlineMode } = useWorkspaceStore();
   const { addToast } = useUiStore();
@@ -79,10 +156,10 @@ export default function DiffPanel() {
   const diff = gateResult?.diff;
   const gatePassed = gateResult?.gatePassed;
 
+  /* ── Async handlers (unchanged business logic) ─────────────────────── */
   const loadGitWorkspace = useCallback(async () => {
     if (!activeProjectId || offlineMode) return;
-    setGitError("");
-    setGitLoading(true);
+    setGitError(""); setGitLoading(true);
     try {
       const [status, log] = await Promise.all([
         fetchGitStatus(activeProjectId),
@@ -100,9 +177,7 @@ export default function DiffPanel() {
         return "";
       });
     } catch (err) {
-      setGitError(err.message);
-      setGitStatus(null);
-      setGitLog([]);
+      setGitError(err.message); setGitStatus(null); setGitLog([]);
     } finally {
       setGitLoading(false);
     }
@@ -112,618 +187,521 @@ export default function DiffPanel() {
     if (!activeProjectId || offlineMode || !gitStatus) return;
     setGitDiffLoading(true);
     try {
-      const data = await fetchGitDiff(activeProjectId, {
-        path: selectedPath || "",
-        staged: showStagedDiff,
-      });
+      const data = await fetchGitDiff(activeProjectId, { path: selectedPath || "", staged: showStagedDiff });
       setGitDiffText(data.diff || "");
     } catch (err) {
-      setGitDiffText("");
-      setGitError(err.message);
+      setGitDiffText(""); setGitError(err.message);
     } finally {
       setGitDiffLoading(false);
     }
   }, [activeProjectId, offlineMode, gitStatus, selectedPath, showStagedDiff]);
 
-  useEffect(() => {
-    loadGitWorkspace();
-  }, [loadGitWorkspace]);
-
+  useEffect(() => { loadGitWorkspace(); }, [loadGitWorkspace]);
   useEffect(() => {
     if (!gitStatus?.branch || gitStatus.branch === "HEAD") return;
     setGitBranchInput((prev) => prev || gitStatus.branch);
   }, [gitStatus?.branch]);
-
-  useEffect(() => {
-    loadGitDiffText();
-  }, [loadGitDiffText]);
+  useEffect(() => { loadGitDiffText(); }, [loadGitDiffText]);
 
   const onCommit = useCallback(async () => {
     if (!activeProjectId || offlineMode) return;
     const message = commitMessage.trim();
-    if (!message) {
-      setGitError("Commit message is required");
-      return;
-    }
-    setGitError("");
-    setCommitLoading(true);
+    if (!message) { setGitError("Commit message is required"); return; }
+    setGitError(""); setCommitLoading(true);
     try {
       const selectedPaths = selectedPath ? [selectedPath] : [];
-      const result = await commitGit(activeProjectId, {
-        message,
-        paths: selectedPaths,
-      });
-      addToast?.({
-        type: "success",
-        message: `Committed ${result.commitHash?.slice(0, 7) || ""}`.trim(),
-      });
+      const result = await commitGit(activeProjectId, { message, paths: selectedPaths });
+      addToast?.({ type: "success", message: `Committed ${result.commitHash?.slice(0, 7) || ""}`.trim() });
       setCommitMessage("");
-      await loadGitWorkspace();
-      await loadGitDiffText();
-    } catch (err) {
-      setGitError(err.message);
-    } finally {
-      setCommitLoading(false);
-    }
+      await loadGitWorkspace(); await loadGitDiffText();
+    } catch (err) { setGitError(err.message); }
+    finally { setCommitLoading(false); }
   }, [activeProjectId, offlineMode, commitMessage, selectedPath, addToast, loadGitWorkspace, loadGitDiffText]);
 
   const onStage = useCallback(async () => {
     if (!activeProjectId || offlineMode || !gitStatus) return;
     const files = Array.isArray(gitStatus.files) ? gitStatus.files : [];
-    const paths = selectedPath
-      ? [selectedPath]
-      : files
-          .filter((f) => f.status === "untracked" || (f.unstagedStatus && f.unstagedStatus !== " "))
-          .map((f) => f.path);
-    if (paths.length === 0) {
-      addToast?.({ type: "info", message: "No files to stage" });
-      return;
-    }
-    setGitActionLoading(true);
-    setGitError("");
+    const paths = selectedPath ? [selectedPath]
+      : files.filter((f) => f.status === "untracked" || (f.unstagedStatus && f.unstagedStatus !== " ")).map((f) => f.path);
+    if (paths.length === 0) { addToast?.({ type: "info", message: "No files to stage" }); return; }
+    setGitActionLoading(true); setGitError("");
     try {
       await stageGitFiles(activeProjectId, paths);
       addToast?.({ type: "success", message: paths.length === 1 ? "Staged 1 file" : `Staged ${paths.length} files` });
-      await loadGitWorkspace();
-      await loadGitDiffText();
-    } catch (err) {
-      setGitError(err.message);
-    } finally {
-      setGitActionLoading(false);
-    }
+      await loadGitWorkspace(); await loadGitDiffText();
+    } catch (err) { setGitError(err.message); }
+    finally { setGitActionLoading(false); }
   }, [activeProjectId, offlineMode, gitStatus, selectedPath, addToast, loadGitWorkspace, loadGitDiffText]);
 
   const onUnstage = useCallback(async () => {
     if (!activeProjectId || offlineMode || !gitStatus) return;
     const files = Array.isArray(gitStatus.files) ? gitStatus.files : [];
-    const paths = selectedPath
-      ? [selectedPath]
-      : files
-          .filter((f) => f.stagedStatus && f.stagedStatus !== " ")
-          .map((f) => f.path);
-    if (paths.length === 0) {
-      addToast?.({ type: "info", message: "No files to unstage" });
-      return;
-    }
-    setGitActionLoading(true);
-    setGitError("");
+    const paths = selectedPath ? [selectedPath]
+      : files.filter((f) => f.stagedStatus && f.stagedStatus !== " ").map((f) => f.path);
+    if (paths.length === 0) { addToast?.({ type: "info", message: "No files to unstage" }); return; }
+    setGitActionLoading(true); setGitError("");
     try {
       await unstageGitFiles(activeProjectId, paths);
       addToast?.({ type: "success", message: paths.length === 1 ? "Unstaged 1 file" : `Unstaged ${paths.length} files` });
-      await loadGitWorkspace();
-      await loadGitDiffText();
-    } catch (err) {
-      setGitError(err.message);
-    } finally {
-      setGitActionLoading(false);
-    }
+      await loadGitWorkspace(); await loadGitDiffText();
+    } catch (err) { setGitError(err.message); }
+    finally { setGitActionLoading(false); }
   }, [activeProjectId, offlineMode, gitStatus, selectedPath, addToast, loadGitWorkspace, loadGitDiffText]);
-
 
   const onCreateBranch = useCallback(async () => {
     if (!activeProjectId || offlineMode) return;
     const branch = String(gitBranchInput || "").trim();
-    if (!branch) {
-      setGitError("Branch name is required");
-      return;
-    }
-    setGitBranchLoading(true);
-    setGitError("");
+    if (!branch) { setGitError("Branch name is required"); return; }
+    setGitBranchLoading(true); setGitError("");
     try {
       await createGitBranch(activeProjectId, { branch });
       addToast?.({ type: "success", message: "Checked out " + branch });
-      await loadGitWorkspace();
-      await loadGitDiffText();
-    } catch (err) {
-      setGitError(err.message);
-    } finally {
-      setGitBranchLoading(false);
-    }
+      await loadGitWorkspace(); await loadGitDiffText();
+    } catch (err) { setGitError(err.message); }
+    finally { setGitBranchLoading(false); }
   }, [activeProjectId, offlineMode, gitBranchInput, addToast, loadGitWorkspace, loadGitDiffText]);
 
   const onPush = useCallback(async () => {
     if (!activeProjectId || offlineMode || !gitStatus) return;
     const branch = String(gitBranchInput || gitStatus.branch || "").trim();
-    if (!branch || branch === "HEAD") {
-      setGitError("Unable to push: detached HEAD");
-      return;
-    }
-    setGitPushLoading(true);
-    setGitError("");
-    setGitPushOutput("");
+    if (!branch || branch === "HEAD") { setGitError("Unable to push: detached HEAD"); return; }
+    setGitPushLoading(true); setGitError(""); setGitPushOutput("");
     try {
       const result = await pushGitBranch(activeProjectId, { remote: gitRemote || "origin", branch, setUpstream: true });
       setGitPushOutput(result.output || "Push completed");
       addToast?.({ type: "success", message: "Pushed " + branch });
-      await loadGitWorkspace();
-      await loadGitDiffText();
-    } catch (err) {
-      setGitError(err.message);
-    } finally {
-      setGitPushLoading(false);
-    }
+      await loadGitWorkspace(); await loadGitDiffText();
+    } catch (err) { setGitError(err.message); }
+    finally { setGitPushLoading(false); }
   }, [activeProjectId, offlineMode, gitStatus, gitBranchInput, gitRemote, addToast, loadGitWorkspace, loadGitDiffText]);
 
   const onPull = useCallback(async () => {
     if (!activeProjectId || offlineMode || !gitStatus) return;
     const branch = String(gitBranchInput || gitStatus.branch || "").trim();
-    if (!branch || branch === "HEAD") {
-      setGitError("Unable to pull: detached HEAD");
-      return;
-    }
-    setGitPullLoading(true);
-    setGitError("");
-    setGitPullOutput("");
+    if (!branch || branch === "HEAD") { setGitError("Unable to pull: detached HEAD"); return; }
+    setGitPullLoading(true); setGitError(""); setGitPullOutput("");
     try {
       const result = await pullGitBranch(activeProjectId, { remote: gitRemote || "origin", ffOnly: true });
       setGitPullOutput(result.output || "Pull completed");
       addToast?.({ type: "success", message: "Pulled latest changes" });
-      await loadGitWorkspace();
-      await loadGitDiffText();
-    } catch (err) {
-      setGitError(err.message);
-    } finally {
-      setGitPullLoading(false);
-    }
+      await loadGitWorkspace(); await loadGitDiffText();
+    } catch (err) { setGitError(err.message); }
+    finally { setGitPullLoading(false); }
   }, [activeProjectId, offlineMode, gitStatus, gitBranchInput, gitRemote, addToast, loadGitWorkspace, loadGitDiffText]);
 
   const onCreatePr = useCallback(async () => {
     if (!activeProjectId || offlineMode || !gitStatus) return;
     const token = String(prToken || "").trim();
-    if (!token) {
-      setGitError("GitHub token is required to open a PR");
-      return;
-    }
+    if (!token) { setGitError("GitHub token is required to open a PR"); return; }
     const title = String(prTitle || "").trim();
-    if (!title) {
-      setGitError("PR title is required");
-      return;
-    }
+    if (!title) { setGitError("PR title is required"); return; }
     const head = String(gitBranchInput || gitStatus.branch || "").trim();
-    if (!head || head === "HEAD") {
-      setGitError("Head branch is required");
-      return;
-    }
-
-    setPrCreating(true);
-    setGitError("");
-    setPrUrl("");
+    if (!head || head === "HEAD") { setGitError("Head branch is required"); return; }
+    setPrCreating(true); setGitError(""); setPrUrl("");
     try {
       const pr = await createGitHubPr(activeProjectId, {
-        token,
-        title,
-        body: String(prBody || ""),
-        base: String(prBase || "main").trim() || "main",
-        head,
+        token, title, body: String(prBody || ""),
+        base: String(prBase || "main").trim() || "main", head,
         remote: gitRemote || "origin",
       });
       const url = pr?.pullRequest?.url || "";
       setPrUrl(url);
       addToast?.({ type: "success", message: url ? "Opened PR" : "PR created" });
-    } catch (err) {
-      setGitError(err.message);
-    } finally {
-      setPrCreating(false);
-    }
+    } catch (err) { setGitError(err.message); }
+    finally { setPrCreating(false); }
   }, [activeProjectId, offlineMode, gitStatus, gitBranchInput, gitRemote, prToken, prTitle, prBody, prBase, addToast]);
-  return (
-    <div className="flex flex-col h-full overflow-hidden">
-      <div className="flex items-center gap-3 px-3 py-2 border-b border-border-primary bg-bg-secondary/50 shrink-0">
-        <span className="text-xs font-semibold text-text-primary">Diff & Gate</span>
-        <div className="flex items-center gap-2 ml-auto">
-          <button
-            onClick={loadGitWorkspace}
-            disabled={gitLoading || !activeProjectId || offlineMode}
-            className="inline-flex items-center gap-1 px-2 py-0.5 rounded border border-border-primary text-[10px] text-text-muted hover:bg-bg-hover disabled:opacity-50"
-          >
-            <RefreshCw size={10} className={gitLoading ? "animate-spin" : ""} />
-            Refresh
-          </button>
-          <label className="flex items-center gap-1.5 text-[10px] text-text-muted cursor-pointer">
-            <input
-              type="checkbox"
-              checked={allowBreaking}
-              onChange={(e) => setAllowBreaking(e.target.checked)}
-              className="w-3 h-3 rounded accent-accent-blue"
-            />
-            Allow breaking
-          </label>
-          {gateResult && (
-            <span className={`flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold ${
-              gatePassed
-                ? "bg-green-50 text-green-600"
-                : "bg-red-50 text-red-600"
-            }`}>
-              {gatePassed ? <CheckCircle2 size={10} /> : <AlertCircle size={10} />}
-              Gate {gatePassed ? "PASSED" : "FAILED"}
-            </span>
-          )}
-        </div>
-      </div>
 
-      <div className="flex-1 overflow-y-auto p-3 space-y-4">
-        <div className="space-y-2">
-          <h4 className="text-[10px] text-text-muted uppercase tracking-wider font-semibold">Semantic Gate</h4>
-          {!baselineContent ? (
-            <div className="px-3 py-2 rounded-md border border-border-primary bg-bg-primary text-xs text-text-muted">
+  /* ── Header actions (refresh + gate pill + allow-breaking toggle) ─── */
+  const headerActions = (
+    <>
+      <label style={{
+        display: "inline-flex", alignItems: "center", gap: 6,
+        fontSize: 11, color: "var(--text-secondary)", cursor: "pointer",
+        padding: "5px 10px", borderRadius: 6, border: "1px solid var(--border-default)",
+        background: "var(--bg-1)",
+      }}>
+        <input
+          type="checkbox"
+          checked={allowBreaking}
+          onChange={(e) => setAllowBreaking(e.target.checked)}
+          style={{ width: 12, height: 12, accentColor: "var(--accent)" }}
+        />
+        Allow breaking
+      </label>
+      <button
+        onClick={loadGitWorkspace}
+        disabled={gitLoading || !activeProjectId || offlineMode}
+        className="panel-btn"
+        title="Refresh git status"
+      >
+        <RefreshCw size={11} className={gitLoading ? "animate-spin" : ""} />
+        Refresh
+      </button>
+    </>
+  );
+
+  const gateStatus = gateResult ? (
+    <StatusPill tone={gatePassed ? "success" : "error"} icon={gatePassed ? <CheckCircle2 /> : <AlertCircle />}>
+      Gate {gatePassed ? "PASSED" : "FAILED"}
+    </StatusPill>
+  ) : null;
+
+  /* ── Render ─────────────────────────────────────────────────────────── */
+  return (
+    <PanelFrame
+      icon={<FileDiff size={14} />}
+      eyebrow="Quality Check"
+      title="Diff & Gate"
+      subtitle={activeFile?.name ? `Comparing ${activeFile.name} against baseline` : "Compare against a baseline to surface breaking changes"}
+      status={gateStatus}
+      actions={headerActions}
+    >
+      {/* ── Semantic Gate ──────────────────────────────────────────── */}
+      <PanelSection title="Semantic Gate" icon={<Shield size={11} />}>
+        {!baselineContent ? (
+          <PanelCard tone="info" dense>
+            <div style={{ fontSize: 12, color: "var(--text-secondary)" }}>
               Select a baseline file to run semantic diff and breaking-change gates.
             </div>
-          ) : (
-            <>
-              {gateResult && (
-                <div className={`px-3 py-2 rounded-md border text-xs ${
-                  gatePassed
-                    ? "bg-green-50 border-green-200 text-green-700"
-                    : "bg-red-50 border-red-200 text-red-700"
-                }`}>
+          </PanelCard>
+        ) : (
+          <>
+            {gateResult && (
+              <PanelCard tone={gatePassed ? "success" : "error"}>
+                <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12 }}>
+                  {gatePassed ? <CheckCircle2 size={14} style={{ color: "var(--cat-billing)" }} /> : <AlertCircle size={14} style={{ color: "#ef4444" }} />}
                   {gateResult.message}
                 </div>
-              )}
-              {diff && (
-                <div className="space-y-2">
-                  <div className="grid grid-cols-2 lg:grid-cols-4 gap-2">
-                    <div className="px-3 py-2 bg-bg-primary border border-border-primary rounded-md">
-                      <div className="text-[10px] text-text-muted uppercase mb-1">Entities</div>
-                      <div className="flex items-center gap-3 text-xs">
-                        <span className="flex items-center gap-1 text-green-600"><Plus size={10} /> {diff.summary.added_entities}</span>
-                        <span className="flex items-center gap-1 text-red-600"><Minus size={10} /> {diff.summary.removed_entities}</span>
-                        <span className="flex items-center gap-1 text-amber-600"><RefreshCw size={10} /> {diff.summary.changed_entities}</span>
-                      </div>
-                    </div>
-                    <div className="px-3 py-2 bg-bg-primary border border-border-primary rounded-md">
-                      <div className="text-[10px] text-text-muted uppercase mb-1">Relationships</div>
-                      <div className="flex items-center gap-3 text-xs">
-                        <span className="flex items-center gap-1 text-green-600"><Plus size={10} /> {diff.summary.added_relationships}</span>
-                        <span className="flex items-center gap-1 text-red-600"><Minus size={10} /> {diff.summary.removed_relationships}</span>
-                      </div>
-                    </div>
-                    <div className="px-3 py-2 bg-bg-primary border border-border-primary rounded-md">
-                      <div className="text-[10px] text-text-muted uppercase mb-1">Indexes</div>
-                      <div className="flex items-center gap-3 text-xs">
-                        <span className="flex items-center gap-1 text-green-600"><Plus size={10} /> {diff.summary.added_indexes || 0}</span>
-                        <span className="flex items-center gap-1 text-red-600"><Minus size={10} /> {diff.summary.removed_indexes || 0}</span>
-                      </div>
-                    </div>
-                    <div className="px-3 py-2 bg-bg-primary border border-border-primary rounded-md">
-                      <div className="text-[10px] text-text-muted uppercase mb-1">Metrics</div>
-                      <div className="flex items-center gap-3 text-xs">
-                        <span className="flex items-center gap-1 text-green-600"><Plus size={10} /> {diff.summary.added_metrics || 0}</span>
-                        <span className="flex items-center gap-1 text-red-600"><Minus size={10} /> {diff.summary.removed_metrics || 0}</span>
-                        <span className="flex items-center gap-1 text-amber-600"><RefreshCw size={10} /> {diff.summary.changed_metrics || 0}</span>
-                      </div>
-                    </div>
-                  </div>
-                  {(diff.changed_metrics || []).length > 0 && (
-                    <div className="space-y-1.5">
-                      <h4 className="text-[10px] text-text-muted uppercase tracking-wider font-semibold">
-                        Metric Contract Changes ({diff.changed_metrics.length})
-                      </h4>
-                      {diff.changed_metrics.map((metricChange) => (
-                        <div
-                          key={metricChange.metric}
-                          className="px-3 py-2 bg-bg-primary border border-border-primary rounded-md text-xs text-text-secondary"
-                        >
-                          <span className="font-semibold text-text-primary">{metricChange.metric}</span>
-                          <span className="text-text-muted"> changed: </span>
-                          <span>{(metricChange.changed_fields || []).join(", ") || "unknown"}</span>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                  {diff.summary.breaking_change_count > 0 && (
-                    <div className="space-y-1.5">
-                      <h4 className="text-[10px] text-status-error uppercase tracking-wider font-semibold flex items-center gap-1">
-                        <Shield size={10} />
-                        Breaking Changes ({diff.summary.breaking_change_count})
-                      </h4>
-                      {(diff.breaking_changes || []).map((change, idx) => (
-                        <div key={idx} className="flex items-start gap-2 px-3 py-2 bg-red-50 border border-red-200 rounded-md">
-                          <AlertCircle size={12} className="text-red-500 shrink-0 mt-0.5" />
-                          <span className="text-xs text-red-700">{change}</span>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              )}
-            </>
-          )}
-        </div>
+              </PanelCard>
+            )}
 
-        <div className="space-y-2">
-          <h4 className="text-[10px] text-text-muted uppercase tracking-wider font-semibold">Git Workspace</h4>
-          {offlineMode || !activeProjectId ? (
-            <div className="px-3 py-2 rounded-md border border-border-primary bg-bg-primary text-xs text-text-muted">
+            {diff && (
+              <>
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 8, marginTop: 10 }}>
+                  <DiffStat label="Entities" stats={[
+                    { icon: Plus, value: diff.summary.added_entities, tone: "success" },
+                    { icon: Minus, value: diff.summary.removed_entities, tone: "error" },
+                    { icon: RefreshCw, value: diff.summary.changed_entities, tone: "warning" },
+                  ]} />
+                  <DiffStat label="Relationships" stats={[
+                    { icon: Plus, value: diff.summary.added_relationships, tone: "success" },
+                    { icon: Minus, value: diff.summary.removed_relationships, tone: "error" },
+                  ]} />
+                  <DiffStat label="Indexes" stats={[
+                    { icon: Plus, value: diff.summary.added_indexes || 0, tone: "success" },
+                    { icon: Minus, value: diff.summary.removed_indexes || 0, tone: "error" },
+                  ]} />
+                  <DiffStat label="Metrics" stats={[
+                    { icon: Plus, value: diff.summary.added_metrics || 0, tone: "success" },
+                    { icon: Minus, value: diff.summary.removed_metrics || 0, tone: "error" },
+                    { icon: RefreshCw, value: diff.summary.changed_metrics || 0, tone: "warning" },
+                  ]} />
+                </div>
+
+                {(diff.changed_metrics || []).length > 0 && (
+                  <PanelSection title="Metric Contract Changes" count={diff.changed_metrics.length}>
+                    <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                      {diff.changed_metrics.map((m) => (
+                        <PanelCard key={m.metric} tone="warning" dense>
+                          <div style={{ fontSize: 12 }}>
+                            <span style={{ fontWeight: 600, color: "var(--text-primary)" }}>{m.metric}</span>
+                            <span style={{ color: "var(--text-tertiary)" }}> changed: </span>
+                            <span style={{ color: "var(--text-secondary)" }}>{(m.changed_fields || []).join(", ") || "unknown"}</span>
+                          </div>
+                        </PanelCard>
+                      ))}
+                    </div>
+                  </PanelSection>
+                )}
+
+                {diff.summary.breaking_change_count > 0 && (
+                  <PanelSection
+                    title="Breaking Changes"
+                    count={diff.summary.breaking_change_count}
+                    icon={<Shield size={11} />}
+                  >
+                    <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                      {(diff.breaking_changes || []).map((change, idx) => (
+                        <PanelCard key={idx} tone="error" dense>
+                          <div style={{ display: "flex", alignItems: "flex-start", gap: 8, fontSize: 12 }}>
+                            <AlertCircle size={12} style={{ color: "#ef4444", flexShrink: 0, marginTop: 2 }} />
+                            <span style={{ color: "var(--text-primary)" }}>{change}</span>
+                          </div>
+                        </PanelCard>
+                      ))}
+                    </div>
+                  </PanelSection>
+                )}
+              </>
+            )}
+          </>
+        )}
+      </PanelSection>
+
+      {/* ── Git Workspace ──────────────────────────────────────────── */}
+      <PanelSection title="Git Workspace" icon={<GitBranch size={11} />}>
+        {offlineMode || !activeProjectId ? (
+          <PanelCard tone="neutral" dense>
+            <div style={{ fontSize: 12, color: "var(--text-secondary)" }}>
               Git features require an active project folder with API server mode enabled.
             </div>
-          ) : (
-            <div className="space-y-2">
-              {gitError && (
-                <div className="px-3 py-2 rounded-md border border-red-200 bg-red-50 text-xs text-red-700">
-                  {gitError}
-                </div>
-              )}
-              {gitLoading && !gitStatus ? (
-                <div className="px-3 py-2 rounded-md border border-border-primary bg-bg-primary text-xs text-text-muted inline-flex items-center gap-2">
-                  <Loader2 size={12} className="animate-spin" />
-                  Loading git status...
-                </div>
-              ) : (
-                gitStatus && (
-                  <div className="space-y-2">
-                    <div className="flex items-center gap-2 px-3 py-2 border border-border-primary bg-bg-primary rounded-md text-xs">
-                      <GitBranch size={12} className="text-text-muted" />
-                      <span className="font-medium text-text-primary">{gitStatus.branch || "HEAD"}</span>
-                      {gitStatus.ahead > 0 && <span className="text-[10px] text-green-700 bg-green-50 border border-green-200 px-1.5 py-0 rounded">ahead {gitStatus.ahead}</span>}
-                      {gitStatus.behind > 0 && <span className="text-[10px] text-amber-700 bg-amber-50 border border-amber-200 px-1.5 py-0 rounded">behind {gitStatus.behind}</span>}
-                      <span className="ml-auto text-[10px] text-text-muted">
-                        {gitStatus.isClean ? "clean" : `${gitStatus.files.length} changed`}
-                      </span>
-                    </div>
+          </PanelCard>
+        ) : gitError ? (
+          <PanelCard tone="error" dense>
+            <div style={{ fontSize: 12, color: "var(--text-primary)" }}>{gitError}</div>
+          </PanelCard>
+        ) : gitLoading && !gitStatus ? (
+          <PanelEmpty icon={Loader2} title="Loading git status…" />
+        ) : gitStatus ? (
+          <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+            {/* Current branch + ahead/behind + dirty count */}
+            <div style={{
+              display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap",
+              padding: "8px 12px", borderRadius: 6,
+              background: "var(--bg-2)", border: "1px solid var(--border-default)",
+            }}>
+              <GitBranch size={12} style={{ color: "var(--text-tertiary)" }} />
+              <span style={{ fontWeight: 600, fontSize: 12.5, color: "var(--text-primary)", fontFamily: "var(--font-mono, inherit)" }}>
+                {gitStatus.branch || "HEAD"}
+              </span>
+              {gitStatus.ahead > 0 && <StatusPill tone="success">ahead {gitStatus.ahead}</StatusPill>}
+              {gitStatus.behind > 0 && <StatusPill tone="warning">behind {gitStatus.behind}</StatusPill>}
+              <span style={{ marginLeft: "auto", fontSize: 11, color: "var(--text-tertiary)" }}>
+                {gitStatus.isClean ? "clean" : `${gitStatus.files.length} changed`}
+              </span>
+            </div>
 
-                    <div className="grid grid-cols-2 gap-2">
-                      <div className="px-3 py-2 border border-border-primary bg-bg-primary rounded-md text-xs">
-                        <div className="text-[10px] text-text-muted uppercase mb-1">Working Tree</div>
-                        <div className="space-y-0.5">
-                          <div>Staged: {gitStatus.stagedCount}</div>
-                          <div>Unstaged: {gitStatus.unstagedCount}</div>
-                          <div>Untracked: {gitStatus.untrackedCount}</div>
-                        </div>
-                      </div>
-                      <div className="px-3 py-2 border border-border-primary bg-bg-primary rounded-md text-xs">
-                        <div className="text-[10px] text-text-muted uppercase mb-1">Diff Mode</div>
-                        <button
-                          onClick={() => setShowStagedDiff((v) => !v)}
-                          className="inline-flex items-center gap-1 px-2 py-1 rounded border border-border-primary text-[10px] text-text-secondary hover:bg-bg-hover"
-                        >
-                          <FileDiff size={10} />
-                          {showStagedDiff ? "Showing staged" : "Showing unstaged"}
-                        </button>
-                      </div>
-                    </div>
-
-                    <div className="space-y-1">
-                      <label className="text-[10px] text-text-muted uppercase tracking-wider font-semibold block">
-                        File
-                      </label>
-                      <select
-                        value={selectedPath}
-                        onChange={(e) => setSelectedPath(e.target.value)}
-                        className="w-full bg-bg-primary border border-border-primary rounded-md px-2 py-1.5 text-xs text-text-primary outline-none focus:border-accent-blue font-mono"
+            {/* Working tree KV grid + diff-mode segmented toggle */}
+            <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr", gap: 10 }}>
+              <KeyValueGrid items={[
+                { label: "Staged",    value: gitStatus.stagedCount },
+                { label: "Unstaged",  value: gitStatus.unstagedCount },
+                { label: "Untracked", value: gitStatus.untrackedCount },
+              ]} />
+              <div style={{
+                padding: 8, borderRadius: 6,
+                background: "var(--bg-2)", border: "1px solid var(--border-default)",
+                display: "flex", flexDirection: "column", gap: 6,
+              }}>
+                <div className="panel-form-label">Diff Mode</div>
+                <div style={{ display: "flex", background: "var(--bg-1)", border: "1px solid var(--border-default)", borderRadius: 5, padding: 2, gap: 2 }}>
+                  {[
+                    { id: false, label: "Unstaged" },
+                    { id: true,  label: "Staged" },
+                  ].map((opt) => {
+                    const active = showStagedDiff === opt.id;
+                    return (
+                      <button
+                        key={String(opt.id)}
+                        onClick={() => setShowStagedDiff(opt.id)}
+                        style={{
+                          flex: 1,
+                          padding: "4px 6px", borderRadius: 3,
+                          border: "none", cursor: "pointer",
+                          fontSize: 10.5, fontWeight: 500,
+                          background: active ? "var(--accent-dim)" : "transparent",
+                          color: active ? "var(--accent)" : "var(--text-secondary)",
+                        }}
                       >
-                        <option value="">All changed files</option>
-                        {(gitStatus.files || []).map((file) => (
-                          <option key={file.path} value={file.path}>
-                            {file.path} ({summarizeFileStatus(file)})
-                          </option>
-                        ))}
-                      </select>
-                      <div className="flex items-center gap-2 mt-2">
-                        <button
-                          onClick={onStage}
-                          disabled={gitActionLoading}
-                          className="inline-flex items-center gap-1 px-2 py-1 rounded border border-border-primary text-[10px] text-text-secondary hover:bg-bg-hover disabled:opacity-60"
-                        >
-                          {gitActionLoading ? <Loader2 size={10} className="animate-spin" /> : <ArrowUpToLine size={10} />}
-                          Stage {selectedPath ? "Selected" : "All"}
-                        </button>
-                        <button
-                          onClick={onUnstage}
-                          disabled={gitActionLoading}
-                          className="inline-flex items-center gap-1 px-2 py-1 rounded border border-border-primary text-[10px] text-text-secondary hover:bg-bg-hover disabled:opacity-60"
-                        >
-                          {gitActionLoading ? <Loader2 size={10} className="animate-spin" /> : <ArrowDownToLine size={10} />}
-                          Unstage {selectedPath ? "Selected" : "All"}
-                        </button>
-                      </div>
+                        {opt.label}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            </div>
+
+            {/* File picker + stage/unstage */}
+            <div className="panel-form-grid">
+              <div className="panel-form-row" style={{ gridColumn: "1 / -1" }}>
+                <label className="panel-form-label">File</label>
+                <select
+                  className="panel-select"
+                  value={selectedPath}
+                  onChange={(e) => setSelectedPath(e.target.value)}
+                >
+                  <option value="">All changed files</option>
+                  {(gitStatus.files || []).map((file) => (
+                    <option key={file.path} value={file.path}>
+                      {file.path} ({summarizeFileStatus(file)})
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+            <div className="panel-btn-row">
+              <button onClick={onStage} disabled={gitActionLoading} className="panel-btn">
+                {gitActionLoading ? <Loader2 size={11} className="animate-spin" /> : <ArrowUpToLine size={11} />}
+                Stage {selectedPath ? "Selected" : "All"}
+              </button>
+              <button onClick={onUnstage} disabled={gitActionLoading} className="panel-btn">
+                {gitActionLoading ? <Loader2 size={11} className="animate-spin" /> : <ArrowDownToLine size={11} />}
+                Unstage {selectedPath ? "Selected" : "All"}
+              </button>
+            </div>
+
+            {/* Unified diff */}
+            <div className="panel-form-row">
+              <label className="panel-form-label">Unified Diff</label>
+              <div style={{ borderRadius: 6, border: "1px solid var(--border-default)", background: "var(--bg-canvas)", overflow: "hidden" }}>
+                <DiffBlock text={gitDiffText} loading={gitDiffLoading} />
+              </div>
+            </div>
+
+            {/* Commit form */}
+            <div className="panel-form-grid">
+              <div className="panel-form-row" style={{ gridColumn: "1 / -1" }}>
+                <label className="panel-form-label">Commit Message</label>
+                <input
+                  className="panel-input"
+                  value={commitMessage}
+                  onChange={(e) => setCommitMessage(e.target.value)}
+                  placeholder={selectedPath ? `Commit selected: ${selectedPath}` : "Commit all staged/changed files"}
+                />
+              </div>
+            </div>
+            <div className="panel-btn-row">
+              <button onClick={onCommit} disabled={commitLoading} className="panel-btn primary">
+                {commitLoading ? <Loader2 size={11} className="animate-spin" /> : <Upload size={11} />}
+                Commit
+              </button>
+            </div>
+
+            {/* Remote / branch actions */}
+            <div style={{
+              padding: 12, borderRadius: 6,
+              background: "var(--bg-2)", border: "1px solid var(--border-default)",
+              display: "flex", flexDirection: "column", gap: 10,
+            }}>
+              <div className="panel-form-label">Remote Actions</div>
+              <div className="panel-form-grid">
+                <div className="panel-form-row">
+                  <label className="panel-form-label">Remote</label>
+                  <input
+                    className="panel-input"
+                    value={gitRemote}
+                    onChange={(e) => setGitRemote(e.target.value)}
+                    placeholder="origin"
+                  />
+                </div>
+                <div className="panel-form-row">
+                  <label className="panel-form-label">Branch</label>
+                  <input
+                    className="panel-input"
+                    value={gitBranchInput}
+                    onChange={(e) => setGitBranchInput(e.target.value)}
+                    placeholder={gitStatus?.branch && gitStatus.branch !== "HEAD" ? gitStatus.branch : "feature/my-change"}
+                  />
+                </div>
+              </div>
+              <div className="panel-btn-row">
+                <button onClick={onCreateBranch} disabled={gitBranchLoading} className="panel-btn">
+                  {gitBranchLoading ? <Loader2 size={11} className="animate-spin" /> : <GitBranch size={11} />}
+                  Create / Checkout
+                </button>
+                <button onClick={onPull} disabled={gitPullLoading || !gitStatus} className="panel-btn">
+                  {gitPullLoading ? <Loader2 size={11} className="animate-spin" /> : <RefreshCw size={11} />}
+                  Pull
+                </button>
+                <button onClick={onPush} disabled={gitPushLoading || !gitStatus} className="panel-btn primary">
+                  {gitPushLoading ? <Loader2 size={11} className="animate-spin" /> : <Upload size={11} />}
+                  Push
+                </button>
+              </div>
+
+              {(gitPullOutput || gitPushOutput) && (
+                <details style={{ background: "var(--bg-1)", border: "1px solid var(--border-default)", borderRadius: 6, padding: 8 }}>
+                  <summary style={{ fontSize: 10.5, color: "var(--text-tertiary)", cursor: "pointer" }}>Last git output</summary>
+                  <pre style={{
+                    marginTop: 8, fontSize: 10.5, fontFamily: "var(--font-mono, inherit)",
+                    whiteSpace: "pre-wrap", wordBreak: "break-word",
+                    maxHeight: 140, overflow: "auto", color: "var(--text-secondary)",
+                  }}>{gitPullOutput || gitPushOutput}</pre>
+                </details>
+              )}
+
+              <details style={{ background: "var(--bg-1)", border: "1px solid var(--border-default)", borderRadius: 6, padding: 12 }}>
+                <summary style={{ fontSize: 11, fontWeight: 500, color: "var(--text-secondary)", cursor: "pointer" }}>Open GitHub PR</summary>
+                <div style={{ marginTop: 10, display: "flex", flexDirection: "column", gap: 10 }}>
+                  <div className="panel-form-grid">
+                    <div className="panel-form-row">
+                      <label className="panel-form-label">PR Title</label>
+                      <input
+                        className="panel-input"
+                        value={prTitle}
+                        onChange={(e) => setPrTitle(e.target.value)}
+                      />
                     </div>
-
-                    <div className="space-y-1">
-                      <label className="text-[10px] text-text-muted uppercase tracking-wider font-semibold block">Unified Diff</label>
-                      <div className="border border-border-primary rounded-md bg-bg-primary">
-                        {gitDiffLoading ? (
-                          <div className="p-2 text-xs text-text-muted inline-flex items-center gap-2">
-                            <Loader2 size={12} className="animate-spin" />
-                            Loading diff...
-                          </div>
-                        ) : (
-                          <pre className="p-2 text-[10px] leading-relaxed text-text-secondary font-mono overflow-x-auto max-h-56 overflow-y-auto whitespace-pre-wrap break-words">
-                            {gitDiffText || "No diff output for current selection."}
-                          </pre>
-                        )}
-                      </div>
+                    <div className="panel-form-row">
+                      <label className="panel-form-label">Base Branch</label>
+                      <input
+                        className="panel-input"
+                        value={prBase}
+                        onChange={(e) => setPrBase(e.target.value)}
+                        placeholder="main"
+                      />
                     </div>
-
-                    <div className="space-y-1">
-                      <label className="text-[10px] text-text-muted uppercase tracking-wider font-semibold block">Commit</label>
-                      <div className="flex items-center gap-2">
-                        <input
-                          value={commitMessage}
-                          onChange={(e) => setCommitMessage(e.target.value)}
-                          placeholder={selectedPath ? `Commit selected: ${selectedPath}` : "Commit all staged/changed files"}
-                          className="flex-1 bg-bg-primary border border-border-primary rounded-md px-2 py-1.5 text-xs text-text-primary outline-none focus:border-accent-blue"
-                        />
-                        <button
-                          onClick={onCommit}
-                          disabled={commitLoading}
-                          className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-md text-xs font-medium bg-accent-blue text-white hover:bg-accent-blue/85 disabled:opacity-60"
-                        >
-                          {commitLoading ? <Loader2 size={11} className="animate-spin" /> : <Upload size={11} />}
-                          Commit
-                        </button>
-                        <button
-                          onClick={onPush}
-                          disabled={gitPushLoading || !gitStatus}
-                          className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-md text-xs font-medium border border-border-primary bg-bg-primary text-text-secondary hover:bg-bg-hover disabled:opacity-60"
-                          title="Push current branch to origin"
-                        >
-                          {gitPushLoading ? <Loader2 size={11} className="animate-spin" /> : <Upload size={11} />}
-                          Push
-                        </button>
-                      </div>
-                    <div className="space-y-1">
-                      <label className="text-[10px] text-text-muted uppercase tracking-wider font-semibold block">Git Actions</label>
-                      <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
-                        <div>
-                          <div className="text-[10px] text-text-muted mb-1">Remote</div>
-                          <input
-                            value={gitRemote}
-                            onChange={(e) => setGitRemote(e.target.value)}
-                            placeholder="origin"
-                            className="w-full bg-bg-primary border border-border-primary rounded-md px-2 py-1.5 text-xs text-text-primary outline-none focus:border-accent-blue font-mono"
-                          />
-                        </div>
-                        <div>
-                          <div className="text-[10px] text-text-muted mb-1">Branch</div>
-                          <input
-                            value={gitBranchInput}
-                            onChange={(e) => setGitBranchInput(e.target.value)}
-                            placeholder={gitStatus?.branch && gitStatus.branch !== "HEAD" ? gitStatus.branch : "feature/my-change"}
-                            className="w-full bg-bg-primary border border-border-primary rounded-md px-2 py-1.5 text-xs text-text-primary outline-none focus:border-accent-blue font-mono"
-                          />
-                        </div>
-                        <div className="flex items-end gap-2">
-                          <button
-                            onClick={onCreateBranch}
-                            disabled={gitBranchLoading}
-                            className="inline-flex items-center gap-1 px-2 py-1.5 rounded border border-border-primary text-[10px] text-text-secondary hover:bg-bg-hover disabled:opacity-60"
-                          >
-                            {gitBranchLoading ? <Loader2 size={10} className="animate-spin" /> : <GitBranch size={10} />}
-                            Create/Checkout
-                          </button>
-                          <button
-                            onClick={onPull}
-                            disabled={gitPullLoading || !gitStatus}
-                            className="inline-flex items-center gap-1 px-2 py-1.5 rounded border border-border-primary text-[10px] text-text-secondary hover:bg-bg-hover disabled:opacity-60"
-                          >
-                            {gitPullLoading ? <Loader2 size={10} className="animate-spin" /> : <RefreshCw size={10} />}
-                            Pull
-                          </button>
-                          <button
-                            onClick={onPush}
-                            disabled={gitPushLoading || !gitStatus}
-                            className="inline-flex items-center gap-1 px-2 py-1.5 rounded border border-border-primary text-[10px] text-text-secondary hover:bg-bg-hover disabled:opacity-60"
-                          >
-                            {gitPushLoading ? <Loader2 size={10} className="animate-spin" /> : <Upload size={10} />}
-                            Push
-                          </button>
-                        </div>
-                      </div>
-
-                      {(gitPullOutput || gitPushOutput) && (
-                        <details className="mt-2 border border-border-primary rounded-md bg-bg-primary p-2">
-                          <summary className="text-[10px] text-text-muted cursor-pointer">Last git output</summary>
-                          <pre className="mt-2 text-[10px] font-mono whitespace-pre-wrap break-words max-h-32 overflow-auto">
-                            {gitPullOutput || gitPushOutput}
-                          </pre>
-                        </details>
-                      )}
-
-                      <details className="mt-2 border border-border-primary rounded-md bg-bg-primary p-2">
-                        <summary className="text-[10px] text-text-muted cursor-pointer">Open GitHub PR</summary>
-                        <div className="mt-2 grid grid-cols-1 md:grid-cols-2 gap-2">
-                          <div>
-                            <div className="text-[10px] text-text-muted mb-1">PR Title</div>
-                            <input
-                              value={prTitle}
-                              onChange={(e) => setPrTitle(e.target.value)}
-                              className="w-full bg-bg-primary border border-border-primary rounded-md px-2 py-1.5 text-xs text-text-primary outline-none focus:border-accent-blue"
-                            />
-                          </div>
-                          <div>
-                            <div className="text-[10px] text-text-muted mb-1">Base Branch</div>
-                            <input
-                              value={prBase}
-                              onChange={(e) => setPrBase(e.target.value)}
-                              placeholder="main"
-                              className="w-full bg-bg-primary border border-border-primary rounded-md px-2 py-1.5 text-xs text-text-primary outline-none focus:border-accent-blue font-mono"
-                            />
-                          </div>
-                        </div>
-                        <div className="mt-2">
-                          <div className="text-[10px] text-text-muted mb-1">GitHub Token</div>
-                          <input
-                            type="password"
-                            value={prToken}
-                            onChange={(e) => setPrToken(e.target.value)}
-                            placeholder="ghp_..."
-                            className="w-full bg-bg-primary border border-border-primary rounded-md px-2 py-1.5 text-xs text-text-primary outline-none focus:border-accent-blue font-mono"
-                          />
-                        </div>
-                        <div className="mt-2">
-                          <div className="text-[10px] text-text-muted mb-1">Description</div>
-                          <textarea
-                            value={prBody}
-                            onChange={(e) => setPrBody(e.target.value)}
-                            rows={3}
-                            className="w-full bg-bg-primary border border-border-primary rounded-md px-2 py-1.5 text-xs text-text-primary outline-none focus:border-accent-blue"
-                          />
-                        </div>
-                        <div className="mt-2 flex items-center gap-2">
-                          <button
-                            onClick={onCreatePr}
-                            disabled={prCreating || !gitStatus}
-                            className="inline-flex items-center gap-1 px-2 py-1.5 rounded-md text-[10px] font-semibold bg-accent-blue text-white hover:bg-accent-blue/85 disabled:opacity-60"
-                          >
-                            {prCreating ? <Loader2 size={10} className="animate-spin" /> : <Upload size={10} />}
-                            Open PR
-                          </button>
-                          {prUrl && (
-                            <a href={prUrl} target="_blank" rel="noreferrer" className="text-[10px] text-accent-blue underline">
-                              {prUrl}
-                            </a>
-                          )}
-                        </div>
-                      </details>
+                    <div className="panel-form-row" style={{ gridColumn: "1 / -1" }}>
+                      <label className="panel-form-label">GitHub Token</label>
+                      <input
+                        className="panel-input"
+                        type="password"
+                        value={prToken}
+                        onChange={(e) => setPrToken(e.target.value)}
+                        placeholder="ghp_…"
+                      />
                     </div>
-
+                    <div className="panel-form-row" style={{ gridColumn: "1 / -1" }}>
+                      <label className="panel-form-label">Description</label>
+                      <textarea
+                        className="panel-textarea"
+                        value={prBody}
+                        onChange={(e) => setPrBody(e.target.value)}
+                        rows={3}
+                      />
                     </div>
-
-                    {gitLog.length > 0 && (
-                      <div className="space-y-1">
-                        <div className="text-[10px] text-text-muted uppercase tracking-wider font-semibold flex items-center gap-1">
-                          <Clock3 size={10} />
-                          Recent Commits
-                        </div>
-                        <div className="border border-border-primary rounded-md bg-bg-primary divide-y divide-border-primary/60">
-                          {gitLog.slice(0, 5).map((entry) => (
-                            <div key={entry.hash} className="px-3 py-1.5">
-                              <div className="text-xs text-text-primary font-medium truncate">{entry.subject}</div>
-                              <div className="text-[10px] text-text-muted font-mono">
-                                {entry.shortHash} · {entry.author}
-                              </div>
-                            </div>
-                          ))}
-                        </div>
-                      </div>
+                  </div>
+                  <div className="panel-btn-row">
+                    <button onClick={onCreatePr} disabled={prCreating || !gitStatus} className="panel-btn primary">
+                      {prCreating ? <Loader2 size={11} className="animate-spin" /> : <Upload size={11} />}
+                      Open PR
+                    </button>
+                    {prUrl && (
+                      <a href={prUrl} target="_blank" rel="noreferrer" style={{ fontSize: 11, color: "var(--accent)", textDecoration: "underline" }}>
+                        {prUrl}
+                      </a>
                     )}
                   </div>
-                )
-              )}
+                </div>
+              </details>
             </div>
-          )}
-        </div>
-      </div>
-    </div>
+          </div>
+        ) : null}
+      </PanelSection>
+
+      {/* ── Recent Commits ─────────────────────────────────────────── */}
+      {gitLog.length > 0 && (
+        <PanelSection title="Recent Commits" count={Math.min(gitLog.length, 5)} icon={<Clock3 size={11} />}>
+          <div style={{ border: "1px solid var(--border-default)", borderRadius: 6, overflow: "hidden", background: "var(--bg-1)" }}>
+            {gitLog.slice(0, 5).map((entry, i) => (
+              <div
+                key={entry.hash}
+                style={{
+                  padding: "8px 12px",
+                  borderBottom: i < Math.min(gitLog.length, 5) - 1 ? "1px solid var(--border-subtle)" : "none",
+                }}
+              >
+                <div style={{ fontSize: 12, fontWeight: 500, color: "var(--text-primary)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                  {entry.subject}
+                </div>
+                <div style={{ fontSize: 10.5, color: "var(--text-tertiary)", fontFamily: "var(--font-mono, inherit)", marginTop: 2 }}>
+                  {entry.shortHash} · {entry.author}
+                </div>
+              </div>
+            ))}
+          </div>
+        </PanelSection>
+      )}
+    </PanelFrame>
   );
 }

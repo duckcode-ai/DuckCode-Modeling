@@ -1,5 +1,11 @@
+/* CommitDialog — stage → commit → optional push for the active project.
+   Ported to the shared `<Modal>` chrome + `.panel-*` primitives. Raw HTML
+   checkboxes are replaced with the styled `.dlx-commit-file-row` that
+   themes correctly across midnight/obsidian/paper/arctic. */
 import React, { useEffect, useState } from "react";
-import { X, GitCommit, UploadCloud, FileDiff } from "lucide-react";
+import {
+  GitCommit, UploadCloud, FileDiff, RefreshCw, AlertCircle, Check,
+} from "lucide-react";
 import useUiStore from "../../stores/uiStore";
 import useWorkspaceStore from "../../stores/workspaceStore";
 import {
@@ -7,6 +13,21 @@ import {
   commitGit,
   pushGitBranch,
 } from "../../lib/api";
+import Modal from "./Modal";
+
+const STATUS_TONE = {
+  A: "accent",   // added
+  M: "warn",     // modified
+  D: "error",    // deleted
+  "?": "muted",  // untracked
+  R: "accent",   // renamed
+  U: "error",    // unmerged
+};
+
+function statusTone(status) {
+  const first = String(status || "").trim().charAt(0);
+  return STATUS_TONE[first] || "muted";
+}
 
 export default function CommitDialog() {
   const { closeModal, addToast } = useUiStore();
@@ -46,6 +67,12 @@ export default function CommitDialog() {
     });
   };
 
+  const toggleAll = () => {
+    const all = (status?.files || []).map((f) => f.path);
+    if (selected.size === all.length) setSelected(new Set());
+    else setSelected(new Set(all));
+  };
+
   const doCommit = async (andPush) => {
     if (!activeProjectId || !message.trim()) {
       setError("Commit message is required.");
@@ -74,103 +101,123 @@ export default function CommitDialog() {
 
   const files = status?.files || [];
   const branch = status?.branch || "";
+  const allSelected = files.length > 0 && selected.size === files.length;
+  const commitDisabled = working || files.length === 0 || !message.trim() || selected.size === 0;
 
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm"
-      onClick={closeModal}
-    >
-      <div
-        className="w-[680px] max-w-[94vw] max-h-[86vh] rounded-xl border border-border-primary bg-bg-surface shadow-2xl flex flex-col overflow-hidden"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div className="flex items-center justify-between px-4 h-12 border-b border-border-primary bg-bg-secondary shrink-0">
-          <div className="flex items-center gap-2">
-            <GitCommit size={14} className="text-text-accent" />
-            <h2 className="t-subtitle text-text-primary">Commit changes</h2>
-            {branch && (
-              <span className="text-xs text-text-muted font-mono ml-1">on {branch}</span>
-            )}
-          </div>
-          <button onClick={closeModal} className="dl-toolbar-btn dl-toolbar-btn--ghost-icon" title="Close">
-            <X size={14} />
-          </button>
-        </div>
-
-        <div className="flex-1 min-h-0 overflow-y-auto p-4 space-y-4">
-          {loading && <div className="text-sm text-text-muted">Reading git status…</div>}
-          {!loading && files.length === 0 && (
-            <div className="text-sm text-text-muted">No changes to commit.</div>
-          )}
-          {!loading && files.length > 0 && (
-            <div className="rounded-lg border border-border-primary overflow-hidden">
-              <div className="t-overline text-text-muted px-3 py-1.5 bg-bg-secondary border-b border-border-primary">
-                Changed files ({files.length})
-              </div>
-              <div className="max-h-[240px] overflow-y-auto">
-                {files.map((f) => (
-                  <label
-                    key={f.path}
-                    className="flex items-center gap-2 px-3 py-1.5 text-sm text-text-primary hover:bg-bg-hover cursor-pointer border-b border-border-primary/60 last:border-b-0"
-                  >
-                    <input
-                      type="checkbox"
-                      checked={selected.has(f.path)}
-                      onChange={() => toggle(f.path)}
-                    />
-                    <FileDiff size={12} className="text-text-muted shrink-0" />
-                    <span className="font-mono text-xs truncate">{f.path}</span>
-                    <span className="ml-auto text-[10px] uppercase tracking-wider text-text-muted">
-                      {f.status}
-                    </span>
-                  </label>
-                ))}
-              </div>
-            </div>
-          )}
-
-          <div>
-            <div className="t-overline text-text-muted mb-1">Message</div>
-            <textarea
-              value={message}
-              onChange={(e) => setMessage(e.target.value)}
-              rows={3}
-              placeholder="Describe your change…"
-              className="w-full text-sm px-3 py-2 rounded-md border border-border-primary bg-bg-primary text-text-primary outline-none focus:border-accent-blue resize-none"
-            />
-          </div>
-
-          {error && (
-            <div className="text-sm text-status-error">{error}</div>
-          )}
-        </div>
-
-        <div className="flex items-center justify-end gap-2 px-4 h-12 border-t border-border-primary bg-bg-secondary shrink-0">
+    <Modal
+      icon={<GitCommit size={14} />}
+      title="Commit changes"
+      subtitle={branch ? `on ${branch}` : "Stage files and write a commit message."}
+      size="lg"
+      onClose={closeModal}
+      closeOnBackdrop={!working}
+      closeOnEscape={!working}
+      footer={
+        <>
           <button
+            type="button"
+            className="panel-btn"
             onClick={closeModal}
-            className="dl-toolbar-btn dl-toolbar-btn--ghost-icon"
             disabled={working}
           >
             Cancel
           </button>
           <button
+            type="button"
+            className="panel-btn"
             onClick={() => doCommit(false)}
-            className="dl-toolbar-btn"
-            disabled={working || files.length === 0 || !message.trim() || selected.size === 0}
+            disabled={commitDisabled}
           >
-            <GitCommit size={13} />
+            <GitCommit size={12} />
             Commit
           </button>
           <button
+            type="button"
+            className="panel-btn primary"
             onClick={() => doCommit(true)}
-            className="dl-toolbar-btn dl-toolbar-btn--primary"
-            disabled={working || files.length === 0 || !message.trim() || selected.size === 0}
+            disabled={commitDisabled}
           >
-            <UploadCloud size={13} />
-            Commit & Push
+            <UploadCloud size={12} />
+            Commit &amp; Push
           </button>
+        </>
+      }
+    >
+      {loading && (
+        <div className="dlx-modal-hint" style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <RefreshCw size={12} className="animate-spin" /> Reading git status…
         </div>
+      )}
+
+      {!loading && files.length === 0 && !error && (
+        <div className="dlx-modal-alert info">
+          <Check size={12} style={{ marginTop: 1, flexShrink: 0 }} />
+          <span>Working tree is clean — no changes to commit.</span>
+        </div>
+      )}
+
+      {!loading && files.length > 0 && (
+        <div className="dlx-modal-section">
+          <div className="dlx-commit-list-header">
+            <button
+              type="button"
+              className="dlx-commit-toggle-all"
+              onClick={toggleAll}
+            >
+              {allSelected ? "Deselect all" : "Select all"}
+            </button>
+            <span className="dlx-commit-list-count">
+              {selected.size} / {files.length} staged
+            </span>
+          </div>
+          <div className="dlx-commit-list">
+            {files.map((f) => {
+              const on = selected.has(f.path);
+              const tone = statusTone(f.status);
+              return (
+                <label
+                  key={f.path}
+                  className={`dlx-commit-file-row ${on ? "on" : ""}`}
+                >
+                  <input
+                    type="checkbox"
+                    checked={on}
+                    onChange={() => toggle(f.path)}
+                  />
+                  <FileDiff size={11} aria-hidden="true" />
+                  <span className="dlx-commit-file-path">{f.path}</span>
+                  <span className={`dlx-commit-file-status tone-${tone}`}>
+                    {String(f.status || "").trim() || "·"}
+                  </span>
+                </label>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      <div className="dlx-modal-section">
+        <label className="dlx-modal-field-label" htmlFor="commit-message">
+          Commit message
+        </label>
+        <textarea
+          id="commit-message"
+          className="panel-textarea"
+          value={message}
+          onChange={(e) => setMessage(e.target.value)}
+          rows={3}
+          placeholder="Describe your change…"
+          disabled={working}
+        />
       </div>
-    </div>
+
+      {error && (
+        <div className="dlx-modal-alert">
+          <AlertCircle size={12} style={{ marginTop: 1, flexShrink: 0 }} />
+          <span>{error}</span>
+        </div>
+      )}
+    </Modal>
   );
 }

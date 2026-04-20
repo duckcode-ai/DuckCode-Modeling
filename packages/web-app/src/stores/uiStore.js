@@ -1,5 +1,93 @@
 import { create } from "zustand";
 
+/* ── Bottom-panel persistence ───────────────────────────────────────────
+   A single localStorage blob keyed `datalex.bottomPanel` keeps the user's
+   drawer preferences (open/closed, active tab, height, maximized) across
+   reloads. Loaded once at store init; written on every mutation. */
+const BOTTOM_STORAGE = "datalex.bottomPanel";
+const DEFAULT_BOTTOM = {
+  open: true,
+  tab: "properties",
+  height: 280,
+  maximized: false,
+};
+
+function loadBottom() {
+  try {
+    const raw = localStorage.getItem(BOTTOM_STORAGE);
+    if (!raw) return { ...DEFAULT_BOTTOM };
+    const parsed = JSON.parse(raw);
+    return {
+      open:      typeof parsed.open === "boolean" ? parsed.open : DEFAULT_BOTTOM.open,
+      tab:       typeof parsed.tab === "string" && parsed.tab ? parsed.tab : DEFAULT_BOTTOM.tab,
+      height:    typeof parsed.height === "number" ? parsed.height : DEFAULT_BOTTOM.height,
+      maximized: typeof parsed.maximized === "boolean" ? parsed.maximized : DEFAULT_BOTTOM.maximized,
+    };
+  } catch (_e) { return { ...DEFAULT_BOTTOM }; }
+}
+
+function saveBottom(state) {
+  try {
+    localStorage.setItem(BOTTOM_STORAGE, JSON.stringify({
+      open:      state.bottomPanelOpen,
+      tab:       state.bottomPanelTab,
+      height:    state.bottomPanelHeight,
+      maximized: state.bottomPanelMaximized,
+    }));
+  } catch (_e) { /* quota / private mode — ignore */ }
+}
+
+function clampHeight(h) {
+  const max = typeof window !== "undefined" ? Math.max(240, window.innerHeight - 160) : 900;
+  const min = 140;
+  return Math.max(min, Math.min(max, Math.round(h)));
+}
+
+const initialBottom = loadBottom();
+
+/* ── Shell-level persistence ───────────────────────────────────────────
+   Separate blob for shell-wide preferences (view mode, right-panel tab).
+   Kept in its own key so the bottom-panel blob stays focused. */
+const SHELL_STORAGE = "datalex.shell";
+const VALID_SHELL_VIEW_MODES = ["diagram", "table", "views", "enums"];
+const DEFAULT_SHELL = { viewMode: "diagram", rightTab: "COLUMNS", rightWidth: 320 };
+const RIGHT_PANEL_MIN = 280;
+const RIGHT_PANEL_MAX_RESERVE = 400; // leave this much room for the rest of the shell
+
+function clampRightWidth(w) {
+  const n = Math.round(Number(w));
+  if (!Number.isFinite(n)) return DEFAULT_SHELL.rightWidth;
+  const max = typeof window !== "undefined"
+    ? Math.max(RIGHT_PANEL_MIN + 40, window.innerWidth - RIGHT_PANEL_MAX_RESERVE)
+    : 720;
+  return Math.max(RIGHT_PANEL_MIN, Math.min(max, n));
+}
+
+function loadShell() {
+  try {
+    const raw = localStorage.getItem(SHELL_STORAGE);
+    if (!raw) return { ...DEFAULT_SHELL };
+    const parsed = JSON.parse(raw);
+    const viewMode = VALID_SHELL_VIEW_MODES.includes(parsed.viewMode) ? parsed.viewMode : DEFAULT_SHELL.viewMode;
+    const rightTab = typeof parsed.rightTab === "string" && parsed.rightTab ? parsed.rightTab : DEFAULT_SHELL.rightTab;
+    const rightWidth = typeof parsed.rightWidth === "number" ? clampRightWidth(parsed.rightWidth) : DEFAULT_SHELL.rightWidth;
+    return { viewMode, rightTab, rightWidth };
+  } catch (_e) { return { ...DEFAULT_SHELL }; }
+}
+
+function saveShell(state) {
+  try {
+    localStorage.setItem(SHELL_STORAGE, JSON.stringify({
+      viewMode: state.shellViewMode,
+      rightTab: state.rightPanelTab,
+      rightWidth: state.rightPanelWidth,
+    }));
+  } catch (_e) { /* ignore */ }
+}
+
+const initialShell = loadShell();
+const ACTIVITY_CAP = 20; // rolling tail of activity entries shown in the bell popover
+
 const useUiStore = create((set, get) => ({
   // ── Activity bar (left icon rail) ──
   // Primary activity determines what shows in the side panel AND the main content area
@@ -17,11 +105,24 @@ const useUiStore = create((set, get) => ({
   theme: localStorage.getItem("dm_theme") || "light",
 
   // ── Bottom panel (slimmed: only contextual panels) ──
-  bottomPanelOpen: true,
-  bottomPanelTab: "properties", // "properties" | "validation" | "history"
+  bottomPanelOpen:      initialBottom.open,
+  bottomPanelTab:       initialBottom.tab,    // "properties" | "validation" | "history" | …
+  bottomPanelHeight:    initialBottom.height, // px, drag-resized via top edge strip
+  bottomPanelMaximized: initialBottom.maximized,
 
   // ── Right panel (entity properties) ──
   rightPanelOpen: true,
+  rightPanelTab: initialShell.rightTab, // "COLUMNS" | "RELATIONS" | "INDEXES" | "SQL" | "YAML"
+  rightPanelWidth: initialShell.rightWidth, // px; persisted across reloads
+
+  // ── Shell view mode (swaps the main canvas surface) ──
+  shellViewMode: initialShell.viewMode, // "diagram" | "table" | "views" | "enums"
+
+  // ── Activity feed (bell popover) ──
+  // Rolling list of recent notable events (toasts, saves, commits). Separate
+  // from `toasts` which auto-dismiss in 4s; these persist for the session.
+  activityFeed: [],
+  unreadActivity: 0,
 
   // ── Unified selection (drives the Right Inspector) ──
   // `kind`: "entity" | "column" | "relationship" | "enum" | "subject_area" | "diagram" | null
@@ -66,8 +167,30 @@ const useUiStore = create((set, get) => ({
   // Legacy alias
   setActiveView: (view) => set({ activeActivity: view }),
 
-  toggleBottomPanel: () => set((s) => ({ bottomPanelOpen: !s.bottomPanelOpen })),
-  setBottomPanelTab: (tab) => set({ bottomPanelTab: tab, bottomPanelOpen: true }),
+  toggleBottomPanel: () => {
+    set((s) => ({ bottomPanelOpen: !s.bottomPanelOpen }));
+    saveBottom(get());
+  },
+  setBottomPanelOpen: (open) => {
+    set({ bottomPanelOpen: !!open });
+    saveBottom(get());
+  },
+  setBottomPanelTab: (tab) => {
+    set({ bottomPanelTab: tab, bottomPanelOpen: true });
+    saveBottom(get());
+  },
+  setBottomPanelHeight: (h) => {
+    set({ bottomPanelHeight: clampHeight(h) });
+    saveBottom(get());
+  },
+  toggleBottomPanelMax: () => {
+    set((s) => ({ bottomPanelMaximized: !s.bottomPanelMaximized }));
+    saveBottom(get());
+  },
+  setBottomPanelMaximized: (v) => {
+    set({ bottomPanelMaximized: !!v });
+    saveBottom(get());
+  },
 
   setSelection: (next) =>
     set({
@@ -85,6 +208,36 @@ const useUiStore = create((set, get) => ({
   toggleDiagramFullscreen: () => set((s) => ({ diagramFullscreen: !s.diagramFullscreen })),
   setDiagramFullscreen: (open) => set({ diagramFullscreen: open }),
   setRightPanelOpen: (open) => set({ rightPanelOpen: open }),
+  setRightPanelTab: (tab) => {
+    set({ rightPanelTab: tab });
+    saveShell(get());
+  },
+  setRightPanelWidth: (w) => {
+    set({ rightPanelWidth: clampRightWidth(w) });
+    saveShell(get());
+  },
+
+  setShellViewMode: (mode) => {
+    if (!VALID_SHELL_VIEW_MODES.includes(mode)) return;
+    set({ shellViewMode: mode });
+    saveShell(get());
+  },
+
+  pushActivity: (entry) => {
+    const stamped = {
+      id: `act_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+      type: entry?.type || "info",
+      message: entry?.message || "",
+      createdAt: Date.now(),
+      ...entry,
+    };
+    set((s) => ({
+      activityFeed: [stamped, ...s.activityFeed].slice(0, ACTIVITY_CAP),
+      unreadActivity: s.unreadActivity + 1,
+    }));
+  },
+  markActivityRead: () => set({ unreadActivity: 0 }),
+  clearActivity: () => set({ activityFeed: [], unreadActivity: 0 }),
 
   toggleCommandPalette: () => set((s) => ({ commandPaletteOpen: !s.commandPaletteOpen })),
   setCommandPaletteOpen: (open) => set({ commandPaletteOpen: open }),
@@ -95,7 +248,23 @@ const useUiStore = create((set, get) => ({
   addToast: (toast) => {
     const id = `toast_${Date.now()}`;
     const entry = { id, ...toast };
-    set((s) => ({ toasts: [...s.toasts, entry] }));
+    set((s) => {
+      // Mirror the toast into the rolling activity feed so the bell popover
+      // retains it after the toast auto-dismisses. Skip "info" spam if the
+      // caller opts out via { activity: false }.
+      const shouldLogActivity = toast?.activity !== false && toast?.message;
+      const activityEntry = shouldLogActivity ? {
+        id: `act_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+        type: toast.type || "info",
+        message: toast.message,
+        createdAt: Date.now(),
+      } : null;
+      return {
+        toasts: [...s.toasts, entry],
+        activityFeed: activityEntry ? [activityEntry, ...s.activityFeed].slice(0, ACTIVITY_CAP) : s.activityFeed,
+        unreadActivity: activityEntry ? s.unreadActivity + 1 : s.unreadActivity,
+      };
+    });
     setTimeout(() => {
       set((s) => ({ toasts: s.toasts.filter((t) => t.id !== id) }));
     }, toast.duration || 4000);

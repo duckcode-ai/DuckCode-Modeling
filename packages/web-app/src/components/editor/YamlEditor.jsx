@@ -1,55 +1,168 @@
-import React, { useCallback, useRef, useState } from "react";
+import React, { useCallback, useRef, useState, useEffect, useMemo } from "react";
 import CodeMirror from "@uiw/react-codemirror";
 import { yaml } from "@codemirror/lang-yaml";
 import { EditorView } from "@codemirror/view";
 import { autocompletion } from "@codemirror/autocomplete";
 import { linter, lintGutter } from "@codemirror/lint";
+import { HighlightStyle, syntaxHighlighting } from "@codemirror/language";
+import { tags as t } from "@lezer/highlight";
 import { Eye, Copy, Check } from "lucide-react";
 import useWorkspaceStore from "../../stores/workspaceStore";
 import { runModelChecks } from "../../modelQuality";
 
-const lightTheme = EditorView.theme({
-  "&": {
-    backgroundColor: "#ffffff",
-    color: "#0f172a",
-    fontSize: "13px",
-    fontFamily: "'JetBrains Mono', 'Fira Code', 'IBM Plex Mono', monospace",
-  },
-  ".cm-content": {
-    caretColor: "#2563eb",
-    padding: "8px 0",
-  },
-  ".cm-cursor": {
-    borderLeftColor: "#2563eb",
-  },
-  "&.cm-focused .cm-selectionBackground, .cm-selectionBackground": {
-    backgroundColor: "rgba(59, 130, 246, 0.15) !important",
-  },
-  ".cm-activeLine": {
-    backgroundColor: "rgba(59, 130, 246, 0.06)",
-  },
-  ".cm-gutters": {
-    backgroundColor: "#f8fafc",
-    color: "#94a3b8",
-    border: "none",
-    borderRight: "1px solid #e2e8f0",
-  },
-  ".cm-activeLineGutter": {
-    backgroundColor: "rgba(59, 130, 246, 0.08)",
-    color: "#475569",
-  },
-  ".cm-lineNumbers .cm-gutterElement": {
-    padding: "0 8px 0 12px",
-    minWidth: "40px",
-  },
-  ".cm-foldGutter": {
-    width: "12px",
-  },
-  ".cm-matchingBracket": {
-    backgroundColor: "rgba(59, 130, 246, 0.15)",
-    outline: "1px solid rgba(59, 130, 246, 0.3)",
-  },
-});
+/* ── Theme-aware CodeMirror chrome ─────────────────────────────────────
+   The editor used to hard-code a light theme, which meant the YAML pane
+   glowed white on midnight/obsidian and the default navy property-key
+   highlight was almost invisible against the surrounding dark shell.
+
+   We now pick between two complementary palettes — one tuned for the two
+   light Luna themes (paper, arctic) and one for the two dark Luna themes
+   (midnight, obsidian) — and swap automatically when the user changes
+   theme. Colors are chosen to read well on the corresponding Luna bg
+   tokens and to stay legible against dim/accent-dim selection halos. */
+
+const DARK_THEMES = new Set(["midnight", "obsidian", "dark"]);
+const FONT_STACK = "'JetBrains Mono', 'Fira Code', 'IBM Plex Mono', monospace";
+
+// Light mode — high-contrast for paper/arctic.
+const LIGHT_PALETTE = {
+  bg:           "#ffffff",
+  fg:           "#1a1f2c",
+  caret:        "#2563eb",
+  selectionBg:  "rgba(37, 99, 235, 0.18)",
+  activeLineBg: "rgba(37, 99, 235, 0.06)",
+  gutterBg:     "#f7f8fa",
+  gutterFg:     "#8b94a3",
+  gutterBorder: "#e4e7ec",
+  activeLineGutterBg: "rgba(37, 99, 235, 0.10)",
+  activeLineGutterFg: "#334155",
+  matchBg:      "rgba(37, 99, 235, 0.18)",
+  matchOutline: "rgba(37, 99, 235, 0.35)",
+  // Syntax
+  key:          "#2c5ba8",   // YAML property name — deep readable blue
+  string:       "#0b7a3e",   // green
+  number:       "#a04b1a",   // orange-brown
+  bool:         "#7a3aa6",   // purple
+  comment:      "#7a828c",   // muted slate
+  punctuation:  "#5b6472",
+  keyword:      "#b02a5a",
+  operator:     "#5b6472",
+  heading:      "#1a1f2c",
+};
+
+// Dark mode — muted-bright for midnight/obsidian.
+const DARK_PALETTE = {
+  bg:           "#151922",   // matches --bg-1 on midnight
+  fg:           "#e4e7ec",
+  caret:        "#7aa9ff",
+  selectionBg:  "rgba(122, 169, 255, 0.22)",
+  activeLineBg: "rgba(122, 169, 255, 0.06)",
+  gutterBg:     "#0f131b",
+  gutterFg:     "#6b7280",
+  gutterBorder: "#242a36",
+  activeLineGutterBg: "rgba(122, 169, 255, 0.10)",
+  activeLineGutterFg: "#b5bcc7",
+  matchBg:      "rgba(122, 169, 255, 0.22)",
+  matchOutline: "rgba(122, 169, 255, 0.45)",
+  // Syntax — chosen to clear WCAG AA against bg #151922
+  key:          "#7db7ff",   // bright sky-blue for YAML keys (the fix)
+  string:       "#8ee1a7",   // soft green
+  number:       "#ffb87a",   // warm amber
+  bool:         "#d4a8ff",   // lavender
+  comment:      "#7a828c",
+  punctuation:  "#9aa3b4",
+  keyword:      "#ff9ab8",
+  operator:     "#9aa3b4",
+  heading:      "#e4e7ec",
+};
+
+function buildEditorTheme(p, dark) {
+  return EditorView.theme(
+    {
+      "&": {
+        backgroundColor: p.bg,
+        color: p.fg,
+        fontSize: "13px",
+        fontFamily: FONT_STACK,
+      },
+      ".cm-content": {
+        caretColor: p.caret,
+        padding: "8px 0",
+        color: p.fg,
+      },
+      ".cm-cursor, .cm-dropCursor": { borderLeftColor: p.caret },
+      "&.cm-focused .cm-selectionBackground, .cm-selectionBackground, .cm-content ::selection": {
+        backgroundColor: `${p.selectionBg} !important`,
+      },
+      ".cm-activeLine": { backgroundColor: p.activeLineBg },
+      ".cm-gutters": {
+        backgroundColor: p.gutterBg,
+        color: p.gutterFg,
+        border: "none",
+        borderRight: `1px solid ${p.gutterBorder}`,
+      },
+      ".cm-activeLineGutter": {
+        backgroundColor: p.activeLineGutterBg,
+        color: p.activeLineGutterFg,
+      },
+      ".cm-lineNumbers .cm-gutterElement": {
+        padding: "0 8px 0 12px",
+        minWidth: "40px",
+      },
+      ".cm-foldGutter": { width: "12px" },
+      ".cm-matchingBracket": {
+        backgroundColor: p.matchBg,
+        outline: `1px solid ${p.matchOutline}`,
+      },
+      // Tooltips / autocomplete popover — these otherwise inherit
+      // browser defaults (white bg) and vanish on dark.
+      ".cm-tooltip, .cm-tooltip-autocomplete, .cm-tooltip-hover": {
+        backgroundColor: dark ? "#1c2130" : "#ffffff",
+        color: p.fg,
+        border: `1px solid ${p.gutterBorder}`,
+        borderRadius: "6px",
+        boxShadow: dark
+          ? "0 10px 28px rgba(0,0,0,0.5)"
+          : "0 10px 28px rgba(15,23,42,0.14)",
+      },
+      ".cm-tooltip-autocomplete ul li[aria-selected]": {
+        backgroundColor: p.activeLineGutterBg,
+        color: p.fg,
+      },
+      // Lint diagnostic underlines/panels get muted tones, not neon red.
+      ".cm-diagnostic": {
+        backgroundColor: dark ? "#1c2130" : "#ffffff",
+        color: p.fg,
+        borderLeft: "3px solid var(--status-error, #ef4444)",
+      },
+      ".cm-diagnostic-warning": { borderLeftColor: "var(--status-warning, #f59e0b)" },
+      ".cm-diagnostic-error":   { borderLeftColor: "var(--status-error, #ef4444)" },
+    },
+    { dark },
+  );
+}
+
+function buildHighlightStyle(p) {
+  return HighlightStyle.define([
+    // YAML mapping keys — the "blue not readable" target.
+    { tag: [t.propertyName, t.definition(t.propertyName)], color: p.key, fontWeight: "500" },
+    { tag: [t.atom, t.bool, t.null],   color: p.bool },
+    { tag: [t.number],                 color: p.number },
+    { tag: [t.string, t.special(t.string)], color: p.string },
+    { tag: [t.comment, t.lineComment, t.blockComment], color: p.comment, fontStyle: "italic" },
+    { tag: [t.keyword],                color: p.keyword },
+    { tag: [t.operator, t.punctuation, t.separator, t.bracket], color: p.punctuation },
+    { tag: [t.heading],                color: p.heading, fontWeight: "600" },
+    { tag: [t.meta, t.processingInstruction], color: p.comment },
+    { tag: [t.escape],                 color: p.keyword },
+    { tag: [t.variableName],           color: p.fg },
+  ]);
+}
+
+const LIGHT_EDITOR_THEME = buildEditorTheme(LIGHT_PALETTE, false);
+const DARK_EDITOR_THEME  = buildEditorTheme(DARK_PALETTE, true);
+const LIGHT_HIGHLIGHT    = syntaxHighlighting(buildHighlightStyle(LIGHT_PALETTE));
+const DARK_HIGHLIGHT     = syntaxHighlighting(buildHighlightStyle(DARK_PALETTE));
 
 // Schema-aware YAML completions
 const SCHEMA_KEYWORDS = {
@@ -168,19 +281,56 @@ function yamlLinter(view) {
 const schemaAutocompletion = autocompletion({ override: [yamlCompletions] });
 const validationLinter = linter(yamlLinter, { delay: 800 });
 
-const editorExtensions = [
-  yaml(),
-  lightTheme,
-  EditorView.lineWrapping,
-  schemaAutocompletion,
-  lintGutter(),
-  validationLinter,
-];
+/* Read the current Luna theme from the DOM and subscribe to changes. The
+   Shell owns the canonical theme value (midnight | obsidian | paper |
+   arctic) and writes it to `data-theme` on <html>; we listen both to the
+   custom `datalex:theme-change` event the Settings dialog fires AND to a
+   MutationObserver so we stay in sync no matter how it changed. */
+function useLunaTheme() {
+  const read = () => (typeof document !== "undefined"
+    ? (document.documentElement.getAttribute("data-theme") || "midnight")
+    : "midnight");
+
+  const [theme, setTheme] = useState(read);
+
+  useEffect(() => {
+    if (typeof document === "undefined") return undefined;
+    const sync = () => setTheme(read());
+    const onEvent = (e) => {
+      const next = e?.detail?.theme;
+      if (next) setTheme(next);
+      else sync();
+    };
+    window.addEventListener("datalex:theme-change", onEvent);
+    const mo = new MutationObserver(sync);
+    mo.observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
+    // Re-sync on mount in case the attribute changed before this effect ran.
+    sync();
+    return () => {
+      window.removeEventListener("datalex:theme-change", onEvent);
+      mo.disconnect();
+    };
+  }, []);
+
+  return theme;
+}
 
 export default function YamlEditor({ readOnly = false }) {
   const { activeFileContent, updateContent, activeFile } = useWorkspaceStore();
   const editorRef = useRef(null);
   const [copied, setCopied] = useState(false);
+  const lunaTheme = useLunaTheme();
+  const isDark = DARK_THEMES.has(lunaTheme);
+
+  const editorExtensions = useMemo(() => [
+    yaml(),
+    isDark ? DARK_EDITOR_THEME : LIGHT_EDITOR_THEME,
+    isDark ? DARK_HIGHLIGHT : LIGHT_HIGHLIGHT,
+    EditorView.lineWrapping,
+    schemaAutocompletion,
+    lintGutter(),
+    validationLinter,
+  ], [isDark]);
 
   const onChange = useCallback((value) => {
     if (!readOnly) updateContent(value);
@@ -227,7 +377,7 @@ export default function YamlEditor({ readOnly = false }) {
           onChange={onChange}
           readOnly={readOnly}
           extensions={editorExtensions}
-          theme="light"
+          theme={isDark ? "dark" : "light"}
           height="100%"
           style={{ height: "100%" }}
           basicSetup={{
