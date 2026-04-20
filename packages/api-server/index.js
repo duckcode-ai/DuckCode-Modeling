@@ -2497,11 +2497,23 @@ app.post("/api/dbt/import", requireAdmin, express.json({ limit: "2mb" }), async 
       target,
       skipWarehouse,
       manifest,
+      // When true, the user's dbt folder is registered as a DataLex project
+      // and the response includes `{projectId, projectName}`. The GUI then
+      // opens the imported tree *against* that project, so Save All writes
+      // back into the same dbt repo at each file's original path. Only valid
+      // with `projectDir` (nothing to save to for a git URL clone).
+      editInPlace,
+      editInPlaceName,
     } = req.body || {};
 
     if (!projectDir && !gitUrl) {
       return res.status(400).json({
         error: "Provide either `projectDir` (local path) or `gitUrl` (public git URL).",
+      });
+    }
+    if (editInPlace && !projectDir) {
+      return res.status(400).json({
+        error: "`editInPlace` requires `projectDir` — git URLs have no local folder to save into.",
       });
     }
 
@@ -2627,7 +2639,43 @@ app.post("/api/dbt/import", requireAdmin, express.json({ limit: "2mb" }), async 
       try { rmSync(cloneDir, { recursive: true, force: true }); } catch (_) {}
     }
 
-    res.json({ success: true, outDir, tree, report });
+    // Edit-in-place mode: register the user's dbt folder as a DataLex project
+    // so the GUI's Save All writes back into it. Idempotent — if the folder is
+    // already registered we reuse the existing project. The imported tree is
+    // returned alongside the projectId; the web-app opens the tree *against*
+    // the project without touching disk until the user saves.
+    let projectRecord = null;
+    if (editInPlace && resolvedProjectDir && !cloneDir) {
+      try {
+        const projects = await loadProjects();
+        const absolute = resolve(resolvedProjectDir);
+        const existing = projects.find((p) => resolve(p.path) === absolute);
+        if (existing) {
+          projectRecord = existing;
+        } else {
+          const derivedName = (editInPlaceName && String(editInPlaceName).trim())
+            || basename(absolute) || "dbt-project";
+          projectRecord = {
+            id: `proj_${Date.now()}`,
+            name: derivedName,
+            path: absolute,
+          };
+          projects.push(projectRecord);
+          await saveProjects(projects);
+        }
+      } catch (err) {
+        // Don't fail the import — log and fall through to in-memory mode.
+        console.error("[datalex] editInPlace project-register failed:", err.message);
+      }
+    }
+
+    res.json({
+      success: true,
+      outDir,
+      tree,
+      report,
+      project: projectRecord,
+    });
   } catch (err) {
     res.status(500).json({ error: err?.message || String(err) });
   }

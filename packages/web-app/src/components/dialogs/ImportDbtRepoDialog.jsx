@@ -5,10 +5,12 @@
  *   3. "Load jaffle-shop demo" — one-click load of a known-good dbt project
  *
  * On submit we call `POST /api/dbt/import` (wraps `dm dbt import`) which
- * returns `{tree: [{path, content}], report}`. We hand the tree to
- * `workspaceStore.loadDbtImportTree` which populates the Explorer in-memory.
- * Nothing touches disk yet — writing the tree back to a real project folder
- * is PR C's scope.
+ * returns `{tree: [{path, content}], report, project?}`. For local-folder
+ * imports with "Edit in place" checked, the server also registers the folder
+ * as a DataLex project and returns it; the web-app then binds the tree to
+ * that project so Save All writes edits back into the original dbt repo
+ * at each file's source path. Without "Edit in place" (or for git/demo
+ * imports), the tree lives in memory only.
  *
  * The jaffle-shop demo tries a checked-in local fixture first (via Vite's
  * `import.meta.glob`) and falls back to the public git URL so `dm serve`
@@ -67,12 +69,16 @@ const TABS = [
 
 export default function ImportDbtRepoDialog() {
   const { closeModal, addToast } = useUiStore();
-  const { loadDbtImportTree } = useWorkspaceStore();
+  const { loadDbtImportTree, loadDbtImportTreeAsProject } = useWorkspaceStore();
 
   const [tab, setTab] = useState("demo");
 
   // Folder mode
   const [folder, setFolder] = useState("");
+  // When true, the api-server registers `folder` as a DataLex project and
+  // Save All writes edits back into that folder at each model's original
+  // dbt path. When false, the import stays in-memory (explore-only).
+  const [editInPlace, setEditInPlace] = useState(true);
 
   // Git mode
   const [gitUrl, setGitUrl] = useState("");
@@ -117,12 +123,37 @@ export default function ImportDbtRepoDialog() {
   };
 
   const handleFolder = async () => {
-    setProgress(`Importing ${folder.trim()}…`);
+    const dir = folder.trim();
+    setProgress(`Importing ${dir}…`);
     const res = await importDbtProject({
-      projectDir: folder.trim(),
+      projectDir: dir,
       skipWarehouse,
+      editInPlace: !!editInPlace,
     });
-    await ingestTree(res.tree || [], folder.trim());
+    const tree = res.tree || [];
+    // When the api-server registered a project for us, bind the tree to it so
+    // Save All writes back into the dbt repo. Otherwise fall back to the
+    // in-memory loader (explore-only).
+    if (editInPlace && res.project && res.project.id) {
+      await loadDbtImportTreeAsProject(tree, res.project);
+      const n = tree.length;
+      addToast({
+        type: "success",
+        message: `Opened ${dir} in place — ${n} file${n === 1 ? "" : "s"}. Save All writes back into this folder.`,
+      });
+      // Collision warning: shared schema.yml files will clobber sibling
+      // models on save until the Phase-2 merge path lands.
+      const collisions = useWorkspaceStore.getState().dbtImportCollisions || [];
+      if (collisions.length) {
+        addToast({
+          type: "warning",
+          message: `${collisions.length} shared schema file${collisions.length === 1 ? "" : "s"} detected; saves may overwrite sibling models. See Save All preview.`,
+        });
+      }
+      closeModal();
+      return;
+    }
+    await ingestTree(tree, dir);
   };
 
   const handleGit = async () => {
@@ -298,6 +329,34 @@ export default function ImportDbtRepoDialog() {
               Must contain <code>dbt_project.yml</code>. The folder is read, parsed, and
               laid out under its original <code>models/</code> and <code>seeds/</code> tree.
             </p>
+
+            <label
+              className="dlx-check"
+              style={{
+                display: "flex",
+                alignItems: "flex-start",
+                gap: 8,
+                marginTop: 12,
+                cursor: submitting ? "not-allowed" : "pointer",
+              }}
+            >
+              <input
+                type="checkbox"
+                checked={editInPlace}
+                onChange={(e) => setEditInPlace(e.target.checked)}
+                disabled={submitting}
+                style={{ marginTop: 2 }}
+              />
+              <span style={{ fontSize: 12 }}>
+                <strong>Edit in place</strong> — save changes back into this folder
+                <span style={{ display: "block", fontSize: 11, color: "var(--text-tertiary)", marginTop: 2, lineHeight: 1.5 }}>
+                  Registers this folder as a DataLex project. <strong>Save All</strong>{" "}
+                  writes edits back to each model's original <code>.yml</code> path so
+                  <code> git diff</code> shows normal dbt changes. Uncheck to explore
+                  read-only in memory.
+                </span>
+              </span>
+            </label>
           </div>
         )}
 

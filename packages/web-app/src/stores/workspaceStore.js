@@ -163,6 +163,12 @@ const useWorkspaceStore = create((set, get) => ({
   offlineMode: false,
   localDocuments: [],
 
+  // dbt editInPlace import: list of destination paths where multiple models
+  // collide on the same file (e.g. shared `schema.yml`). Populated by
+  // `loadDbtImportTreeAsProject` and used by the UI to warn the user that
+  // save will overwrite sibling models in those files.
+  dbtImportCollisions: [],
+
   // --- Project actions ---
   loadProjects: async () => {
     set({ loading: true, error: null });
@@ -420,6 +426,111 @@ const useWorkspaceStore = create((set, get) => ({
     } catch (_err) {
       // Safari private mode etc. — don't fail the import on storage errors.
     }
+  },
+
+  /**
+   * Variant of `loadDbtImportTree` that binds the imported tree to a real,
+   * registered DataLex project (`editInPlace` flow). Unlike the in-memory
+   * variant above:
+   *   - `offlineMode` stays false
+   *   - `activeProjectId` is set; `projects` list is refreshed
+   *   - each doc's `fullPath` is derived from `meta.datalex.dbt.source_path`
+   *     so Save All writes back to the *original* dbt file path (with
+   *     the original `.yml` extension), not a parallel `.yaml`
+   *   - every file is dirty (differs from disk) and localDocuments holds
+   *     the in-memory edit buffer until the user clicks Save All
+   *
+   * Known limitation: if the dbt project uses shared `schema.yml` files with
+   * multiple models, the save path will clobber sibling models in that file.
+   * Detected and warned; Phase 2 will route through `datalex generate dbt`
+   * for merge-safe writes.
+   */
+  loadDbtImportTreeAsProject: async (tree, project) => {
+    if (!Array.isArray(tree) || tree.length === 0) {
+      throw new Error("loadDbtImportTreeAsProject: empty tree — nothing to load.");
+    }
+    if (!project || !project.id || !project.path) {
+      throw new Error("loadDbtImportTreeAsProject: requires { id, path } project record.");
+    }
+
+    // Rewrite each imported doc's path to match its original dbt file:
+    // `models/staging/stg_customers.yaml` (importer convention) →
+    // `models/staging/stg_customers.yml` (what's actually in the dbt repo).
+    // Source-path metadata is carried under `meta.datalex.dbt.source_path`
+    // when available; otherwise we fall back to the importer-written path.
+    const rewritePath = (rawPath, yamlText) => {
+      let preferred = String(rawPath || "").replace(/^[/\\]+/, "");
+      try {
+        const doc = parseYamlObjectSafe(yamlText);
+        const srcPath =
+          doc?.meta?.datalex?.dbt?.source_path ||
+          doc?.meta?.datalex?.dbt?.original_file_path;
+        if (srcPath && typeof srcPath === "string") {
+          preferred = srcPath.replace(/^[/\\]+/, "");
+        }
+      } catch (_) { /* fall through */ }
+      // dbt repos almost always use `.yml`; the importer emits `.yaml`.
+      // Normalise so the save destination matches what `git diff` expects.
+      return preferred.replace(/\.yaml$/i, ".yml");
+    };
+
+    // Shape-B detector: count models per destination path. Any path that
+    // ends up with >1 doc is a multi-model schema.yml collision.
+    const destCounts = new Map();
+    const ts = Date.now();
+    const docs = tree.map((entry, i) => {
+      const content = String(entry.content || "");
+      const fullPath = rewritePath(entry.path || entry.fullPath, content);
+      destCounts.set(fullPath, (destCounts.get(fullPath) || 0) + 1);
+      const name = fullPath.split("/").pop() || `file-${i}.yml`;
+      return {
+        id: `dbt-import-${ts}-${i}`,
+        name,
+        fullPath,
+        path: fullPath,
+        content,
+      };
+    });
+
+    const collisions = Array.from(destCounts.entries()).filter(([, n]) => n > 1);
+
+    // Pick a sensible first-open: prefer staging, then marts, then anything.
+    const firstModel =
+      docs.find((d) => /models\/staging\/.*\.ya?ml$/i.test(d.fullPath)) ||
+      docs.find((d) => /models\/.*\.ya?ml$/i.test(d.fullPath)) ||
+      docs[0];
+
+    // Ensure the project is in the store. Refresh from the server to pick up
+    // any record we just created via /api/dbt/import.
+    const serverProjects = await fetchProjects().catch(() => []);
+    const mergedProjects = serverProjects.length
+      ? serverProjects
+      : [...(get().projects || []), project];
+
+    get()._snapshotActiveProject();
+
+    set({
+      offlineMode: false,
+      projects: mergedProjects,
+      activeProjectId: project.id,
+      openProjects: Array.from(new Set([...(get().openProjects || []), project.id])),
+      projectFiles: docs,
+      projectPath: project.path,
+      projectModelPath: "",
+      projectConfig: null,
+      // We still populate `localDocuments` so the edit buffer survives tab
+      // switches before the first save. Once Save All lands files on disk,
+      // subsequent reads come from the server like any other project.
+      localDocuments: docs,
+      openTabs: firstModel ? [firstModel] : [],
+      activeFile: firstModel || null,
+      activeFileContent: firstModel?.content || "",
+      originalContent: "", // empty so every file shows as dirty vs. "disk"
+      isDirty: !!firstModel,
+      loading: false,
+      error: null,
+      dbtImportCollisions: collisions.map(([p]) => p),
+    });
   },
 
   addProjectFolder: async (name, path, createIfMissing = false, options = {}) => {
