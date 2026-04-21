@@ -187,6 +187,7 @@ export default function RightPanel({
         rel={rel}
         relationships={relationships}
         onSelect={onSelectRel}
+        tables={tables}
       />
     );
   } else if (tab === "INDEXES") {

@@ -336,6 +336,32 @@ export function modelToFlow(doc) {
       fkToPk ? "#8b5cf6" :
       CARDINALITY_COLOR[cardinality] || "#455a64";
 
+    // Identifying vs non-identifying.
+    //   - Explicit: `relationship.identifying: true` in YAML.
+    //   - Auto: the FK column on the referencing side is itself part of
+    //     that entity's primary key (classic identifying pattern — child
+    //     rows can't exist without a parent, FK is in the PK).
+    // Rendering:
+    //   - Identifying     → solid stroke (default).
+    //   - Non-identifying → dashed stroke (weaker coupling).
+    // Self-references keep their own dash pattern (set above); this flag
+    // only changes the stroke for normal edges.
+    const explicitIdentifying =
+      rel?.identifying === true ||
+      rel?.kind === "identifying" ||
+      rel?.type === "identifying";
+    const explicitNonIdentifying =
+      rel?.identifying === false ||
+      rel?.kind === "non_identifying" ||
+      rel?.type === "non_identifying";
+    const autoIdentifying = Boolean(
+      (sourceField.primary_key && sourceField.foreign_key) ||
+      (targetField.primary_key && targetField.foreign_key)
+    );
+    const isIdentifying = explicitIdentifying
+      ? true
+      : (explicitNonIdentifying ? false : autoIdentifying);
+
     // Optionality: explicit relationship flags win; otherwise infer from field
     // nullability (nullable FK => optional on that end). Relationships default
     // to mandatory-mandatory when nothing is specified.
@@ -372,6 +398,7 @@ export function modelToFlow(doc) {
         sharedTargetCount,
         sourceOptional,
         targetOptional,
+        identifying: isIdentifying,
         description: toDisplayText(rel?.description, "")
       },
       markerStart,
@@ -379,7 +406,9 @@ export function modelToFlow(doc) {
       style: {
         stroke: edgeColor,
         strokeWidth: (isSelf || pkToFk || fkToPk) ? 2.4 : 2,
-        strokeDasharray: isSelf ? "6 4" : undefined,
+        // Self-links keep their signature dash; otherwise: solid for
+        // identifying, dashed for non-identifying (matches the legend).
+        strokeDasharray: isSelf ? "6 4" : (isIdentifying ? undefined : "5 3"),
       },
       labelStyle: { fill: "#475569", fontSize: 10, fontWeight: 600 },
       animated: cardinality === "many_to_many" || isSelf

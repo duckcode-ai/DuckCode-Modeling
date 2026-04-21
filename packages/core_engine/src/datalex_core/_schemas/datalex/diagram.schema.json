@@ -38,6 +38,42 @@
         }
       }
     },
+    "relationships": {
+      "description": "Cross-file relationships authored at the diagram level. Each entry connects two columns belonging to different model files referenced in `entities[]`; the edge is rendered on the canvas and persisted with the diagram rather than injected into the referenced model files. Use this for diagram-local FKs (drag-to-relate on the canvas, 'Add Relationship' dialog) that shouldn't mutate the underlying dbt / DataLex model YAML.",
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["from", "to"],
+        "additionalProperties": false,
+        "properties": {
+          "name": { "type": "string" },
+          "from": {
+            "type": "object",
+            "required": ["entity", "field"],
+            "additionalProperties": false,
+            "properties": {
+              "entity": { "type": "string" },
+              "field": { "type": "string" }
+            }
+          },
+          "to": {
+            "type": "object",
+            "required": ["entity", "field"],
+            "additionalProperties": false,
+            "properties": {
+              "entity": { "type": "string" },
+              "field": { "type": "string" }
+            }
+          },
+          "cardinality": {
+            "type": "string",
+            "enum": ["one_to_one", "one_to_many", "many_to_one", "many_to_many"]
+          },
+          "identifying": { "type": "boolean" },
+          "label": { "type": "string" }
+        }
+      }
+    },
     "viz": {
       "type": "object",
       "additionalProperties": true,

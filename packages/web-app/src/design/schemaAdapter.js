@@ -26,7 +26,12 @@ function columnsFromFields(fields) {
   return fields.map((f) => {
     const col = {
       name: String(f.name || ""),
-      type: String(f.type || "string"),
+      // Preserve whatever the YAML says verbatim (including "unknown",
+      // which the dbt importer writes when the manifest has no data_type).
+      // Legacy silent default of "string" masked uncompiled dbt projects —
+      // now we surface the gap so EntityNode can render "—" and Inspector
+      // can prompt the user to fill it in.
+      type: String(f.type ?? ""),
     };
     if (f.primary_key || f.pk) col.pk = true;
     if (f.nullable === false) col.nn = true;
@@ -198,7 +203,10 @@ function dbtModelToDataLexEntity(model) {
     })();
     const out = {
       name: String(c?.name || ""),
-      type: String(c?.data_type || c?.type || "string"),
+      // Preserve "unknown" / empty verbatim so downstream renderers can
+      // show the em-dash for untyped columns rather than silently
+      // coercing everything to "string".
+      type: String(c?.data_type ?? c?.type ?? ""),
     };
     if (hasNotNull) out.nullable = false;
     if (hasUnique) out.unique = true;
@@ -412,6 +420,36 @@ export function adaptDiagramYaml(yamlText, projectFiles) {
       if (relSeen.has(key)) return;
       relSeen.add(key);
       allRelationships.push(r);
+    });
+  });
+
+  // Merge diagram-level relationships (cross-file FKs authored on the
+  // canvas — drag-to-relate, "Add Relationship" dialog). These aren't
+  // written back into the referenced model files; they live only in the
+  // diagram YAML so a user can compose edges across dbt models without
+  // mutating the underlying schema. Shape matches the canonical
+  // relationships[] entries produced by adaptDataLexYaml: {from:{table,col},
+  // to:{table,col}, kind?, label?, ...}.
+  const diagramRels = Array.isArray(diagram.relationships) ? diagram.relationships : [];
+  diagramRels.forEach((r) => {
+    const fromEnt = String(r?.from?.entity || r?.from?.table || "").toLowerCase();
+    const fromCol = String(r?.from?.field || r?.from?.col || "").toLowerCase();
+    const toEnt = String(r?.to?.entity || r?.to?.table || "").toLowerCase();
+    const toCol = String(r?.to?.field || r?.to?.col || "").toLowerCase();
+    if (!fromEnt || !fromCol || !toEnt || !toCol) return;
+    const key = `${fromEnt}.${fromCol}->${toEnt}.${toCol}`;
+    if (relSeen.has(key)) return;
+    relSeen.add(key);
+    allRelationships.push({
+      from: { table: fromEnt, col: fromCol },
+      to: { table: toEnt, col: toCol },
+      kind: String(r?.cardinality || "many_to_one"),
+      identifying: !!r?.identifying,
+      label: r?.label ? String(r.label) : undefined,
+      name: r?.name ? String(r.name) : undefined,
+      // Tag as diagram-origin so the identifying/non-identifying renderer
+      // can tell it apart from model-file FKs if it ever needs to.
+      _diagramLevel: true,
     });
   });
 

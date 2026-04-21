@@ -805,7 +805,15 @@ export default function Shell() {
         onSelectTable={(id) => { handleSelect({ type: "table", id }); setCommandPaletteOpen(false); }}
         handlers={{
           newTable:        () => handleNewTable(),
-          newRelationship: () => addToast({ type: "info", message: "New relationship — use the YAML tab." }),
+          newRelationship: () => openModal("newRelationship", {
+            // Give the dialog a picker over the current diagram's entities
+            // so the user isn't forced to drag between column dots.
+            tables: (tables || []).map((t) => ({
+              id: t.id || t.name,
+              name: t.name || t.id,
+              columns: (t.columns || []).map((c) => ({ name: c.name })),
+            })),
+          }),
           autoLayout:      () => handleAutoLayout(),
           exportSql:       () => openModal("exportDdl"),
           cycleTheme:      () => cycleTheme(),

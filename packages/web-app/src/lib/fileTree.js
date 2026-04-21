@@ -35,11 +35,39 @@
  * Group files into a tree. Files with no `/` in their relative path land at
  * the root. Folders are created implicitly as files are inserted.
  *
+ * `extraFolderPaths` lets the caller seed empty folder nodes that wouldn't
+ * otherwise appear (the server's file walker only returns *.yaml/*.yml).
+ * The optimistic "New folder" path relies on this — a user-created empty
+ * folder shows up instantly in the Explorer, even before any file lands
+ * inside it.
+ *
  * @param {FileDescriptor[]} files
+ * @param {string[]} [extraFolderPaths] slash-joined folder paths to ensure
  * @returns {TreeNode[]}
  */
-export function buildFileTree(files) {
+export function buildFileTree(files, extraFolderPaths = []) {
   const root = { name: "", path: "", children: new Map() };
+
+  // Seed empty folder branches first so they appear even when no files
+  // live under them yet. Files added below will share these branches via
+  // the `has(seg)` check.
+  for (const raw of extraFolderPaths || []) {
+    const rel = normalise(raw).replace(/\/+$/, "");
+    if (!rel) continue;
+    const parts = rel.split("/").filter(Boolean);
+    let cursor = root;
+    for (const seg of parts) {
+      if (!cursor.children.has(seg)) {
+        cursor.children.set(seg, {
+          kind: "folder",
+          name: seg,
+          path: [cursor.path, seg].filter(Boolean).join("/"),
+          children: new Map(),
+        });
+      }
+      cursor = cursor.children.get(seg);
+    }
+  }
 
   for (const f of files || []) {
     const rel = relPathFor(f);

@@ -19,6 +19,7 @@ import {
   Download,
   Image,
   StickyNote,
+  GitBranch,
 } from "lucide-react";
 import useDiagramStore from "../../stores/diagramStore";
 import useUiStore from "../../stores/uiStore";
@@ -37,6 +38,8 @@ const REL_SEMANTIC_LEGEND = [
   { label: "FK->PK", color: "#8b5cf6", dash: false },
   { label: "Self relationship", color: "#f59e0b", dash: true },
   { label: "Shared PK target", color: "#0f766e", dash: false },
+  { label: "Identifying",      color: "#455a64", dash: false },
+  { label: "Non-identifying",  color: "#455a64", dash: true },
 ];
 
 function ToolbarSection({ children, className = "" }) {
@@ -97,9 +100,10 @@ export default function DiagramToolbar() {
     activeSchemaFilter,
     setActiveSchemaFilter,
     requestLayoutRefresh,
+    model,
   } = useDiagramStore();
 
-  const { diagramFullscreen, toggleDiagramFullscreen } = useUiStore();
+  const { diagramFullscreen, toggleDiagramFullscreen, openModal } = useUiStore();
   const { canEdit } = useAuthStore();
   const [showLegend, setShowLegend] = useState(false);
   const [showSchemaLegend, setShowSchemaLegend] = useState(false);
@@ -126,6 +130,17 @@ export default function DiagramToolbar() {
     const current = visibleLimit || totalEntities;
     const next = Math.max(1, Math.min(totalEntities, current + delta));
     setVisibleLimit(next === totalEntities ? 0 : next);
+  };
+
+  // Build a `tables` payload for NewRelationshipDialog's picker mode from
+  // the current diagram model. Dialog expects [{id, name, columns:[{name}]}].
+  const handleOpenNewRelationship = () => {
+    const entities = (model?.entities || []).map((e) => ({
+      id: e.name,
+      name: e.name,
+      columns: (e.fields || e.columns || []).map((f) => ({ name: f.name })),
+    }));
+    openModal("newRelationship", { tables: entities });
   };
 
   const handleLimitInputChange = (rawValue) => {
@@ -247,6 +262,14 @@ export default function DiagramToolbar() {
         <ToolbarButton onClick={() => requestLayoutRefresh()} title="Auto arrange and fit">
           <RefreshCw size={10} /> Auto Layout
         </ToolbarButton>
+        {canEdit() && (
+          <ToolbarButton
+            onClick={handleOpenNewRelationship}
+            title="Add a relationship between two entities"
+          >
+            <GitBranch size={10} /> Add Relationship
+          </ToolbarButton>
+        )}
         <ToolbarButton
           active={vizSettings.groupBySubjectArea}
           onClick={() => updateVizSetting("groupBySubjectArea", !vizSettings.groupBySubjectArea)}
@@ -377,10 +400,11 @@ export default function DiagramToolbar() {
               {REL_SEMANTIC_LEGEND.map((item) => (
                 <div key={item.label} className="flex items-center gap-2">
                   <div
-                    className="w-5 h-0.5 rounded-full"
+                    className="w-5 rounded-full"
                     style={{
-                      backgroundColor: item.color,
-                      borderTop: item.dash ? `1px dashed ${item.color}` : undefined,
+                      height: item.dash ? 0 : 2,
+                      backgroundColor: item.dash ? "transparent" : item.color,
+                      borderTop: item.dash ? `2px dashed ${item.color}` : undefined,
                     }}
                   />
                   <span className="text-[10px] text-slate-600">{item.label}</span>

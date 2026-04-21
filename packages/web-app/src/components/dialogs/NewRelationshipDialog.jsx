@@ -15,7 +15,7 @@ import Modal from "./Modal";
 import useUiStore from "../../stores/uiStore";
 import useWorkspaceStore from "../../stores/workspaceStore";
 import { addRelationship } from "../../lib/yamlRoundTrip";
-import { patchRelationship } from "../../design/yamlPatch";
+import { patchRelationship, addDiagramRelationship } from "../../design/yamlPatch";
 
 const CARDINALITIES = [
   { id: "one_to_one",   label: "One-to-one",   sub: "1 : 1" },
@@ -39,19 +39,54 @@ function defaultRelName(fromEntity, toEntity) {
 
 export default function NewRelationshipDialog() {
   const { closeModal, addToast, modalPayload } = useUiStore();
-  const fromEntity = String(modalPayload?.fromEntity || "");
-  const fromColumn = String(modalPayload?.fromColumn || "id");
-  const toEntity = String(modalPayload?.toEntity || "");
-  const toColumn = String(modalPayload?.toColumn || "id");
+  // Endpoint source: a drag on the canvas pre-fills from/to/columns and the
+  // dialog is a one-pane confirmation. The toolbar / command-palette / right-
+  // click paths send `tables:[{id,name,columns:[{name}]}]` in the payload and
+  // leave endpoints empty — the user picks them with dropdowns here.
+  const pickableTables = Array.isArray(modalPayload?.tables) ? modalPayload.tables : null;
+  const initFromEntity = String(modalPayload?.fromEntity || "");
+  const initFromColumn = String(modalPayload?.fromColumn || (initFromEntity ? "id" : ""));
+  const initToEntity = String(modalPayload?.toEntity || "");
+  const initToColumn = String(modalPayload?.toColumn || (initToEntity ? "id" : ""));
 
-  const [name, setName] = useState(() => defaultRelName(fromEntity, toEntity));
+  const [fromEntity, setFromEntity] = useState(initFromEntity);
+  const [fromColumn, setFromColumn] = useState(initFromColumn);
+  const [toEntity, setToEntity] = useState(initToEntity);
+  const [toColumn, setToColumn] = useState(initToColumn);
+
+  const [name, setName] = useState(() => defaultRelName(initFromEntity, initToEntity));
   const [cardinality, setCardinality] = useState("many_to_one");
   const [identifying, setIdentifying] = useState(false);
   const [optional, setOptional] = useState(false);
   const [onDelete, setOnDelete] = useState("");
   const [error, setError] = useState("");
 
-  const canSubmit = !!name.trim() && !!fromEntity && !!toEntity;
+  // When the user picks entities in picker mode, refresh the default name.
+  React.useEffect(() => {
+    if (pickableTables && fromEntity && toEntity) {
+      setName((prev) => {
+        const isDefault =
+          !prev || prev === defaultRelName(initFromEntity, initToEntity);
+        return isDefault ? defaultRelName(fromEntity, toEntity) : prev;
+      });
+    }
+  }, [fromEntity, toEntity, pickableTables, initFromEntity, initToEntity]);
+
+  const fromCols = React.useMemo(() => {
+    const hit = (pickableTables || []).find(
+      (t) => (t?.id || t?.name || "").toLowerCase() === fromEntity.toLowerCase()
+    );
+    return (hit?.columns || []).map((c) => c.name).filter(Boolean);
+  }, [pickableTables, fromEntity]);
+
+  const toCols = React.useMemo(() => {
+    const hit = (pickableTables || []).find(
+      (t) => (t?.id || t?.name || "").toLowerCase() === toEntity.toLowerCase()
+    );
+    return (hit?.columns || []).map((c) => c.name).filter(Boolean);
+  }, [pickableTables, toEntity]);
+
+  const canSubmit = !!name.trim() && !!fromEntity && !!toEntity && !!fromColumn && !!toColumn;
 
   const handleSubmit = (e) => {
     e.preventDefault();
@@ -59,6 +94,42 @@ export default function NewRelationshipDialog() {
     setError("");
 
     const s = useWorkspaceStore.getState();
+    // Detect diagram mode: when the active file is a .diagram.yaml, the FK
+    // should land in the diagram's top-level `relationships:` block — not
+    // injected into whichever referenced model file. Diagram YAML doesn't
+    // contain the endpoint entities at all (they're composed from other
+    // files), so addRelationship would fail the "entity exists" check.
+    const activeName = String(s.activeFile?.name || "");
+    const isDiagram = /\.diagram\.ya?ml$/i.test(activeName);
+
+    if (isDiagram) {
+      const next = addDiagramRelationship(s.activeFileContent, {
+        name: name.trim(),
+        from: { entity: fromEntity, field: fromColumn },
+        to: { entity: toEntity, field: toColumn },
+        cardinality,
+        identifying,
+        label: "",
+      });
+      if (!next) {
+        setError("Could not write to diagram YAML — check the file is a valid .diagram.yaml.");
+        return;
+      }
+      if (next === s.activeFileContent) {
+        setError("That relationship already exists on this diagram.");
+        return;
+      }
+      s.updateContent(next);
+      addToast({
+        type: "success",
+        message: `Linked ${fromEntity}.${fromColumn} → ${toEntity}.${toColumn} (diagram).`,
+      });
+      closeModal();
+      return;
+    }
+
+    // Model-file mode: fall through to the existing addRelationship path,
+    // which writes into `relationships:` inside the model YAML itself.
     const from = `${fromEntity}.${fromColumn}`;
     const to = `${toEntity}.${toColumn}`;
     const { yaml: next, error: err } = addRelationship(
@@ -95,9 +166,9 @@ export default function NewRelationshipDialog() {
     closeModal();
   };
 
-  // Defensive: the canvas should never fire this without both ends, but
-  // if modalProps was cleared by a re-render we bail gracefully.
-  if (!fromEntity || !toEntity) {
+  // Defensive: if the dialog opens with no endpoints AND no picker tables,
+  // we can't do anything — point the user back at the canvas.
+  if ((!fromEntity || !toEntity) && !pickableTables) {
     return (
       <Modal
         icon={<GitBranch size={14} />}
@@ -131,27 +202,103 @@ export default function NewRelationshipDialog() {
       }
     >
       <form id="new-rel-form" onSubmit={handleSubmit} style={{ display: "contents" }}>
-        {/* Endpoint summary */}
-        <div
-          style={{
-            display: "flex",
-            alignItems: "center",
-            gap: 8,
-            padding: "10px 12px",
-            background: "var(--bg-2)",
-            border: "1px solid var(--border-default)",
-            borderRadius: 8,
-            marginBottom: 14,
-            fontSize: 12,
-            fontFamily: "var(--font-mono, ui-monospace, Menlo, monospace)",
-          }}
-        >
-          <span style={{ color: "var(--text-primary)", fontWeight: 600 }}>{fromEntity}</span>
-          <span style={{ color: "var(--text-tertiary)" }}>.{fromColumn}</span>
-          <Link2 size={12} style={{ margin: "0 4px", color: "var(--text-tertiary)" }} />
-          <span style={{ color: "var(--text-primary)", fontWeight: 600 }}>{toEntity}</span>
-          <span style={{ color: "var(--text-tertiary)" }}>.{toColumn}</span>
-        </div>
+        {/* Endpoint picker (toolbar / command-palette entry) OR summary (drag). */}
+        {pickableTables ? (
+          <div className="dlx-modal-section" style={{ marginBottom: 14 }}>
+            <label className="dlx-modal-field-label">Endpoints</label>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr auto 1fr", gap: 8, alignItems: "end" }}>
+              {/* From side */}
+              <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                <span style={{ fontSize: 10, color: "var(--text-tertiary)", textTransform: "uppercase", letterSpacing: 0.4 }}>From</span>
+                <select
+                  className="panel-input"
+                  value={fromEntity}
+                  onChange={(e) => {
+                    setFromEntity(e.target.value);
+                    // Reset column to a sensible default whenever entity changes.
+                    const hit = pickableTables.find(
+                      (t) => (t?.id || t?.name || "").toLowerCase() === e.target.value.toLowerCase()
+                    );
+                    const cols = (hit?.columns || []).map((c) => c.name).filter(Boolean);
+                    setFromColumn(cols.includes("id") ? "id" : (cols[0] || ""));
+                  }}
+                >
+                  <option value="">Choose entity…</option>
+                  {pickableTables.map((t) => {
+                    const id = t?.id || t?.name;
+                    const label = t?.name || t?.id;
+                    return <option key={id} value={id}>{label}</option>;
+                  })}
+                </select>
+                <select
+                  className="panel-input"
+                  value={fromColumn}
+                  onChange={(e) => setFromColumn(e.target.value)}
+                  disabled={!fromEntity || fromCols.length === 0}
+                >
+                  <option value="">Choose column…</option>
+                  {fromCols.map((c) => <option key={c} value={c}>{c}</option>)}
+                </select>
+              </div>
+
+              <Link2 size={14} style={{ color: "var(--text-tertiary)", marginBottom: 10 }} />
+
+              {/* To side */}
+              <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                <span style={{ fontSize: 10, color: "var(--text-tertiary)", textTransform: "uppercase", letterSpacing: 0.4 }}>To</span>
+                <select
+                  className="panel-input"
+                  value={toEntity}
+                  onChange={(e) => {
+                    setToEntity(e.target.value);
+                    const hit = pickableTables.find(
+                      (t) => (t?.id || t?.name || "").toLowerCase() === e.target.value.toLowerCase()
+                    );
+                    const cols = (hit?.columns || []).map((c) => c.name).filter(Boolean);
+                    setToColumn(cols.includes("id") ? "id" : (cols[0] || ""));
+                  }}
+                >
+                  <option value="">Choose entity…</option>
+                  {pickableTables.map((t) => {
+                    const id = t?.id || t?.name;
+                    const label = t?.name || t?.id;
+                    return <option key={id} value={id}>{label}</option>;
+                  })}
+                </select>
+                <select
+                  className="panel-input"
+                  value={toColumn}
+                  onChange={(e) => setToColumn(e.target.value)}
+                  disabled={!toEntity || toCols.length === 0}
+                >
+                  <option value="">Choose column…</option>
+                  {toCols.map((c) => <option key={c} value={c}>{c}</option>)}
+                </select>
+              </div>
+            </div>
+          </div>
+        ) : (
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 8,
+              padding: "10px 12px",
+              background: "var(--bg-2)",
+              border: "1px solid var(--border-default)",
+              borderRadius: 8,
+              marginBottom: 14,
+              fontSize: 12,
+              fontFamily: "var(--font-mono, ui-monospace, Menlo, monospace)",
+            }}
+          >
+            <span style={{ color: "var(--text-primary)", fontWeight: 600 }}>{fromEntity}</span>
+            <span style={{ color: "var(--text-tertiary)" }}>.{fromColumn}</span>
+            <Link2 size={12} style={{ margin: "0 4px", color: "var(--text-tertiary)" }} />
+            <span style={{ color: "var(--text-primary)", fontWeight: 600 }}>{toEntity}</span>
+            <span style={{ color: "var(--text-tertiary)" }}>.{toColumn}</span>
+          </div>
+        )}
 
         <div className="dlx-modal-section">
           <label className="dlx-modal-field-label" htmlFor="rel-name">Name</label>

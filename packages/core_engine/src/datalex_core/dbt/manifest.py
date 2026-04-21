@@ -84,7 +84,35 @@ def import_manifest(
             # Record the dbt source path so writers can mirror the tree.
             result.source_paths["models"][doc["name"]] = model_path
 
+    # Count columns that landed as "unknown" — these come from manifest nodes
+    # without a populated `data_type` (i.e. the user hasn't run `dbt compile`
+    # or `dbt docs generate`). Surfacing the count lets the CLI + API server
+    # print a single actionable line instead of each column silently
+    # defaulting to a generic type.
+    unknown = _count_unknown_types(result)
+    if unknown > 0:
+        result.warnings.append(
+            f"{unknown} column(s) have no data type — run `dbt compile` "
+            "or `dbt docs generate` to populate types, or edit them inline "
+            "in the DataLex Inspector."
+        )
+
     return result
+
+
+def _count_unknown_types(result: ImportResult) -> int:
+    """Count how many columns in the import result have `type: unknown`."""
+    n = 0
+    for src in result.sources.values():
+        for tbl in src.get("tables", []) or []:
+            for c in tbl.get("columns", []) or []:
+                if c.get("type") == "unknown":
+                    n += 1
+    for mdl in result.models.values():
+        for c in mdl.get("columns", []) or []:
+            if c.get("type") == "unknown":
+                n += 1
+    return n
 
 
 def _common_source_path(tables: List[Dict[str, Any]]) -> str:
@@ -265,11 +293,16 @@ def _build_source_table_doc(
 
 def _build_source_column_doc(c: Dict[str, Any], prior: Dict[str, Any]) -> Dict[str, Any]:
     doc: Dict[str, Any] = {"name": c.get("name")}
-    # type: manifest owns it; prefer manifest value if present
+    # type: manifest owns it; prefer manifest value if present. Same
+    # "unknown" sentinel as _build_model_column_doc so the UI can flag
+    # columns that didn't pick up a real type (dbt manifest without
+    # `dbt compile`).
     if c.get("data_type"):
         doc["type"] = c["data_type"]
     elif prior.get("type"):
         doc["type"] = prior["type"]
+    else:
+        doc["type"] = "unknown"
 
     # user-authored: preserve
     for k in ("description", "sensitivity", "tags"):
@@ -340,10 +373,18 @@ def _build_model_doc(
 
 def _build_model_column_doc(c: Dict[str, Any], prior: Dict[str, Any]) -> Dict[str, Any]:
     doc: Dict[str, Any] = {"name": c.get("name")}
+    # Type precedence: dbt `data_type` (populated by `dbt compile` / `dbt docs
+    # generate`), then any prior user-authored type, then an explicit
+    # "unknown" sentinel. Writing "unknown" (rather than omitting `type:`)
+    # makes uncompiled dbt projects surface visibly in the UI — the web-app
+    # renders "unknown" columns as "—" and the caller prints a one-line
+    # warning at import time so users know to run `dbt compile`.
     if c.get("data_type"):
         doc["type"] = c["data_type"]
     elif prior.get("type"):
         doc["type"] = prior["type"]
+    else:
+        doc["type"] = "unknown"
 
     for k in ("description", "sensitivity", "tags", "terms", "tests", "constraints"):
         if prior.get(k):
