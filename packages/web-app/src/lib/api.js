@@ -1,5 +1,37 @@
 const BASE = "/api";
 
+// ApiError — thrown by `request()` on any non-2xx response. Carries the
+// structured envelope fields (`code`, `details`, HTTP `status`) so callers
+// can route on `err.code === "PATH_ESCAPE"` for targeted UX without
+// string-matching the message. Legacy routes that still return the old
+// `{ error: "string" }` shape produce an ApiError with code UNKNOWN so the
+// toast still shows something meaningful during the transition.
+export class ApiError extends Error {
+  constructor({ code, message, details, status }) {
+    super(message);
+    this.name = "ApiError";
+    this.code = code;
+    this.details = details;
+    this.status = status;
+  }
+}
+
+function parseErrorBody(body, status) {
+  // New envelope: { error: { code, message, details? } }
+  if (body && body.error && typeof body.error === "object") {
+    return {
+      code: body.error.code || "UNKNOWN",
+      message: body.error.message || `HTTP ${status}`,
+      details: body.error.details || null,
+    };
+  }
+  // Legacy envelope: { error: "message" }
+  if (body && typeof body.error === "string") {
+    return { code: "UNKNOWN", message: body.error, details: null };
+  }
+  return { code: "UNKNOWN", message: `HTTP ${status}`, details: null };
+}
+
 async function request(path, options = {}) {
   const res = await fetch(`${BASE}${path}`, {
     headers: { "Content-Type": "application/json" },
@@ -7,7 +39,8 @@ async function request(path, options = {}) {
   });
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
-    throw new Error(body.error || `HTTP ${res.status}`);
+    const parsed = parseErrorBody(body, res.status);
+    throw new ApiError({ ...parsed, status: res.status });
   }
   return res.json();
 }

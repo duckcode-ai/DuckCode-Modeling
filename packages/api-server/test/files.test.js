@@ -29,7 +29,8 @@ describe("POST /api/projects/:id/files", () => {
       .post(`/api/projects/${project.id}/files`)
       .send({ name: "../outside.yml", content: "" });
     assert.equal(res.status, 400);
-    assert.match(res.body.error, /inside project model path/);
+    assert.equal(res.body.error.code, "PATH_ESCAPE");
+    assert.match(res.body.error.message, /inside project model path/);
   });
 
   test("returns 409 on collision", async () => {
@@ -40,6 +41,7 @@ describe("POST /api/projects/:id/files", () => {
       .post(`/api/projects/${project.id}/files`)
       .send({ name: "dupe.yml", content: "" });
     assert.equal(res.status, 409);
+    assert.equal(res.body.error.code, "CONFLICT");
   });
 
   test("returns 400 when name is missing", async () => {
@@ -47,6 +49,7 @@ describe("POST /api/projects/:id/files", () => {
       .post(`/api/projects/${project.id}/files`)
       .send({ content: "x" });
     assert.equal(res.status, 400);
+    assert.equal(res.body.error.code, "VALIDATION");
   });
 
   test("returns 404 for unknown project", async () => {
@@ -54,6 +57,7 @@ describe("POST /api/projects/:id/files", () => {
       .post("/api/projects/proj_does_not_exist/files")
       .send({ name: "x.yml", content: "" });
     assert.equal(res.status, 404);
+    assert.equal(res.body.error.code, "NOT_FOUND");
   });
 });
 
@@ -84,6 +88,7 @@ describe("PATCH /api/projects/:id/files (rename)", () => {
       .patch(`/api/projects/${project.id}/files`)
       .send({ fromPath: "nope.yml", toPath: "also-nope.yml" });
     assert.equal(res.status, 404);
+    assert.equal(res.body.error.code, "NOT_FOUND");
   });
 
   test("returns 409 when destination exists", async () => {
@@ -91,6 +96,7 @@ describe("PATCH /api/projects/:id/files (rename)", () => {
       .patch(`/api/projects/${project.id}/files`)
       .send({ fromPath: "renamed.yml", toPath: "other.yml" });
     assert.equal(res.status, 409);
+    assert.equal(res.body.error.code, "CONFLICT");
   });
 
   test("rejects destination outside modelPath", async () => {
@@ -98,6 +104,7 @@ describe("PATCH /api/projects/:id/files (rename)", () => {
       .patch(`/api/projects/${project.id}/files`)
       .send({ fromPath: "renamed.yml", toPath: "../escape.yml" });
     assert.equal(res.status, 400);
+    assert.equal(res.body.error.code, "PATH_ESCAPE");
   });
 });
 
@@ -127,6 +134,7 @@ describe("DELETE /api/projects/:id/files", () => {
       .delete(`/api/projects/${project.id}/files`)
       .send({ path: "ghost.yml" });
     assert.equal(res.status, 404);
+    assert.equal(res.body.error.code, "NOT_FOUND");
   });
 
   test("rejects path escape", async () => {
@@ -134,6 +142,7 @@ describe("DELETE /api/projects/:id/files", () => {
       .delete(`/api/projects/${project.id}/files`)
       .send({ path: "../../secret.yml" });
     assert.equal(res.status, 400);
+    assert.equal(res.body.error.code, "PATH_ESCAPE");
   });
 });
 
@@ -179,6 +188,7 @@ describe("POST /api/projects/:id/save-all", () => {
     assert.equal(res.body.saved, 2);
     assert.equal(res.body.total, 3);
     const failed = res.body.results.find((r) => !r.ok);
+    assert.equal(failed.code, "PATH_ESCAPE");
     assert.match(failed.error, /inside project model path/);
   });
 
@@ -192,6 +202,7 @@ describe("POST /api/projects/:id/save-all", () => {
       });
     assert.equal(res.status, 200);
     assert.equal(res.body.saved, 0);
+    assert.equal(res.body.results[0].code, "VALIDATION");
     assert.match(res.body.results[0].error, /content must be a string/);
   });
 
@@ -200,5 +211,6 @@ describe("POST /api/projects/:id/save-all", () => {
       .post(`/api/projects/${project.id}/save-all`)
       .send({ files: [] });
     assert.equal(res.status, 400);
+    assert.equal(res.body.error.code, "VALIDATION");
   });
 });

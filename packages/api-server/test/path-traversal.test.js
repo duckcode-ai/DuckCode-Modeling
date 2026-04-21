@@ -45,6 +45,7 @@ describe("path traversal guardrails", () => {
         .post(`/api/projects/${project.id}/files`)
         .send({ name: attempt, content: "OVERWRITE" });
       assert.ok(res.status >= 400, `expected error status, got ${res.status}`);
+      assert.equal(res.body.error.code, "PATH_ESCAPE");
       assertBystanderIntact();
     });
 
@@ -52,9 +53,11 @@ describe("path traversal guardrails", () => {
       const res = await request(app)
         .delete(`/api/projects/${project.id}/files`)
         .send({ path: attempt });
-      // 400 (rejected upfront) or 404 (resolved inside modelPath, no such file)
-      // are both acceptable — what matters is the bystander survives.
+      // PATH_ESCAPE (rejected upfront) or NOT_FOUND (resolved inside modelPath,
+      // no such file) are both acceptable — what matters is the bystander
+      // survives.
       assert.ok(res.status >= 400, `expected error status, got ${res.status}`);
+      assert.ok(["PATH_ESCAPE", "NOT_FOUND"].includes(res.body.error.code));
       assertBystanderIntact();
     });
 
@@ -67,6 +70,8 @@ describe("path traversal guardrails", () => {
         (r) => !(r.ok && r.path && r.path.includes("SECRET")),
       );
       assert.ok(ok, "no result pointed at the bystander");
+      const failed = res.body.results.find((r) => !r.ok);
+      assert.equal(failed.code, "PATH_ESCAPE");
       assertBystanderIntact();
     });
   }
@@ -78,6 +83,7 @@ describe("path traversal guardrails", () => {
       .post(`/api/projects/${project.id}/files`)
       .send({ name: "/etc/passwd", content: "x" });
     assert.ok(res.status >= 400);
+    assert.equal(res.body.error.code, "PATH_ESCAPE");
     // Of course we didn't actually write to /etc/passwd — check bystander.
     assertBystanderIntact();
   });
