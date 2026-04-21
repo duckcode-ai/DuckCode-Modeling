@@ -3053,6 +3053,24 @@ app.post("/api/dbt/import", requireAdmin, express.json({ limit: "2mb" }), async 
     };
     walk(outDir);
 
+    // Seed an empty overview diagram so the post-import landing state is
+    // "blank canvas to build on" rather than "whichever source file
+    // happens to parse first". Only added if the import didn't already
+    // emit a .diagram.yaml of its own. The same doc flows through both
+    // the offline and edit-in-place frontend paths via the `tree`
+    // response, and is persisted to disk below in edit-in-place mode.
+    const hasDiagram = tree.some((e) => /\.diagram\.ya?ml$/i.test(e.path));
+    if (!hasDiagram) {
+      tree.push({
+        path: "datalex/diagrams/overview.diagram.yaml",
+        content:
+          "kind: diagram\n" +
+          "name: overview\n" +
+          "title: Overview\n" +
+          "entities: []\n",
+      });
+    }
+
     // Edit-in-place mode: materialise the imported YAMLs inside the user's
     // dbt folder so clicking a file in the Explorer can read it from disk.
     // We only write files that don't already exist — never clobber a
@@ -3065,7 +3083,12 @@ app.post("/api/dbt/import", requireAdmin, express.json({ limit: "2mb" }), async 
     const writeFailures = [];
     if (editInPlace && resolvedProjectDir) {
       for (const entry of tree) {
-        const destRel = entry.path.replace(/\.yaml$/i, ".yml");
+        // `.diagram.yaml` is a DataLex convention — keep that exact
+        // extension. Everything else (dbt model/source files) converts
+        // back to `.yml` to match what's on disk in a dbt repo.
+        const destRel = /\.diagram\.ya?ml$/i.test(entry.path)
+          ? entry.path
+          : entry.path.replace(/\.yaml$/i, ".yml");
         const destAbs = join(resolvedProjectDir, destRel);
         try {
           if (!existsSync(destAbs)) {

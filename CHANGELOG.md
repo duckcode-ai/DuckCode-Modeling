@@ -7,6 +7,34 @@ from `v0.1.0` onward.
 
 ## [Unreleased]
 
+## [1.0.3] — 2026-04-21
+
+Patch release — fixes the post-dbt-import landing UX so users land on
+a clean "build your first diagram" canvas instead of whichever source
+file parses first.
+
+### Changed
+
+- **dbt import seeds an empty overview diagram.** `/api/dbt/import`
+  now adds `datalex/diagrams/overview.diagram.yaml` (with
+  `entities: []`) to the response tree whenever the import didn't
+  already produce a `.diagram.yaml`. In edit-in-place mode the file
+  is persisted to disk alongside the other imported YAMLs.
+  - `packages/api-server/index.js` — tree-seed after `walk(outDir)`.
+- **Both import loaders open the diagram first.** `loadDbtImportTree`
+  and `loadDbtImportTreeAsProject` now pick a `.diagram.yaml` file as
+  the default tab when one is present, falling back to the old
+  staging → marts → anything ordering. The canvas opens empty with
+  the Add Entities CTA front-and-center instead of rendering a dbt
+  sources file's `tables:` list as if it were a diagram.
+  - `packages/web-app/src/stores/workspaceStore.js`.
+- **`.diagram.yaml` extension preserved** through the edit-in-place
+  path rewrite (previously `.yaml → .yml` was applied globally and
+  would have renamed any `.diagram.yaml` the importer produced).
+  - Both `packages/api-server/index.js` (server-side rewrite on disk
+    write) and `packages/web-app/src/stores/workspaceStore.js`
+    (client-side `rewritePath` in `loadDbtImportTreeAsProject`).
+
 ## [1.0.2] — 2026-04-21
 
 Patch release — reverts a shim-writer regression from v1.0.1 that

@@ -780,9 +780,13 @@ const useWorkspaceStore = create((set, get) => ({
       };
     });
 
-    // Pick a sensible first-open: prefer staging models, then marts, then
-    // anything else. Gives the user something recognisable on first click.
+    // Prefer an empty `.diagram.yaml` overview as the landing tab so the
+    // user sees a blank "build your first diagram" canvas instead of
+    // whichever source file happens to parse first. The api-server
+    // seeds `datalex/diagrams/overview.diagram.yaml` when none exists.
+    // Falls back to the previous staging → marts → anything ordering.
     const firstModel =
+      docs.find((d) => /\.diagram\.ya?ml$/i.test(d.fullPath)) ||
       docs.find((d) => /models\/staging\/.*\.ya?ml$/i.test(d.fullPath)) ||
       docs.find((d) => /models\/.*\.ya?ml$/i.test(d.fullPath)) ||
       docs[0];
@@ -860,6 +864,8 @@ const useWorkspaceStore = create((set, get) => ({
       } catch (_) { /* fall through */ }
       // dbt repos almost always use `.yml`; the importer emits `.yaml`.
       // Normalise so the save destination matches what `git diff` expects.
+      // `.diagram.yaml` is a DataLex convention — keep the full extension.
+      if (/\.diagram\.ya?ml$/i.test(preferred)) return preferred;
       return preferred.replace(/\.yaml$/i, ".yml");
     };
 
@@ -883,8 +889,11 @@ const useWorkspaceStore = create((set, get) => ({
 
     const collisions = Array.from(destCounts.entries()).filter(([, n]) => n > 1);
 
-    // Pick a sensible first-open: prefer staging, then marts, then anything.
+    // Prefer an empty `.diagram.yaml` overview (seeded by the api-server
+    // when the import didn't produce one) so the user lands on a blank
+    // canvas to build, not on whichever source file parses first.
     const firstModel =
+      docs.find((d) => /\.diagram\.ya?ml$/i.test(d.fullPath)) ||
       docs.find((d) => /models\/staging\/.*\.ya?ml$/i.test(d.fullPath)) ||
       docs.find((d) => /models\/.*\.ya?ml$/i.test(d.fullPath)) ||
       docs[0];
