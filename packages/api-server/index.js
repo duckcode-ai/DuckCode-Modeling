@@ -53,20 +53,24 @@ const PYTHON =
 //
 // `cmd_serve` may also set DM_CLI directly to override — useful for
 // integration tests.
-const REPO_DM_SCRIPT = join(REPO_ROOT, "dm");
-const REPO_DATALEX_SCRIPT = join(REPO_ROOT, "datalex");
+// The launcher script was renamed `dm → datalex` in Apr 2026. `REPO_DM_SCRIPT`
+// keeps the constant name for code-level compatibility but points at the
+// current filename. `REPO_DM_LEGACY` lets a dev on a pre-rename checkout
+// still boot.
+const REPO_DM_SCRIPT = join(REPO_ROOT, "datalex");
+const REPO_DM_LEGACY = join(REPO_ROOT, "dm");
 const DM_CLI_OVERRIDE = process.env.DM_CLI || null;
 const DM_CLI_KIND = (() => {
   if (DM_CLI_OVERRIDE && existsSync(DM_CLI_OVERRIDE)) return "python-script";
   if (DM_CLI_OVERRIDE) return "exec";  // bare command name on PATH
   if (existsSync(REPO_DM_SCRIPT)) return "python-script";
-  if (existsSync(REPO_DATALEX_SCRIPT)) return "python-script";
+  if (existsSync(REPO_DM_LEGACY)) return "python-script";
   return "exec"; // falls back to `datalex` on PATH
 })();
 const DM_CLI_TARGET = (() => {
   if (DM_CLI_OVERRIDE) return DM_CLI_OVERRIDE;
   if (existsSync(REPO_DM_SCRIPT)) return REPO_DM_SCRIPT;
-  if (existsSync(REPO_DATALEX_SCRIPT)) return REPO_DATALEX_SCRIPT;
+  if (existsSync(REPO_DM_LEGACY)) return REPO_DM_LEGACY;
   return "datalex";
 })();
 
@@ -2306,7 +2310,7 @@ app.post("/api/import", requireAdmin, express.json({ limit: "10mb" }), async (re
     writeFileSync(tmpFile, content, "utf-8");
 
     const args = [
-      join(REPO_ROOT, "dm"),
+      join(REPO_ROOT, "datalex"),
       "import",
       importFormat,
       tmpFile,
@@ -2397,7 +2401,7 @@ app.post("/api/forward/generate-sql", requireAdmin, express.json(), async (req, 
       return res.status(400).json({ error: "model_path is required" });
     }
 
-    const args = [join(REPO_ROOT, "dm"), "generate", "sql", String(model_path), "--dialect", String(dialect)];
+    const args = [join(REPO_ROOT, "datalex"), "generate", "sql", String(model_path), "--dialect", String(dialect)];
     if (out) args.push("--out", String(out));
 
     const output = execFileSync(PYTHON, args, { encoding: "utf-8", timeout: 120000, cwd: REPO_ROOT });
@@ -2428,7 +2432,7 @@ app.post("/api/model/transform", requireAdmin, express.json({ limit: "10mb" }), 
     const tmpModel = join(tmpDir, "model.yaml");
     writeFileSync(tmpModel, modelYaml, "utf-8");
 
-    const args = [join(REPO_ROOT, "dm"), "transform", String(transform), tmpModel];
+    const args = [join(REPO_ROOT, "datalex"), "transform", String(transform), tmpModel];
     if (transform === "logical-to-physical") {
       args.push("--dialect", String(dialect));
     }
@@ -2469,7 +2473,7 @@ app.post("/api/model/standards/check", requireAdmin, express.json({ limit: "10mb
     const tmpModel = join(tmpDir, "model.yaml");
     writeFileSync(tmpModel, modelYaml, "utf-8");
 
-    const args = [join(REPO_ROOT, "dm"), "standards", "check", tmpModel, "--output-json"];
+    const args = [join(REPO_ROOT, "datalex"), "standards", "check", tmpModel, "--output-json"];
     const output = execFileSync(PYTHON, args, { encoding: "utf-8", timeout: 120000, cwd: REPO_ROOT });
     res.json({ success: true, report: JSON.parse(output) });
   } catch (err) {
@@ -2490,7 +2494,7 @@ app.post("/api/model/standards/fix", requireAdmin, express.json({ limit: "10mb" 
     const tmpModel = join(tmpDir, "model.yaml");
     writeFileSync(tmpModel, modelYaml, "utf-8");
 
-    const args = [join(REPO_ROOT, "dm"), "standards", "fix", tmpModel];
+    const args = [join(REPO_ROOT, "datalex"), "standards", "fix", tmpModel];
     if (out) args.push("--out", String(out));
     const output = execFileSync(PYTHON, args, { encoding: "utf-8", timeout: 120000, cwd: REPO_ROOT });
     const fixedYaml = out ? readFileSync(String(out), "utf-8") : output.replace(/^#.*\n/gm, "").trimStart();
@@ -2533,7 +2537,7 @@ app.post("/api/model/sync/compare", requireAdmin, express.json({ limit: "10mb" }
     writeFileSync(currentFile, currentYaml, "utf-8");
     writeFileSync(candidateFile, candidateYaml, "utf-8");
 
-    const args = [join(REPO_ROOT, "dm"), "sync", "compare", currentFile, candidateFile];
+    const args = [join(REPO_ROOT, "datalex"), "sync", "compare", currentFile, candidateFile];
     if (allow_breaking) args.push("--allow-breaking");
 
     let output = "";
@@ -2574,7 +2578,7 @@ app.post("/api/model/sync/merge", requireAdmin, express.json({ limit: "10mb" }),
     writeFileSync(currentFile, currentYaml, "utf-8");
     writeFileSync(candidateFile, candidateYaml, "utf-8");
 
-    const args = [join(REPO_ROOT, "dm"), "sync", "merge", currentFile, candidateFile];
+    const args = [join(REPO_ROOT, "datalex"), "sync", "merge", currentFile, candidateFile];
     if (out) args.push("--out", String(out));
 
     const output = execFileSync(PYTHON, args, { encoding: "utf-8", timeout: 120000, cwd: REPO_ROOT });
@@ -2607,7 +2611,7 @@ app.post("/api/forward/completeness", express.json(), async (req, res) => {
     }
 
     const args = [
-      join(REPO_ROOT, "dm"),
+      join(REPO_ROOT, "datalex"),
       "completeness",
       String(model_path),
       "--output-json",
@@ -2642,7 +2646,7 @@ app.post("/api/forward/migrate", requireAdmin, express.json(), async (req, res) 
       return res.status(400).json({ error: "old_model and new_model are required" });
     }
 
-    const args = [join(REPO_ROOT, "dm"), "migrate", String(old_model), String(new_model), "--dialect", String(dialect)];
+    const args = [join(REPO_ROOT, "datalex"), "migrate", String(old_model), String(new_model), "--dialect", String(dialect)];
     if (out) args.push("--out", String(out));
 
     const output = execFileSync(PYTHON, args, { encoding: "utf-8", timeout: 120000, cwd: REPO_ROOT });
@@ -2702,7 +2706,7 @@ app.post("/api/forward/dbt-sync", requireAdmin, express.json({ limit: "5mb" }), 
     let errorMsg = "";
 
     try {
-      execFileSync(PYTHON, [join(REPO_ROOT, "dm"), "dbt", "sync", tmpModel, "--dbt-schema", tmpDbt, "--out", tmpOut], {
+      execFileSync(PYTHON, [join(REPO_ROOT, "datalex"), "dbt", "sync", tmpModel, "--dbt-schema", tmpDbt, "--out", tmpOut], {
         encoding: "utf-8",
         timeout: 30000,
         cwd: REPO_ROOT,
@@ -2824,7 +2828,7 @@ app.post("/api/dbt/import", requireAdmin, express.json({ limit: "2mb" }), async 
       typeof skipWarehouse === "boolean" ? skipWarehouse : Boolean(gitUrl);
 
     const cliArgs = [
-      join(REPO_ROOT, "dm"),
+      join(REPO_ROOT, "datalex"),
       "dbt",
       "import",
       "--project-dir",
@@ -3027,7 +3031,7 @@ app.post("/api/forward/apply", express.json({ limit: "10mb" }), async (req, res)
     }
 
     conn = buildConnArgs(params);
-    const args = [join(REPO_ROOT, "dm"), "apply", String(connector), "--dialect", String(dialect || connector), ...conn.args];
+    const args = [join(REPO_ROOT, "datalex"), "apply", String(connector), "--dialect", String(dialect || connector), ...conn.args];
 
     if (model_schema) args.push("--model-schema", String(model_schema));
     if (migration_name) args.push("--migration-name", String(migration_name));
@@ -3154,7 +3158,7 @@ function buildConnArgs(params) {
 app.get("/api/connectors", (req, res) => {
   try {
     const output = execFileSync(PYTHON, [
-      join(REPO_ROOT, "dm"), "connectors", "--output-json",
+      join(REPO_ROOT, "datalex"), "connectors", "--output-json",
     ], { encoding: "utf-8", timeout: 10000, cwd: REPO_ROOT });
     const connectors = JSON.parse(output);
     res.json(connectors);
@@ -3253,7 +3257,7 @@ app.post("/api/connectors/test", express.json(), async (req, res) => {
     if (!connector) return res.status(400).json({ error: "Missing connector type" });
 
     conn = buildConnArgs(params);
-    const args = [join(REPO_ROOT, "dm"), "pull", connector, "--test", ...conn.args];
+    const args = [join(REPO_ROOT, "datalex"), "pull", connector, "--test", ...conn.args];
 
     try {
       const output = execFileSync(PYTHON, args, { encoding: "utf-8", timeout: 30000, cwd: REPO_ROOT });
@@ -3317,7 +3321,7 @@ app.post("/api/connectors/schemas", express.json(), async (req, res) => {
     if (!connector) return res.status(400).json({ error: "Missing connector type" });
 
     conn = buildConnArgs(params);
-    const args = [join(REPO_ROOT, "dm"), "schemas", connector, "--output-json", ...conn.args];
+    const args = [join(REPO_ROOT, "datalex"), "schemas", connector, "--output-json", ...conn.args];
     const output = execFileSync(PYTHON, args, { encoding: "utf-8", timeout: 30000, cwd: REPO_ROOT });
     const schemas = JSON.parse(output);
     res.json(schemas);
@@ -3337,7 +3341,7 @@ app.post("/api/connectors/tables", express.json(), async (req, res) => {
     if (!connector) return res.status(400).json({ error: "Missing connector type" });
 
     conn = buildConnArgs(params);
-    const args = [join(REPO_ROOT, "dm"), "tables", connector, "--output-json", ...conn.args];
+    const args = [join(REPO_ROOT, "datalex"), "tables", connector, "--output-json", ...conn.args];
     const output = execFileSync(PYTHON, args, { encoding: "utf-8", timeout: 30000, cwd: REPO_ROOT });
     const tables = JSON.parse(output);
     res.json(tables);
@@ -3365,7 +3369,7 @@ app.post("/api/connectors/pull", express.json(), async (req, res) => {
     if (!connector) return res.status(400).json({ error: "Missing connector type" });
 
     conn = buildConnArgs(params);
-    const args = [join(REPO_ROOT, "dm"), "pull", connector, ...conn.args];
+    const args = [join(REPO_ROOT, "datalex"), "pull", connector, ...conn.args];
     if (model_name) { args.push("--model-name", model_name); }
     if (tables) {
       const tableList = typeof tables === "string" ? tables.split(",").map(t => t.trim()).filter(Boolean) : tables;
@@ -3453,7 +3457,7 @@ app.post("/api/connectors/pull-multi", express.json(), async (req, res) => {
         if (connector === "bigquery") schemaParams.dataset = schemaName;
         const schemaConn = buildConnArgs(schemaParams);
 
-        const args = [join(REPO_ROOT, "dm"), "pull", connector, ...baseConn.args, ...schemaConn.args];
+        const args = [join(REPO_ROOT, "datalex"), "pull", connector, ...baseConn.args, ...schemaConn.args];
         args.push("--model-name", schemaName);
 
         if (tablesToPull && Array.isArray(tablesToPull) && tablesToPull.length > 0) {
@@ -3574,7 +3578,7 @@ app.post("/api/connectors/pull/stream", express.json(), async (req, res) => {
     return res.end();
   }
 
-  const args = [join(REPO_ROOT, "dm"), "pull", connector, ...conn.args];
+  const args = [join(REPO_ROOT, "datalex"), "pull", connector, ...conn.args];
   if (model_name) args.push("--model-name", model_name);
   if (tables) {
     const list = typeof tables === "string"

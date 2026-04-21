@@ -34,6 +34,14 @@ drag-and-drop diagram workflow. Fixing it was the whole point.
   - `packages/web-app/tests/yamlPatchDiagram.test.js` — regression
     suite covering explicit match, wildcard fallback, repeated moves,
     and the null-fallback path.
+- **dbt import + every CLI shell-out works from a dev clone again.**
+  Commit `2cac0cc` (Apr 18) renamed the launcher `dm → datalex` but 17
+  call sites in `packages/api-server/index.js` still spawned
+  `<REPO_ROOT>/dm`, producing `can't open file '.../dm': [Errno 2]` on
+  dbt Import, Generate SQL, Transform, Standards, Sync, Pull,
+  Connectors, Apply, and every other flow that shells out. All call
+  sites now reference `<REPO_ROOT>/datalex`; the `dm` legacy path is
+  kept as a fallback so pre-rename checkouts still boot.
 
 ## [0.5.0] — 2026-04-21
 
