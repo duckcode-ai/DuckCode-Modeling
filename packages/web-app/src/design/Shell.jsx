@@ -52,6 +52,8 @@ const GitBranchDialog     = React.lazy(() => import("../components/dialogs/GitBr
 const ImportDbtRepoDialog = React.lazy(() => import("../components/dialogs/ImportDbtRepoDialog"));
 const NewRelationshipDialog = React.lazy(() => import("../components/dialogs/NewRelationshipDialog"));
 const BulkRenameColumnDialog = React.lazy(() => import("../components/dialogs/BulkRenameColumnDialog"));
+const ShareBundleDialog   = React.lazy(() => import("../components/dialogs/ShareBundleDialog"));
+const SnapshotsDialog     = React.lazy(() => import("../components/dialogs/SnapshotsDialog"));
 const ViewerWelcome       = React.lazy(() => import("../components/viewer/ViewerWelcome"));
 
 // The three main-canvas alternatives to the diagram. Lazy-loaded so the
@@ -966,6 +968,17 @@ export default function Shell() {
           { id: "import",     section: "Actions", label: "Import schema…",         meta: "",    icon: <span style={{ fontSize: 12 }}>⇩</span>,  run: () => openModal("importDialog") },
           { id: "import-dbt", section: "Actions", label: "Import dbt repo…",       meta: "",    icon: <span style={{ fontSize: 12 }}>⤓</span>,  run: () => openModal("importDbtRepo") },
           { id: "demo-jaffle",section: "Actions", label: "Load jaffle-shop demo",  meta: "",    icon: <span style={{ fontSize: 12 }}>✨</span>, run: () => openModal("importDbtRepo") },
+          // v0.5.0 — stakeholder-share + snapshot flows. Share opens the
+          // HTML bundle dialog prefilled from the currently-adapted schema;
+          // snapshots routes through the new git-tag API.
+          { id: "share-diagram", section: "Share", label: "Share diagram as HTML…", meta: "", icon: <span style={{ fontSize: 12 }}>⇪</span>, run: () => openModal("shareBundle", {
+            title: schema?.name || activeFile?.name?.replace(/\.(diagram|model)\.ya?ml$/i, "") || "Diagram",
+            projectName: (projects || []).find((p) => p.id === activeProjectId)?.name,
+            tables: filteredTables,
+            relationships: filteredRelationships,
+            subjectAreas: schema?.subjectAreas || [],
+          }) },
+          { id: "snapshot-manage", section: "Share", label: "Snapshots (git tags)…", meta: "", icon: <span style={{ fontSize: 12 }}>⛒</span>, run: () => activeProjectId && openModal("snapshots") },
         ]}
       />
 
@@ -982,6 +995,8 @@ export default function Shell() {
         {activeModal === "importDbtRepo"      && <ImportDbtRepoDialog />}
         {activeModal === "newRelationship"    && <NewRelationshipDialog />}
         {activeModal === "bulkRenameColumn"   && <BulkRenameColumnDialog />}
+        {activeModal === "shareBundle"        && <ShareBundleDialog />}
+        {activeModal === "snapshots"          && <SnapshotsDialog />}
         {activeModal === "gitBranch"          && <GitBranchDialog />}
         {activeModal === "welcome"            && <WelcomeModal onClose={closeModal} />}
       </React.Suspense>

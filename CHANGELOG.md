@@ -7,6 +7,58 @@ from `v0.1.0` onward.
 
 ## [Unreleased]
 
+## [0.5.0] — 2026-04-21
+
+First SQLDBM-parity minor: shareability. The v0.4.x line closed the
+last-mile modeling loop (bulk rename, domain navigation, git-diff
+overlay). v0.5.0 takes the next step — getting a diagram out of the
+tool and in front of a stakeholder, without a server, without a git
+checkout, without DataLex installed on the other end.
+
+### Added
+
+- **HTML share bundles.** New `Cmd-K → Share diagram as HTML…` opens a
+  `ShareBundleDialog` that generates a self-contained HTML file from
+  the currently adapted schema — entity cards grouped by subject area,
+  a relationships table with in-page anchors, a legend, and an inlined
+  stylesheet that honors `prefers-color-scheme`. The bundle has **zero
+  external dependencies** — drop it on S3, paste it in an email, open
+  it in any browser. Download + copy-to-clipboard + optional in-dialog
+  preview (sandboxed iframe so the preview can't exfiltrate).
+  - Generator lives in `packages/web-app/src/lib/shareBundle.js` with
+    `generateShareBundleHtml({...})` + `downloadShareBundle(html,
+    filename)` — both pure and testable.
+  - The bundle reuses the v0.4.1 domain-filter pipeline, so if you're
+    focused on one subject area the export is scoped to that area
+    automatically.
+- **Versioned snapshots via git tags.** New `Cmd-K → Snapshots (git
+  tags)…` opens a `SnapshotsDialog` that lists every tag in the repo
+  (annotated + lightweight) with commit hash, date, and subject, and
+  lets you create a new annotated tag on HEAD in one click. Name
+  auto-suggests the next `vMAJOR.MINOR` based on existing tags.
+  Deleting a tag only touches the local ref — remote cleanup remains
+  an explicit `git push --delete origin <tag>`.
+  - Three new API endpoints on `packages/api-server/index.js`:
+    `GET /api/git/tags`, `POST /api/git/tags`, `DELETE /api/git/tags`.
+    Tag-name validation mirrors git's own rules (no leading `-`, no
+    `.lock` suffix, restricted character set).
+  - API client additions: `fetchGitTags`, `createGitTag`, `deleteGitTag`
+    in `packages/web-app/src/lib/api.js`.
+
+### Changed
+
+- `Shell.jsx` command palette gains a "Share" section with the two new
+  entries. Both route through the existing `openModal`/`modalPayload`
+  plumbing — no new state stores.
+
+### Roadmap complete
+
+v0.5.0 closes out the v0.4+ SQLDBM-parity roadmap that landed in
+v0.3.3's plan: bulk refactor, diff overlay, domain nav, forward DDL
+(shipped earlier), read-only share, versioned snapshots. Next arc
+focuses on collaboration surfaces (comments, review requests,
+consumer-side schema subscriptions).
+
 ## [0.4.2] — 2026-04-21
 
 ### Added

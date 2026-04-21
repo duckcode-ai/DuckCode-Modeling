@@ -1194,6 +1194,144 @@ app.get("/api/git/branches", async (req, res) => {
   }
 });
 
+// Git: list tags — backs the v0.5.0 "Snapshots" UI where each tag is a
+// frozen view of a diagram state. Returns `{tags: [{name, commit, date,
+// subject, annotation}, ...]}` sorted newest-first. Uses `creatordate`
+// so annotated + lightweight tags both sort correctly (the tag's own
+// creation date for annotated, the target commit's committer date for
+// lightweight).
+app.get("/api/git/tags", async (req, res) => {
+  try {
+    const { projectId } = req.query;
+    const projectPath = await resolveProjectPath(String(projectId || "").trim());
+    if (!projectPath) return res.status(404).json({ error: "Project not found" });
+    if (!existsSync(projectPath)) return res.status(400).json({ error: "Project path does not exist" });
+    try {
+      // %(contents:subject) is populated for annotated tags; lightweight
+      // tags fall back to the target commit's subject via %(*subject).
+      const format = "%(refname:short)%x1f%(objectname:short)%x1f%(creatordate:iso-strict)%x1f%(subject)%x1f%(contents:subject)";
+      const output = runGit(
+        ["tag", "--list", "--sort=-creatordate", `--format=${format}`],
+        projectPath
+      );
+      const tags = output
+        .split("\n")
+        .filter(Boolean)
+        .map((line) => {
+          const [name, commit, date, commitSubject, annotation] = line.split("\x1f");
+          return {
+            name: name || "",
+            commit: commit || "",
+            date: date || "",
+            subject: (annotation || commitSubject || "").trim(),
+            annotated: !!annotation,
+          };
+        });
+      res.json({ ok: true, projectId, tags });
+    } catch (_err) {
+      res.json({ ok: true, projectId, tags: [] });
+    }
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Git: create an annotated tag. Default behavior is to annotate the
+// current HEAD so the snapshot captures the state the user is looking at.
+// `ref` may be passed to tag an arbitrary commit (power-user path; we
+// don't expose this in the UI yet).
+app.post("/api/git/tags", requireAdmin, express.json(), async (req, res) => {
+  try {
+    const { projectId, name, message, ref } = req.body || {};
+    const normalizedProjectId = String(projectId || "").trim();
+    if (!normalizedProjectId) {
+      return res.status(400).json({ error: "projectId is required" });
+    }
+    const tagName = String(name || "").trim();
+    if (!tagName) {
+      return res.status(400).json({ error: "tag name is required" });
+    }
+    // Lightweight guardrail — git rejects these but we'd rather 400 cleanly.
+    if (!/^[A-Za-z0-9._/\-]+$/.test(tagName) || tagName.startsWith("-") || tagName.endsWith(".lock")) {
+      return res.status(400).json({ error: "tag name contains invalid characters" });
+    }
+    const projectPath = await resolveProjectPath(normalizedProjectId);
+    if (!projectPath) return res.status(404).json({ error: "Project not found" });
+
+    const body = String(message || `Snapshot: ${tagName}`).trim();
+    const target = String(ref || "HEAD").trim();
+    if (!/^[A-Za-z0-9._/\-@]+$/.test(target)) {
+      return res.status(400).json({ error: "invalid ref" });
+    }
+
+    try {
+      runGit(["tag", "-a", tagName, "-m", body, target], projectPath);
+    } catch (err) {
+      const stderr = (err.stderr || err.message || "").toString();
+      if (stderr.includes("already exists")) {
+        return res.status(409).json({ error: `Tag "${tagName}" already exists` });
+      }
+      throw err;
+    }
+
+    // Re-read the tag we just made so the UI can refresh without a second
+    // GET. Lightweight format mirrors the list endpoint.
+    const format = "%(refname:short)%x1f%(objectname:short)%x1f%(creatordate:iso-strict)%x1f%(subject)%x1f%(contents:subject)";
+    const out = runGit(
+      ["tag", "--list", tagName, `--format=${format}`],
+      projectPath
+    ).trim();
+    const [, commit, date, commitSubject, annotation] = out.split("\x1f");
+    res.json({
+      ok: true,
+      tag: {
+        name: tagName,
+        commit: commit || "",
+        date: date || "",
+        subject: (annotation || commitSubject || "").trim(),
+        annotated: true,
+      },
+    });
+  } catch (err) {
+    const stderr = (err.stderr || err.message || "").toString();
+    if (stderr.includes("not a git repository")) {
+      return res.status(400).json({ error: "Selected project is not a git repository" });
+    }
+    res.status(500).json({ error: stderr.trim() || String(err.message || err) });
+  }
+});
+
+// Git: delete a local tag. Remote cleanup is a separate `git push --delete`
+// which we leave to the power-user flow; this only touches the local ref.
+app.delete("/api/git/tags", requireAdmin, express.json(), async (req, res) => {
+  try {
+    const { projectId, name } = req.body || {};
+    const normalizedProjectId = String(projectId || "").trim();
+    const tagName = String(name || "").trim();
+    if (!normalizedProjectId || !tagName) {
+      return res.status(400).json({ error: "projectId and name are required" });
+    }
+    if (!/^[A-Za-z0-9._/\-]+$/.test(tagName)) {
+      return res.status(400).json({ error: "tag name contains invalid characters" });
+    }
+    const projectPath = await resolveProjectPath(normalizedProjectId);
+    if (!projectPath) return res.status(404).json({ error: "Project not found" });
+    try {
+      runGit(["tag", "-d", tagName], projectPath);
+    } catch (err) {
+      const stderr = (err.stderr || err.message || "").toString();
+      if (stderr.includes("not found")) {
+        return res.status(404).json({ error: `Tag "${tagName}" not found` });
+      }
+      throw err;
+    }
+    res.json({ ok: true, deleted: tagName });
+  } catch (err) {
+    const stderr = (err.stderr || err.message || "").toString();
+    res.status(500).json({ error: stderr.trim() || String(err.message || err) });
+  }
+});
+
 // Git: get remote origin URL and detect GitHub repo
 app.get("/api/git/remote", async (req, res) => {
   try {

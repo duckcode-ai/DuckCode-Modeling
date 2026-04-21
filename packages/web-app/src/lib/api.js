@@ -83,6 +83,26 @@ export async function fetchGitRemote(projectId) {
   return request(`/git/remote?projectId=${encodeURIComponent(projectId)}`);
 }
 
+// v0.5.0 — git tag helpers backing the Snapshots dialog.
+export async function fetchGitTags(projectId) {
+  const data = await request(`/git/tags?projectId=${encodeURIComponent(projectId)}`);
+  return data.tags || [];
+}
+
+export async function createGitTag(projectId, { name, message, ref } = {}) {
+  return request(`/git/tags`, {
+    method: "POST",
+    body: JSON.stringify({ projectId, name, message, ref }),
+  });
+}
+
+export async function deleteGitTag(projectId, name) {
+  return request(`/git/tags`, {
+    method: "DELETE",
+    body: JSON.stringify({ projectId, name }),
+  });
+}
+
 export async function fetchProjectFiles(projectId) {
   const data = await request(`/projects/${projectId}/files`);
   return data;
