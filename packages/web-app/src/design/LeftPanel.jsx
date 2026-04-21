@@ -310,7 +310,7 @@ export default function LeftPanel({ activeTable, onSelectTable, tables, theme, s
             <span className="dot" style={{ width: 6, height: 6, borderRadius: "50%", background: "var(--status-success)" }} />
           </div>
 
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
+          <div data-tour="explorer-files" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
             <div style={{ fontSize: 11, color: "var(--text-tertiary)", letterSpacing: "0.06em", textTransform: "uppercase" }}>Files</div>
             <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
               {explorerReady && (
@@ -332,6 +332,7 @@ export default function LeftPanel({ activeTable, onSelectTable, tables, theme, s
                     <I.Folder />
                   </button>
                   <button
+                    data-tour="new-diagram"
                     className="icon-btn"
                     title="New diagram"
                     onClick={async () => {

@@ -52,9 +52,10 @@ function ToolbarDivider() {
   return <div className="w-px h-5 bg-slate-200 mx-0.5" />;
 }
 
-function ToolbarButton({ active, onClick, title, children, className = "" }) {
+function ToolbarButton({ active, onClick, title, children, className = "", ...rest }) {
   return (
     <button
+      {...rest}
       onClick={onClick}
       title={title}
       className={`flex items-center gap-1 px-2 py-1 rounded-md text-[11px] font-medium transition-all ${
@@ -268,6 +269,7 @@ export default function DiagramToolbar() {
         </ToolbarButton>
         {canEdit() && isDiagramFile && (
           <ToolbarButton
+            data-tour="add-entities"
             onClick={() => openModal("entityPicker")}
             title="Add one or more entities to this diagram"
           >
@@ -276,6 +278,7 @@ export default function DiagramToolbar() {
         )}
         {canEdit() && (
           <ToolbarButton
+            data-tour="add-relationship"
             onClick={handleOpenNewRelationship}
             title="Add a relationship between two entities"
           >

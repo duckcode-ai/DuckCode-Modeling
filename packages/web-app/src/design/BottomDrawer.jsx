@@ -124,6 +124,7 @@ export default function BottomDrawer({ tabs, children }) {
           {tabs.map(({ id, label, icon: Icon }) => (
             <button
               key={id}
+              data-tour={`panel-tab-${id}`}
               className={`bottom-drawer-tab ${bottomPanelTab === id ? "active" : ""}`}
               onClick={() => setBottomPanelTab(id)}
               title={label}

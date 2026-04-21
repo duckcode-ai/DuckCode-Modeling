@@ -1417,3 +1417,84 @@ body.drawer-resizing .bottom-drawer-resize-grip { opacity: 1; background: var(--
 .dlx-branch-row:disabled { cursor: not-allowed; }
 .dlx-branch-row .dlx-branch-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .dlx-branch-row .dlx-branch-check { color: var(--accent); }
+
+/* ── Onboarding tour — driver.js popover theming ────────────────────
+   We import driver.js/dist/driver.css from lib/onboardingTour.js, then
+   override just the tokens that matter so the popover sits inside the
+   DataLex visual system (same surface color as modals, same accent on
+   the Next button, monospace for inline <code> callouts). */
+.driver-popover.dl-tour-popover {
+  background: var(--bg-2);
+  color: var(--text-primary);
+  border: 1px solid var(--border-strong);
+  border-radius: 10px;
+  box-shadow: var(--shadow-pop, 0 12px 32px rgba(0, 0, 0, 0.28));
+  font-family: var(--font-body, inherit);
+  max-width: 340px;
+}
+.driver-popover.dl-tour-popover .driver-popover-title {
+  color: var(--text-primary);
+  font-size: 14px;
+  font-weight: 600;
+  margin: 0 0 6px 0;
+}
+.driver-popover.dl-tour-popover .driver-popover-description {
+  color: var(--text-secondary);
+  font-size: 12.5px;
+  line-height: 1.55;
+}
+.driver-popover.dl-tour-popover .driver-popover-description code {
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 11.5px;
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: var(--bg-1);
+  color: var(--text-primary);
+}
+.driver-popover.dl-tour-popover .driver-popover-description kbd {
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 11px;
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: var(--bg-1);
+  border: 1px solid var(--border-default);
+  color: var(--text-secondary);
+}
+.driver-popover.dl-tour-popover .driver-popover-progress-text {
+  color: var(--text-tertiary);
+  font-size: 10.5px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.driver-popover.dl-tour-popover .driver-popover-footer {
+  margin-top: 12px;
+  gap: 6px;
+}
+.driver-popover.dl-tour-popover .driver-popover-prev-btn,
+.driver-popover.dl-tour-popover .driver-popover-next-btn,
+.driver-popover.dl-tour-popover .driver-popover-close-btn {
+  font-family: inherit;
+  font-size: 12px;
+  padding: 6px 12px;
+  border-radius: 6px;
+  border: 1px solid var(--border-default);
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+  text-shadow: none;
+}
+.driver-popover.dl-tour-popover .driver-popover-next-btn {
+  background: var(--accent, #3b82f6);
+  border-color: var(--accent, #3b82f6);
+  color: #fff;
+  font-weight: 600;
+}
+.driver-popover.dl-tour-popover .driver-popover-next-btn:hover {
+  filter: brightness(1.05);
+}
+.driver-popover.dl-tour-popover .driver-popover-arrow-side-top.driver-popover-arrow,
+.driver-popover.dl-tour-popover .driver-popover-arrow-side-bottom.driver-popover-arrow,
+.driver-popover.dl-tour-popover .driver-popover-arrow-side-left.driver-popover-arrow,
+.driver-popover.dl-tour-popover .driver-popover-arrow-side-right.driver-popover-arrow {
+  border-color: var(--border-strong) transparent transparent transparent;
+}

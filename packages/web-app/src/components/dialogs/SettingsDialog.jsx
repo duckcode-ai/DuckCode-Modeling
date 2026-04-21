@@ -7,16 +7,18 @@
 import React from "react";
 import {
   Sun, Moon, Sparkles, Snowflake,
-  Keyboard, Info, SlidersHorizontal, Plug, Check,
+  Keyboard, Info, SlidersHorizontal, Plug, Check, Compass,
 } from "lucide-react";
 import useUiStore from "../../stores/uiStore";
 import { THEMES } from "../../design/notation";
+import { startOnboardingTour, resetOnboardingSeen } from "../../lib/onboardingTour";
 import Modal from "./Modal";
 
 const TABS = [
   { id: "appearance",  label: "Appearance",  icon: SlidersHorizontal },
   { id: "keyboard",    label: "Keyboard",    icon: Keyboard },
   { id: "connections", label: "Connections", icon: Plug },
+  { id: "help",        label: "Help & Tour", icon: Compass },
   { id: "about",       label: "About",       icon: Info },
 ];
 
@@ -81,6 +83,7 @@ export default function SettingsDialog() {
           {active === "appearance"  && <AppearancePane currentTheme={currentTheme} onPickTheme={pickTheme} />}
           {active === "keyboard"    && <KeyboardPane />}
           {active === "connections" && <ConnectionsPane />}
+          {active === "help"        && <HelpPane onClose={closeModal} />}
           {active === "about"       && <AboutPane />}
         </div>
       </div>
@@ -209,6 +212,74 @@ function ConnectionsPane() {
         <Plug size={12} />
         Open connections manager
       </button>
+    </div>
+  );
+}
+
+/* ─────────────────────────── Help & Tour ─────────────────────────── */
+function HelpPane({ onClose }) {
+  const handleReplay = () => {
+    onClose?.();
+    // Tour runs against the underlying shell, so we need the modal
+    // gone first. A short delay keeps the transition clean.
+    setTimeout(() => startOnboardingTour(), 120);
+  };
+  const handleResetAndReplay = () => {
+    resetOnboardingSeen();
+    handleReplay();
+  };
+  return (
+    <div className="dlx-settings-pane">
+      <header>
+        <h3 className="dlx-settings-pane-title">Onboarding tour</h3>
+        <p className="dlx-settings-pane-sub">
+          A quick spotlight tour of the icons and panels that matter —
+          import, diagram building, relationship validation, dangling
+          scan, and merge-safe save. Takes about 60 seconds.
+        </p>
+      </header>
+      <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+        <button type="button" className="panel-btn primary" onClick={handleReplay}>
+          <Compass size={12} /> Replay onboarding tour
+        </button>
+        <button
+          type="button"
+          className="panel-btn"
+          onClick={handleResetAndReplay}
+          title="Clear the 'seen' flag so the welcome modal appears again on the next page load"
+        >
+          Reset + replay from welcome
+        </button>
+      </div>
+
+      <section style={{ marginTop: 22 }}>
+        <div className="dlx-modal-section-heading" style={{ marginBottom: 8 }}>
+          Documentation
+        </div>
+        <ul
+          style={{
+            margin: 0,
+            padding: 0,
+            listStyle: "none",
+            display: "grid",
+            gap: 6,
+            fontSize: 13,
+          }}
+        >
+          {[
+            ["Getting started", "docs/getting-started.md"],
+            ["Jaffle-shop walkthrough (3 min)", "docs/tutorials/jaffle-shop-walkthrough.md"],
+            ["Import an existing dbt project", "docs/tutorials/import-existing-dbt.md"],
+            ["Pull a live warehouse", "docs/tutorials/warehouse-pull.md"],
+            ["CLI cheat sheet", "docs/cli.md"],
+          ].map(([label, path]) => (
+            <li key={path}>
+              <code style={{ fontSize: 12, color: "var(--text-tertiary)" }}>{path}</code>
+              <span style={{ marginLeft: 8, color: "var(--text-secondary)" }}>— {label}</span>
+            </li>
+          ))}
+        </ul>
+      </section>
     </div>
   );
 }

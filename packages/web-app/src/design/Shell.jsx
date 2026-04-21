@@ -22,6 +22,7 @@ import { DEMO_SCHEMA } from "./demoSchema";
 import { THEMES } from "./notation";
 import { adaptDataLexYaml, adaptDataLexModelYaml, adaptDiagramYaml } from "./schemaAdapter";
 import { appendEntity, deleteEntityDeep, setEntityDisplay, setDiagramEntityDisplay } from "./yamlPatch";
+import { shouldShowFirstRun } from "../lib/onboardingTour";
 
 import { fetchGitStatus } from "../lib/api";
 import {
@@ -56,6 +57,7 @@ const BulkRenameColumnDialog = React.lazy(() => import("../components/dialogs/Bu
 const ShareBundleDialog   = React.lazy(() => import("../components/dialogs/ShareBundleDialog"));
 const SnapshotsDialog     = React.lazy(() => import("../components/dialogs/SnapshotsDialog"));
 const ViewerWelcome       = React.lazy(() => import("../components/viewer/ViewerWelcome"));
+const OnboardingWelcomeDialog = React.lazy(() => import("../components/dialogs/OnboardingWelcomeDialog"));
 
 // The three main-canvas alternatives to the diagram. Lazy-loaded so the
 // initial bundle stays tight when the user only ever uses the diagram.
@@ -242,6 +244,20 @@ export default function Shell() {
 
   /* ── Keyboard shortcuts (match legacy App.jsx behavior) ────────── */
   const [showShortcuts, setShowShortcuts] = useState(false);
+
+  /* ── First-run onboarding welcome ──────────────────────────────────
+     Defer to an effect so SSR-style renders don't read localStorage,
+     and so we don't flash the modal before the shell has finished its
+     first paint. */
+  const [showOnboarding, setShowOnboarding] = useState(false);
+  React.useEffect(() => {
+    if (shouldShowFirstRun()) {
+      // Wait for the top-bar / explorer to mount before offering the
+      // tour — the user needs something behind the modal to look at.
+      const t = setTimeout(() => setShowOnboarding(true), 400);
+      return () => clearTimeout(t);
+    }
+  }, []);
   useEffect(() => {
     const handler = (e) => {
       const tag = (e.target.tagName || "").toLowerCase();
@@ -1013,6 +1029,7 @@ export default function Shell() {
         {activeModal === "snapshots"          && <SnapshotsDialog />}
         {activeModal === "gitBranch"          && <GitBranchDialog />}
         {activeModal === "welcome"            && <WelcomeModal onClose={closeModal} />}
+        {showOnboarding                       && <OnboardingWelcomeDialog onClose={() => setShowOnboarding(false)} />}
       </React.Suspense>
 
       {showShortcuts && <KeyboardShortcutsPanel onClose={() => setShowShortcuts(false)} />}

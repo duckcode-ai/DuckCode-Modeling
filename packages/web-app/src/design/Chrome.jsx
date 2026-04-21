@@ -74,7 +74,7 @@ export function TopBar({
           <button className="tool-btn" title="Open project" onClick={onOpenFile}><I.Folder /></button>
           <button className="tool-btn" title="Import schema (dbt / SQL / DBML)" onClick={onImport}><I.Download style={{ transform: "rotate(180deg)" }} /></button>
           {onImportDbt && (
-            <button className="tool-btn" title="Import dbt repo (folder / git / jaffle-shop demo)" onClick={onImportDbt}><I.Dep /></button>
+            <button data-tour="import-dbt" className="tool-btn" title="Import dbt repo (folder / git / jaffle-shop demo)" onClick={onImportDbt}><I.Dep /></button>
           )}
           <button className="tool-btn"
                   title={isDirty ? "Save (⌘S)" : "Nothing to save"}
@@ -85,7 +85,7 @@ export function TopBar({
             {isDirty && <span style={{ width: 6, height: 6, borderRadius: 3, background: "var(--accent)", marginLeft: 4 }} />}
           </button>
           {onSaveAll && (
-            <button className="tool-btn"
+            <button data-tour="save-all" className="tool-btn"
                     title="Save project (flush all edits to disk)"
                     onClick={onSaveAll}
                     disabled={!canSaveAll}
@@ -116,7 +116,7 @@ export function TopBar({
         <div className="tool-group">
           <button className="tool-btn" onClick={onRunSql}><I.Play />Run SQL</button>
           <button className="tool-btn" title="Commit (git)" onClick={onCommit}><I.Branch /></button>
-          <button className="tool-btn" title="Settings" onClick={onSettings}><I.Settings /></button>
+          <button data-tour="settings" className="tool-btn" title="Settings" onClick={onSettings}><I.Settings /></button>
         </div>
       </div>
       <button
