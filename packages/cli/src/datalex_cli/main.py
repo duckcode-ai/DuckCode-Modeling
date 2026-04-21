@@ -1465,31 +1465,51 @@ def cmd_serve(args: argparse.Namespace) -> int:
     env["DM_PYTHON"] = sys.executable
 
     # The api-server resolves the CLI script via `join(REPO_ROOT, "dm")`
-    # (and, post-rename, `join(REPO_ROOT, "datalex")`) in ~20 call sites.
-    # In a repo clone those files exist; in a pip install they don't.
-    # Writing small shims next to REPO_ROOT lets every existing callsite
-    # keep working without touching the api-server source. If a shim
-    # path is already present (dev clone), we leave it alone.
-    shim_body = (
-        "#!{py}\n"
-        "import sys\n"
-        "from datalex_cli.main import main\n"
-        "raise SystemExit(main())\n".format(py=sys.executable)
-    )
-    for shim_name in ("dm", "datalex"):
-        shim_path = Path(project_dir) / shim_name
-        if shim_path.exists():
-            continue
+    # in its `dmExec()` helper. In a repo clone that file exists; in a
+    # pip install it doesn't, so we drop a small shim next to REPO_ROOT.
+    # NOTE: we intentionally do NOT write a shim named `datalex` —
+    # `<project>/datalex/` is the canonical folder where DataLex stores
+    # diagrams (`datalex/diagrams/*.diagram.yaml`), and a file named
+    # `datalex` would collide with the `mkdir datalex/diagrams` that
+    # the Explorer does on "new diagram". The api-server's dmExec helper
+    # already handles the rename (falls back through `datalex` → `dm`
+    # → PATH) so the `dm` shim alone is sufficient.
+    dm_shim = Path(project_dir) / "dm"
+    if not dm_shim.exists():
         try:
-            shim_path.write_text(shim_body)
+            dm_shim.write_text(
+                "#!{py}\n"
+                "import sys\n"
+                "from datalex_cli.main import main\n"
+                "raise SystemExit(main())\n".format(py=sys.executable)
+            )
             try:
-                shim_path.chmod(0o755)
+                dm_shim.chmod(0o755)
             except Exception:
                 pass
         except Exception as err:
             # Read-only project dir is fine: we'll hit API errors for
             # subprocess-backed routes but the UI still loads.
-            print(f"[datalex] Note: could not write CLI shim at {shim_path}: {err}")
+            print(f"[datalex] Note: could not write CLI shim at {dm_shim}: {err}")
+
+    # Self-heal: if a previous 1.0.1 `datalex serve` run wrote a
+    # `datalex` file shim, remove it now so the diagrams folder can be
+    # created. We only remove it when it's a regular file (or symlink)
+    # under 1KB and starts with the shebang we wrote — never a folder
+    # that might be the user's real `datalex/` config dir.
+    stray_shim = Path(project_dir) / "datalex"
+    try:
+        if stray_shim.is_symlink() or (stray_shim.is_file() and stray_shim.stat().st_size < 1024):
+            head = ""
+            try:
+                head = stray_shim.read_text(errors="ignore")[:200]
+            except Exception:
+                pass
+            if "datalex_cli.main" in head or stray_shim.is_symlink():
+                stray_shim.unlink()
+                print(f"[datalex]   removed stale `datalex` shim at {stray_shim}")
+    except Exception:
+        pass
 
     # Auto-register the --project-dir folder as a DataLex project so the UI
     # opens directly into it instead of the "model-examples" default. We only

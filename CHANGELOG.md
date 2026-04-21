@@ -7,6 +7,28 @@ from `v0.1.0` onward.
 
 ## [Unreleased]
 
+## [1.0.2] — 2026-04-21
+
+Patch release — reverts a shim-writer regression from v1.0.1 that
+broke diagram creation for every pip-installed user.
+
+### Fixed
+
+- **`datalex/diagrams/` mkdir no longer collides with a file shim.**
+  v1.0.1 added a "belt-and-suspenders" change that had the CLI write
+  a file named `datalex` next to the project root in addition to the
+  existing `dm` shim. But `<project>/datalex/` is the canonical folder
+  DataLex uses for diagrams (`datalex/diagrams/*.diagram.yaml`), so
+  the file shim blocked `mkdir datalex/diagrams` with `ENOTDIR` when
+  the user clicked "new diagram". Fix: only write the `dm` shim; the
+  api-server's `dmExec()` helper (fixed in v1.0.1) already handles
+  the `datalex → dm → PATH` fallback without needing the file shim.
+  - `packages/cli/src/datalex_cli/main.py` — shim-writer no longer
+    creates a `datalex` file.
+- **Self-heal on upgrade.** If a previous v1.0.1 `datalex serve`
+  already wrote the stray file, the CLI now removes it on next start
+  (only when it's the shim we wrote — never a real user folder).
+
 ## [1.0.1] — 2026-04-21
 
 Patch release — fixes a launch-day regression where dbt project import
