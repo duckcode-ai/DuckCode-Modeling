@@ -925,6 +925,10 @@ app.get("/api/projects/:id/files", async (req, res) => {
     if (!existsSync(structure.modelPath)) {
       await mkdir(structure.modelPath, { recursive: true });
     }
+    // Project-open hook: keep the conventional diagrams folder visible in
+    // Explorer even for projects that weren't created via dbt import. Safe
+    // to call every time — idempotent and never rewrites existing files.
+    ensureDiagramsFolder(structure.modelPath);
 
     const files = await walkYamlFiles(structure.modelPath);
     res.json({
@@ -1976,6 +1980,24 @@ async function resolveProjectAndModelPath(projectId) {
 // later doc declares the same entity. The CLI still uses the richer Python
 // merge for two-way sync; this JS variant is scoped to the "N candidates,
 // no prior current" save-all path.
+// Ensure `datalex/diagrams/` exists under the given root. Idempotent —
+// never touches existing files; writes `.gitkeep` only when the folder
+// is freshly created so the empty folder round-trips through git.
+// Silent on errors (callers are project-open hooks, not actionable).
+function ensureDiagramsFolder(rootPath) {
+  try {
+    const diagramsDir = join(rootPath, "datalex", "diagrams");
+    if (!existsSync(diagramsDir)) {
+      mkdirSync(diagramsDir, { recursive: true });
+      const keepFile = join(diagramsDir, ".gitkeep");
+      if (!existsSync(keepFile)) writeFileSync(keepFile, "", "utf-8");
+    }
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, error: String(err?.message || err).slice(0, 400) };
+  }
+}
+
 function mergeDbtDocsForPath(docContents) {
   if (!Array.isArray(docContents) || docContents.length === 0) return "";
   if (docContents.length === 1) return docContents[0];
@@ -3058,20 +3080,14 @@ app.post("/api/dbt/import", requireAdmin, express.json({ limit: "2mb" }), async 
         }
       }
       // Seed `datalex/diagrams/` so the Explorer shows the conventional
-      // diagrams location immediately after import. `.gitkeep` keeps the
-      // empty dir round-trippable through git.
-      try {
-        const diagramsDir = join(resolvedProjectDir, "datalex", "diagrams");
-        if (!existsSync(diagramsDir)) {
-          mkdirSync(diagramsDir, { recursive: true });
-          const keepFile = join(diagramsDir, ".gitkeep");
-          if (!existsSync(keepFile)) writeFileSync(keepFile, "", "utf-8");
-        }
-      } catch (err) {
+      // diagrams location immediately after import. Shared with the
+      // project-open hook on GET /files.
+      const seed = ensureDiagramsFolder(resolvedProjectDir);
+      if (!seed.ok) {
         writeFailures.push({
           path: "datalex/diagrams/.gitkeep",
           code: "INTERNAL",
-          error: String(err?.message || err).slice(0, 400),
+          error: seed.error,
         });
       }
     }

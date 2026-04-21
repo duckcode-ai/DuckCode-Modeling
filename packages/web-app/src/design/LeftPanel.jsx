@@ -86,29 +86,57 @@ export default function LeftPanel({ activeTable, onSelectTable, tables, theme, s
         if (!name) return;
         const fullRel = joinChild(menu.target === "folder" ? menu.path : "", name);
         await createFolderAction(fullRel);
+      } else if (actionId === "new-diagram") {
+        const name = window.prompt("New diagram name:", "untitled");
+        if (!name) return;
+        // Drop the new .diagram.yaml into the clicked folder. Root target
+        // falls through to the default datalex/diagrams/ location.
+        const folder = menu.target === "folder" ? menu.path || "" : "";
+        await createNewDiagram(name, folder);
       } else if (actionId === "rename") {
         const current = menu.path || "";
         const next = window.prompt("Rename to (full path from model root):", current);
         if (!next || next === current) return;
+        // Phase 3.3 — preview reference-rewrite impact before we actually
+        // execute the rename. User sees the list of diagrams + manifests
+        // that will be rewritten so there's no surprise cascade.
+        const scope = menu.target === "folder" ? "folder" : "file";
+        const impact = await useWorkspaceStore.getState().previewRenameImpact(current, next, scope);
+        const promptText = useWorkspaceStore.getState().formatRenameImpactPrompt(current, next, impact);
+        const proceed = window.confirm(promptText);
+        if (!proceed) return;
         if (menu.target === "folder") await renameFolderAction(current, next);
         else await renameFileAction(current, next);
+        const cascade = useWorkspaceStore.getState().lastRenameCascade;
+        if (cascade?.filesUpdated?.length) {
+          addToast({
+            type: "info",
+            message: `Renamed to "${next}". Rewrote ${cascade.filesUpdated.length} related file${cascade.filesUpdated.length === 1 ? "" : "s"}.`,
+          });
+        }
+        if (cascade?.failures?.length) {
+          addToast({
+            type: "warning",
+            message: `Rename-cascade partially failed (${cascade.failures.length} file${cascade.failures.length === 1 ? "" : "s"}). See console.`,
+          });
+          console.warn("[datalex] rename-cascade failures:", cascade.failures);
+        }
       } else if (actionId === "move") {
         const current = menu.path || "";
         const next = window.prompt("Move to (full path from model root):", current);
         if (!next || next === current) return;
         await moveFileAction(current, next);
       } else if (actionId === "delete") {
-        if (menu.target === "folder") {
-          const confirmed = window.confirm(
-            `Delete folder "${menu.path}" and everything inside it? This cannot be undone.`
-          );
-          if (!confirmed) return;
-          await deleteFolderAction(menu.path);
-        } else {
-          const confirmed = window.confirm(`Delete "${menu.path}"? This cannot be undone.`);
-          if (!confirmed) return;
-          await deleteFileAction(menu.path);
-        }
+        // Phase 3.4 — preview the cascade before confirming. User sees how
+        // many diagrams + relationships will be affected so there's no
+        // silent data loss.
+        const scope = menu.target === "folder" ? "folder" : "file";
+        const impact = await useWorkspaceStore.getState().previewDeleteImpact(menu.path, scope);
+        const promptText = useWorkspaceStore.getState().formatDeleteImpactPrompt(menu.path, scope, impact);
+        const confirmed = window.confirm(promptText);
+        if (!confirmed) return;
+        if (scope === "folder") await deleteFolderAction(menu.path);
+        else await deleteFileAction(menu.path);
         // Surface the cascade: "also rewrote N file(s) to remove M reference(s)"
         // so the user isn't surprised by silent edits to sibling model files.
         const cascade = useWorkspaceStore.getState().lastDeleteCascade;
@@ -132,6 +160,7 @@ export default function LeftPanel({ activeTable, onSelectTable, tables, theme, s
   }, [
     joinChild,
     createNewFile,
+    createNewDiagram,
     createFolderAction,
     renameFileAction,
     renameFolderAction,

@@ -17,6 +17,7 @@ import {
   Edit3,
   Trash2,
   Scissors,
+  LayoutDashboard,
 } from "lucide-react";
 
 const ITEMS_BY_TARGET = {
@@ -28,12 +29,14 @@ const ITEMS_BY_TARGET = {
   folder: [
     { id: "new-file", label: "New file…", icon: FilePlus },
     { id: "new-folder", label: "New folder…", icon: FolderPlus },
+    { id: "new-diagram", label: "New diagram here…", icon: LayoutDashboard },
     { id: "rename", label: "Rename folder…", icon: Edit3 },
     { id: "delete", label: "Delete folder", icon: Trash2, danger: true },
   ],
   root: [
     { id: "new-file", label: "New file…", icon: FilePlus },
     { id: "new-folder", label: "New folder…", icon: FolderPlus },
+    { id: "new-diagram", label: "New diagram…", icon: LayoutDashboard },
   ],
 };
 

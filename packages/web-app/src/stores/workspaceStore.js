@@ -118,6 +118,270 @@ async function cascadeRemoveEntityReferences(projectId, deletedSubpath, entityNa
   return { filesUpdated, failures };
 }
 
+// --- Phase 3.3 rename impact helpers ------------------------------------
+// Scan every `.diagram.yaml` in the project for entity entries whose `file:`
+// field points at a path about to be renamed, and every `datalex.yaml` /
+// model file for `imports[].path:` entries under the same path. Returns a
+// structured impact report so the UI can preview + the cascade can rewrite.
+//
+// `fromPath` / `toPath` are POSIX subpaths relative to the project model
+// root (same shape as Explorer node.path values). `matchScope`:
+//   - "file"   → rewrites refs where `ref === fromPath`
+//   - "folder" → rewrites refs where `ref === fromPath` OR `ref` starts with `fromPath + "/"`
+function matchesRenameSource(ref, fromPath, matchScope) {
+  if (!ref) return false;
+  const normRef = String(ref).replace(/^\/+/, "");
+  if (normRef === fromPath) return true;
+  if (matchScope === "folder" && normRef.startsWith(fromPath + "/")) return true;
+  return false;
+}
+
+function rewriteRenameTarget(ref, fromPath, toPath) {
+  const normRef = String(ref).replace(/^\/+/, "");
+  if (normRef === fromPath) return toPath;
+  return toPath + normRef.slice(fromPath.length);
+}
+
+async function computeRenameImpact(projectId, fromPath, toPath, matchScope) {
+  const report = { diagramRefs: [], importRefs: [], filesToRewrite: [] };
+  try {
+    const { files } = await fetchProjectFiles(projectId);
+    const impactByFile = new Map();
+    for (const f of files || []) {
+      if (!f.path) continue;
+      const isDiagram = /\.diagram\.ya?ml$/.test(f.path);
+      const isModelOrManifest = /\.model\.ya?ml$|(^|\/)datalex\.ya?ml$/.test(f.path);
+      if (!isDiagram && !isModelOrManifest) continue;
+      // Skip files under the renamed subtree — they move with the folder,
+      // we don't need to rewrite them (the PATCH moves them as-is).
+      if (matchScope === "folder" && (f.path === fromPath || f.path.startsWith(fromPath + "/"))) continue;
+      if (matchScope === "file" && f.path === fromPath) continue;
+
+      let content;
+      try {
+        ({ content } = await fetchFileContent(f.fullPath));
+      } catch (_err) { continue; }
+      const doc = parseYamlObjectSafe(content);
+      if (!doc) continue;
+
+      let refs = 0;
+      if (isDiagram && Array.isArray(doc.entities)) {
+        for (const entry of doc.entities) {
+          if (matchesRenameSource(entry?.file, fromPath, matchScope)) {
+            refs += 1;
+            report.diagramRefs.push({
+              diagram: f.path,
+              oldRef: String(entry.file).replace(/^\/+/, ""),
+              newRef: rewriteRenameTarget(entry.file, fromPath, toPath),
+              entity: entry.entity || null,
+            });
+          }
+        }
+      }
+      if (isModelOrManifest && Array.isArray(doc.imports)) {
+        for (const imp of doc.imports) {
+          if (!imp || typeof imp !== "object") continue;
+          if (matchesRenameSource(imp.path, fromPath, matchScope)) {
+            refs += 1;
+            report.importRefs.push({
+              file: f.path,
+              oldRef: String(imp.path).replace(/^\/+/, ""),
+              newRef: rewriteRenameTarget(imp.path, fromPath, toPath),
+              package: imp.package || null,
+            });
+          }
+        }
+      }
+      if (refs > 0) {
+        impactByFile.set(f.path, { fullPath: f.fullPath, refs });
+      }
+    }
+    report.filesToRewrite = Array.from(impactByFile.entries()).map(([path, v]) => ({
+      path,
+      fullPath: v.fullPath,
+      refs: v.refs,
+    }));
+  } catch (_err) {
+    // Best-effort scan; surface an empty report rather than blocking the rename.
+  }
+  return report;
+}
+
+function formatRenameImpactPrompt(fromPath, toPath, report) {
+  const lines = [`Rename "${fromPath}" → "${toPath}"?`, ""];
+  if (report.filesToRewrite.length === 0) {
+    lines.push("No diagram or import references point at this path.");
+  } else {
+    const diagramFiles = report.filesToRewrite.filter((f) => /\.diagram\.ya?ml$/.test(f.path));
+    const modelFiles = report.filesToRewrite.filter((f) => !/\.diagram\.ya?ml$/.test(f.path));
+    lines.push(`This will rewrite ${report.diagramRefs.length + report.importRefs.length} reference(s) across ${report.filesToRewrite.length} file(s):`);
+    if (diagramFiles.length) {
+      lines.push(`  • ${diagramFiles.length} diagram(s):`);
+      for (const f of diagramFiles.slice(0, 6)) lines.push(`      ${f.path} (${f.refs} ref${f.refs === 1 ? "" : "s"})`);
+      if (diagramFiles.length > 6) lines.push(`      … and ${diagramFiles.length - 6} more`);
+    }
+    if (modelFiles.length) {
+      lines.push(`  • ${modelFiles.length} model/manifest file(s):`);
+      for (const f of modelFiles.slice(0, 6)) lines.push(`      ${f.path} (${f.refs} ref${f.refs === 1 ? "" : "s"})`);
+      if (modelFiles.length > 6) lines.push(`      … and ${modelFiles.length - 6} more`);
+    }
+  }
+  lines.push("", "Continue?");
+  return lines.join("\n");
+}
+
+// Apply a pre-computed rename impact: rewrite every affected file's
+// YAML `file:` / `imports[].path:` values. Best-effort per file — one
+// failure doesn't block the rest. Returns { filesUpdated, failures }
+// so callers can surface partial-success state.
+async function applyRenameCascade(projectId, report, fromPath, toPath, matchScope) {
+  const filesUpdated = [];
+  const failures = [];
+  for (const target of report.filesToRewrite) {
+    try {
+      const { content } = await fetchFileContent(target.fullPath);
+      const doc = parseYamlObjectSafe(content);
+      if (!doc) continue;
+      let mutated = false;
+      if (Array.isArray(doc.entities)) {
+        for (const entry of doc.entities) {
+          if (matchesRenameSource(entry?.file, fromPath, matchScope)) {
+            entry.file = rewriteRenameTarget(entry.file, fromPath, toPath);
+            mutated = true;
+          }
+        }
+      }
+      if (Array.isArray(doc.imports)) {
+        for (const imp of doc.imports) {
+          if (imp && typeof imp === "object" && matchesRenameSource(imp.path, fromPath, matchScope)) {
+            imp.path = rewriteRenameTarget(imp.path, fromPath, toPath);
+            mutated = true;
+          }
+        }
+      }
+      if (mutated) {
+        const next = yaml.dump(doc, { lineWidth: 120, noRefs: true, sortKeys: false });
+        await saveFileContent(target.fullPath, next);
+        filesUpdated.push(target.path);
+      }
+    } catch (err) {
+      failures.push({ path: target.path, error: err?.message || String(err) });
+    }
+  }
+  return { filesUpdated, failures };
+}
+
+// --- Phase 3.4 delete impact helpers ------------------------------------
+// Compute how many diagrams / relationships reference the entities defined
+// in the file (or folder) about to be deleted. Powers the confirmation
+// dialog so users don't silently lose references.
+async function computeDeleteImpact(projectId, subpath, scope) {
+  const report = { entities: [], diagrams: [], relationships: [], files: [] };
+  try {
+    const { files } = await fetchProjectFiles(projectId);
+    const allPaths = (files || []).filter((f) => f.path);
+
+    // Collect entity names defined in the doomed path(s).
+    let entityNames = [];
+    let doomedPaths = new Set();
+    if (scope === "folder") {
+      entityNames = await collectEntitiesInFolder(projectId, subpath);
+      const prefix = subpath.replace(/\/+$/, "") + "/";
+      for (const f of allPaths) {
+        if (f.path === subpath || f.path.startsWith(prefix)) doomedPaths.add(f.path);
+      }
+    } else {
+      entityNames = await collectEntitiesInFile(projectId, subpath);
+      doomedPaths.add(subpath);
+    }
+    report.entities = entityNames;
+    report.files = Array.from(doomedPaths);
+    if (entityNames.length === 0) return report;
+
+    const entityLower = new Set(entityNames.map((n) => String(n).toLowerCase()));
+
+    // Scan every surviving diagram for entity refs and every model file for
+    // relationship endpoints that reference one of the doomed entities.
+    for (const f of allPaths) {
+      if (doomedPaths.has(f.path)) continue;
+      const isDiagram = /\.diagram\.ya?ml$/.test(f.path);
+      const isModel = /\.model\.ya?ml$/.test(f.path);
+      if (!isDiagram && !isModel) continue;
+      let content;
+      try {
+        ({ content } = await fetchFileContent(f.fullPath));
+      } catch (_err) { continue; }
+      const doc = parseYamlObjectSafe(content);
+      if (!doc) continue;
+
+      if (isDiagram && Array.isArray(doc.entities)) {
+        const refs = [];
+        for (const entry of doc.entities) {
+          const fileRef = String(entry?.file || "").replace(/^\/+/, "");
+          const hitsDoomedFile = doomedPaths.has(fileRef);
+          const hitsDoomedName = entityLower.has(String(entry?.entity || "").toLowerCase());
+          if (hitsDoomedFile || hitsDoomedName) {
+            refs.push({ file: fileRef, entity: entry.entity || null });
+          }
+        }
+        if (refs.length) report.diagrams.push({ path: f.path, refs });
+      }
+      if (isModel && Array.isArray(doc.relationships)) {
+        for (const rel of doc.relationships) {
+          const fromEntity = String(rel?.from || "").split(".")[0] || "";
+          const toEntity = String(rel?.to || "").split(".")[0] || "";
+          if (entityLower.has(fromEntity.toLowerCase()) || entityLower.has(toEntity.toLowerCase())) {
+            report.relationships.push({
+              file: f.path,
+              name: rel.name || null,
+              from: rel.from || null,
+              to: rel.to || null,
+            });
+          }
+        }
+      }
+    }
+  } catch (_err) {
+    // Best-effort — fall back to an empty report rather than blocking delete.
+  }
+  return report;
+}
+
+function formatDeleteImpactPrompt(subpath, scope, report) {
+  const isFolder = scope === "folder";
+  const lines = [
+    isFolder
+      ? `Delete folder "${subpath}" and everything inside it?`
+      : `Delete "${subpath}"?`,
+    "",
+  ];
+  if (isFolder && report.files.length > 1) {
+    lines.push(`Removes ${report.files.length} file(s) from disk.`);
+  }
+  if (report.entities.length === 0) {
+    lines.push("No entities defined — nothing to cascade.");
+  } else {
+    lines.push(`${report.entities.length} entity name(s) will be removed:`);
+    const shown = report.entities.slice(0, 8);
+    for (const n of shown) lines.push(`  • ${n}`);
+    if (report.entities.length > 8) lines.push(`  … and ${report.entities.length - 8} more`);
+    lines.push("");
+    if (report.diagrams.length === 0 && report.relationships.length === 0) {
+      lines.push("No diagram or relationship references point at these entities.");
+    } else {
+      if (report.diagrams.length) {
+        const totalDiagramRefs = report.diagrams.reduce((acc, d) => acc + d.refs.length, 0);
+        lines.push(`${totalDiagramRefs} reference(s) in ${report.diagrams.length} diagram(s) will be removed.`);
+      }
+      if (report.relationships.length) {
+        lines.push(`${report.relationships.length} relationship(s) will be unwired.`);
+      }
+    }
+  }
+  lines.push("", "This cannot be undone. Continue?");
+  return lines.join("\n");
+}
+
 function parseYamlObjectSafe(text) {
   try {
     const doc = yaml.load(text);
@@ -268,6 +532,11 @@ const useWorkspaceStore = create((set, get) => ({
   // surface "we also rewrote N files to remove M dangling references".
   // Null when no delete has happened yet; reset on every deleteFile call.
   lastDeleteCascade: null,
+
+  // Summary of the most recent rename cascade (Phase 3.3) — consumed by
+  // toast/UX to surface "we also rewrote N files to point at the new
+  // path". Null when no rename has happened yet.
+  lastRenameCascade: null,
 
   // Loading states
   loading: false,
@@ -1189,16 +1458,21 @@ const useWorkspaceStore = create((set, get) => ({
     }
   },
 
-  /* Create a new .diagram.yaml file under `datalex/diagrams/`. The
-     diagram YAML starts as an empty `entities: []` so the canvas
-     renders an empty state until the user drags model files onto it. */
-  createNewDiagram: async (slug) => {
+  /* Create a new .diagram.yaml file. Defaults to `datalex/diagrams/` to
+     match the conventional layout, but accepts `targetFolder` so the
+     Explorer context-menu "New diagram here" can land it in the clicked
+     folder instead. Target folder is a POSIX subpath relative to the
+     project model root — same shape as Explorer node `path` values. */
+  createNewDiagram: async (slug, targetFolder = "") => {
     const clean = String(slug || "untitled")
       .trim()
       .toLowerCase()
       .replace(/[^a-z0-9_]+/g, "_")
       .replace(/^_+|_+$/g, "") || "untitled";
-    const subpath = `datalex/diagrams/${clean}.diagram.yaml`;
+    const folder = String(targetFolder || "").replace(/^\/+|\/+$/g, "");
+    const subpath = folder
+      ? `${folder}/${clean}.diagram.yaml`
+      : `datalex/diagrams/${clean}.diagram.yaml`;
     const content =
       `kind: diagram\n` +
       `name: ${clean}\n` +
@@ -1406,6 +1680,30 @@ const useWorkspaceStore = create((set, get) => ({
     }
   },
 
+  // Compute a rename impact report without mutating anything on disk.
+  // Thin wrapper around the module-level `computeRenameImpact` so callers
+  // (LeftPanel preview dialog) don't need to import the helper directly.
+  previewRenameImpact: async (fromPath, toPath, matchScope = "file") => {
+    const { activeProjectId, offlineMode } = get();
+    if (offlineMode || !activeProjectId) return { diagramRefs: [], importRefs: [], filesToRewrite: [] };
+    return computeRenameImpact(activeProjectId, fromPath, toPath, matchScope);
+  },
+
+  formatRenameImpactPrompt,
+
+  // Phase 3.4 — delete impact preview. Called by the Explorer context
+  // menu before the confirmation modal so users see which diagrams and
+  // relationships they're about to invalidate.
+  previewDeleteImpact: async (subpath, scope = "file") => {
+    const { activeProjectId, offlineMode } = get();
+    if (offlineMode || !activeProjectId) {
+      return { entities: [], diagrams: [], relationships: [], files: [] };
+    }
+    return computeDeleteImpact(activeProjectId, subpath, scope);
+  },
+
+  formatDeleteImpactPrompt,
+
   // Rename OR move a file — server treats both the same (it's just a rename
   // to a different subpath). If the file was open in a tab it's closed; if
   // it was the active file we re-open it at its new location.
@@ -1416,7 +1714,10 @@ const useWorkspaceStore = create((set, get) => ({
     if (!fromPath || !toPath) throw new Error("fromPath and toPath are required.");
     if (fromPath === toPath) return;
     const wasActive = !!(activeFile && activeFile.path === fromPath);
-    set({ loading: true, error: null });
+    set({ loading: true, error: null, lastRenameCascade: null });
+    // Scan for diagram/import references BEFORE the PATCH — we need the
+    // old path's references to know what to rewrite.
+    const impact = await computeRenameImpact(activeProjectId, fromPath, toPath, "file");
     try {
       const result = await renameProjectFile(activeProjectId, fromPath, toPath);
       // Drop any tab pointing at the old path.
@@ -1428,9 +1729,20 @@ const useWorkspaceStore = create((set, get) => ({
         isDirty: wasActive ? false : s.isDirty,
       }));
       const data = await fetchProjectFiles(activeProjectId);
+      // Rewrite diagram / imports refs that pointed at the old path, now
+      // that the rename itself succeeded. Best-effort per file.
+      const cascade = impact.filesToRewrite.length
+        ? await applyRenameCascade(activeProjectId, impact, fromPath, toPath, "file")
+        : { filesUpdated: [], failures: [] };
       set((s) => ({
         projectFiles: data.files || [],
         modelGraphVersion: (s.modelGraphVersion || 0) + 1,
+        lastRenameCascade: {
+          fromPath, toPath,
+          impact,
+          filesUpdated: cascade.filesUpdated,
+          failures: cascade.failures,
+        },
       }));
       if (wasActive && result?.file?.fullPath) {
         const moved = (data.files || []).find((f) => f.fullPath === result.file.fullPath);
@@ -1458,7 +1770,10 @@ const useWorkspaceStore = create((set, get) => ({
     const normalize = (p) => String(p).replace(/\/+$/, "");
     const fromNorm = normalize(fromPath);
     const toNorm = normalize(toPath);
-    set({ loading: true, error: null });
+    set({ loading: true, error: null, lastRenameCascade: null });
+    // Scan references BEFORE the PATCH moves files — afterwards the old
+    // paths don't exist so refs that still target them would be dangling.
+    const impact = await computeRenameImpact(activeProjectId, fromNorm, toNorm, "folder");
     try {
       await renameProjectFolder(activeProjectId, fromNorm, toNorm);
       const data = await fetchProjectFiles(activeProjectId);
@@ -1486,6 +1801,18 @@ const useWorkspaceStore = create((set, get) => ({
           loading: false,
         };
       });
+      const cascade = impact.filesToRewrite.length
+        ? await applyRenameCascade(activeProjectId, impact, fromNorm, toNorm, "folder")
+        : { filesUpdated: [], failures: [] };
+      set((s) => ({
+        modelGraphVersion: (s.modelGraphVersion || 0) + 1,
+        lastRenameCascade: {
+          fromPath: fromNorm, toPath: toNorm,
+          impact,
+          filesUpdated: cascade.filesUpdated,
+          failures: cascade.failures,
+        },
+      }));
     } catch (err) {
       set({ error: err.message, loading: false });
       throw err;
