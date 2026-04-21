@@ -26,6 +26,7 @@ export default function LeftPanel({ activeTable, onSelectTable, tables, theme, s
      explorer tree is self-contained — no need to thread two more props
      through Shell.jsx just to reach the workspace. */
   const projectFiles = useWorkspaceStore((s) => s.projectFiles);
+  const optimisticFolders = useWorkspaceStore((s) => s.optimisticFolders);
   const activeFullPath = useWorkspaceStore((s) => s.activeFile?.fullPath || "");
   const offlineMode = useWorkspaceStore((s) => s.offlineMode);
   // Note: `activeProjectId` comes from props (threaded from Shell) — don't
@@ -42,7 +43,10 @@ export default function LeftPanel({ activeTable, onSelectTable, tables, theme, s
   const deleteFolderAction = useWorkspaceStore((s) => s.deleteFolder);
   const createNewFile = useWorkspaceStore((s) => s.createNewFile);
   const createNewDiagram = useWorkspaceStore((s) => s.createNewDiagram);
-  const fileTree = React.useMemo(() => buildFileTree(projectFiles || []), [projectFiles]);
+  const fileTree = React.useMemo(
+    () => buildFileTree(projectFiles || [], optimisticFolders || []),
+    [projectFiles, optimisticFolders]
+  );
 
   const [folded, setFolded] = React.useState({});
   const toggleFolder = (path) => setFolded((s) => ({ ...s, [path]: !s[path] }));

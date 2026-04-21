@@ -1,7 +1,9 @@
 import React, { useState, useMemo } from "react";
 import { Handle, Position } from "@xyflow/react";
-import { Key, Fingerprint, ChevronDown, ChevronUp, ArrowRightLeft, Shield, Database, AlertTriangle } from "lucide-react";
+import { Key, Fingerprint, ChevronDown, ChevronUp, ArrowRightLeft, Shield, Database, AlertTriangle, GitBranch } from "lucide-react";
 import { getSchemaColor } from "../../lib/schemaColors";
+import useUiStore from "../../stores/uiStore";
+import useDiagramStore from "../../stores/diagramStore";
 
 function CompletenessIndicator({ score }) {
   if (score === null || score === undefined) return null;
@@ -53,7 +55,28 @@ const TAG_COLORS = {
   CONFIDENTIAL: "bg-red-50 text-red-700 border-red-200",
 };
 
-function FieldBadges({ field, entityName, classifications, indexedFields }) {
+// Small helper: detect enum-typed columns from either a stringy type
+// ("enum('a','b')", "enum[red,blue]") or a separate `enum:` list.
+function isEnumField(field) {
+  if (Array.isArray(field?.enum) && field.enum.length > 0) return true;
+  const t = String(field?.type || "").trim().toLowerCase();
+  return t.startsWith("enum(") || t.startsWith("enum<") || t.startsWith("enum[");
+}
+
+function enumValues(field) {
+  if (Array.isArray(field?.enum)) return field.enum;
+  const t = String(field?.type || "");
+  const m = t.match(/enum\s*[([<]\s*(.+?)\s*[)\]>]/i);
+  if (!m) return [];
+  return m[1].split(",").map((s) => s.trim().replace(/^['"]|['"]$/g, "")).filter(Boolean);
+}
+
+function findIndexForField(indexes, fieldName) {
+  if (!Array.isArray(indexes)) return null;
+  return indexes.find((idx) => Array.isArray(idx?.fields) && idx.fields.includes(fieldName)) || null;
+}
+
+function FieldBadges({ field, entityName, classifications, indexedFields, indexes }) {
   const classKey = `${entityName}.${field.name}`;
   const classification = classifications?.[classKey];
   const badges = [];
@@ -68,30 +91,48 @@ function FieldBadges({ field, entityName, classifications, indexedFields }) {
   }
   if (field.primary_key) {
     badges.push(
-      <span key="pk" className="flex items-center gap-0.5 px-1 py-0.5 rounded text-[9px] font-bold bg-amber-50 text-amber-700 border border-amber-200">
+      <span key="pk" className="flex items-center gap-0.5 px-1 py-0.5 rounded text-[9px] font-bold bg-amber-50 text-amber-700 border border-amber-200" title="Primary key">
         <Key size={8} />
         PK
       </span>
     );
   }
   if (field.foreign_key) {
+    const fkTarget = typeof field.foreign_key === "string"
+      ? field.foreign_key
+      : (field.foreign_key?.references || field.foreign_key?.table || "");
     badges.push(
-      <span key="fk" className="px-1 py-0.5 rounded text-[9px] font-bold bg-violet-50 text-violet-700 border border-violet-200">
+      <span
+        key="fk"
+        className="px-1 py-0.5 rounded text-[9px] font-bold bg-violet-50 text-violet-700 border border-violet-200"
+        title={fkTarget ? `Foreign key → ${fkTarget}` : "Foreign key"}
+      >
         FK
       </span>
     );
   }
   if (field.unique && !field.primary_key) {
     badges.push(
-      <span key="uq" className="flex items-center gap-0.5 px-1 py-0.5 rounded text-[9px] font-bold bg-cyan-50 text-cyan-700 border border-cyan-200">
+      <span key="uq" className="flex items-center gap-0.5 px-1 py-0.5 rounded text-[9px] font-bold bg-cyan-50 text-cyan-700 border border-cyan-200" title="Unique constraint">
         <Fingerprint size={8} />
         UQ
       </span>
     );
   }
   if (indexedFields?.has(field.name)) {
+    // Surface the index definition (fields + type + uniqueness) in the tooltip
+    // so users can distinguish composite/unique indexes without opening the
+    // inspector. Falls back to a plain label if no metadata is available.
+    const idxDef = findIndexForField(indexes, field.name);
+    const idxTip = idxDef
+      ? `Index: ${idxDef.name || "(unnamed)"} on (${(idxDef.fields || []).join(", ")})${idxDef.unique ? " · UNIQUE" : ""}${idxDef.type ? ` · ${idxDef.type}` : ""}`
+      : "Indexed column";
     badges.push(
-      <span key="idx" className="px-1 py-0.5 rounded text-[9px] font-bold bg-sky-50 text-sky-700 border border-sky-200">
+      <span
+        key="idx"
+        className="px-1 py-0.5 rounded text-[9px] font-bold bg-sky-50 text-sky-700 border border-sky-200"
+        title={idxTip}
+      >
         IDX
       </span>
     );
@@ -99,29 +140,61 @@ function FieldBadges({ field, entityName, classifications, indexedFields }) {
   if (field.sensitivity) {
     const cls = SENSITIVITY_COLORS[field.sensitivity] || SENSITIVITY_COLORS.internal;
     badges.push(
-      <span key="sens" className={`px-1 py-0.5 rounded text-[9px] font-bold border ${cls}`}>
+      <span key="sens" className={`px-1 py-0.5 rounded text-[9px] font-bold border ${cls}`} title={`Sensitivity: ${field.sensitivity}`}>
         {field.sensitivity.toUpperCase().slice(0, 4)}
       </span>
     );
   }
   if (field.computed) {
+    const formula = String(field.computed_expression || field.formula || field.computed === true ? "" : field.computed || "");
     badges.push(
-      <span key="comp" className="px-1 py-0.5 rounded text-[9px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">
+      <span
+        key="comp"
+        className="px-1 py-0.5 rounded text-[9px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200"
+        title={formula ? `Computed: ${formula}` : "Computed column"}
+      >
         COMP
       </span>
     );
   }
   if (field.check) {
+    // CHECK constraints are often the short pithy expression we want on
+    // hover — e.g. `length(email) > 3`. Support both string and object
+    // ({expression, name}) shapes.
+    const expr = typeof field.check === "string"
+      ? field.check
+      : (field.check?.expression || field.check?.expr || "");
     badges.push(
-      <span key="chk" className="px-1 py-0.5 rounded text-[9px] font-bold bg-pink-50 text-pink-700 border border-pink-200">
+      <span
+        key="chk"
+        className="px-1 py-0.5 rounded text-[9px] font-bold bg-pink-50 text-pink-700 border border-pink-200"
+        title={expr ? `CHECK: ${expr}` : "CHECK constraint"}
+      >
         CHK
       </span>
     );
   }
   if ("default" in field) {
+    const def = field.default === null ? "NULL" : String(field.default);
     badges.push(
-      <span key="def" className="px-1 py-0.5 rounded text-[9px] font-bold bg-gray-100 text-gray-600 border border-gray-200">
+      <span
+        key="def"
+        className="px-1 py-0.5 rounded text-[9px] font-bold bg-gray-100 text-gray-600 border border-gray-200"
+        title={`DEFAULT: ${def}`}
+      >
         DEF
+      </span>
+    );
+  }
+  if (isEnumField(field)) {
+    const vals = enumValues(field);
+    badges.push(
+      <span
+        key="enum"
+        className="px-1 py-0.5 rounded text-[9px] font-bold bg-indigo-50 text-indigo-700 border border-indigo-200"
+        title={vals.length ? `Enum: ${vals.join(", ")}` : "Enum column"}
+      >
+        ENUM
       </span>
     );
   }
@@ -182,6 +255,52 @@ function keySetLabel(keySet) {
 
 export default function EntityNode({ data }) {
   const [collapsed, setCollapsed] = useState(false);
+  // Right-click menu. `{x,y}` are viewport coordinates used to position the
+  // floating menu (closed when null). `null` means no menu open.
+  const [ctxMenu, setCtxMenu] = useState(null);
+  const openModal = useUiStore((s) => s.openModal);
+
+  const handleContextMenu = (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setCtxMenu({ x: e.clientX, y: e.clientY });
+  };
+
+  const closeCtxMenu = () => setCtxMenu(null);
+
+  const handleAddRelationshipFromHere = () => {
+    // Pull the full model so the dialog's picker can complete the `to` side.
+    const model = useDiagramStore.getState().model;
+    const entityList = (model?.entities || []).map((e) => ({
+      id: e.name,
+      name: e.name,
+      columns: (e.fields || e.columns || []).map((f) => ({ name: f.name })),
+    }));
+    const firstField = (data.fields || [])[0]?.name || "";
+    openModal("newRelationship", {
+      fromEntity: data.name,
+      fromColumn: firstField,
+      toEntity: "",
+      toColumn: "",
+      tables: entityList,
+    });
+    closeCtxMenu();
+  };
+
+  // Close the menu on any global click / escape. We install the listeners
+  // only while the menu is open to keep idle nodes cheap.
+  React.useEffect(() => {
+    if (!ctxMenu) return;
+    const onDown = () => closeCtxMenu();
+    const onKey = (e) => { if (e.key === "Escape") closeCtxMenu(); };
+    window.addEventListener("mousedown", onDown);
+    window.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("mousedown", onDown);
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [ctxMenu]);
+
   const modelingViewMode = data.modelingViewMode || "physical";
   const fieldView = data.fieldView || "all";
   const entityType = data.type || "table";
@@ -282,11 +401,60 @@ export default function EntityNode({ data }) {
     if (storage) modelingHints.push(`Storage: ${storage}`);
   }
 
+  // Floating right-click menu — rendered alongside whichever render path
+  // is active. Position-fixed to the viewport so it clears the node
+  // container's clipping.
+  const ctxMenuEl = ctxMenu ? (
+    <div
+      onMouseDown={(e) => e.stopPropagation()}
+      style={{
+        position: "fixed",
+        top: ctxMenu.y,
+        left: ctxMenu.x,
+        zIndex: 10000,
+        background: "white",
+        border: "1px solid #e2e8f0",
+        borderRadius: 6,
+        boxShadow: "0 4px 18px rgba(15, 23, 42, 0.15)",
+        minWidth: 200,
+        padding: 4,
+        fontSize: 12,
+      }}
+    >
+      <button
+        type="button"
+        onClick={handleAddRelationshipFromHere}
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: 8,
+          width: "100%",
+          padding: "6px 10px",
+          border: "none",
+          background: "transparent",
+          cursor: "pointer",
+          borderRadius: 4,
+          textAlign: "left",
+          color: "#1e293b",
+        }}
+        onMouseEnter={(e) => (e.currentTarget.style.background = "#f1f5f9")}
+        onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
+      >
+        <GitBranch size={12} />
+        <span>Add Relationship from here…</span>
+      </button>
+    </div>
+  ) : null;
+
   // Compact dot mode for large models
   if (data.compactMode) {
     const relCount = data.relationshipCount || 0;
     return (
-      <div className={`w-[140px] rounded-lg border ${colors.border} bg-white shadow-sm overflow-hidden flex`}>
+      <>
+      <div
+        onContextMenu={handleContextMenu}
+        className={`w-[140px] rounded-lg border ${colors.border} bg-white shadow-sm overflow-hidden flex`}
+      >
         <div className={`w-1 shrink-0 ${schemaColor.bg}`} />
         <Handle type="target" position={Position.Left} className="!bg-blue-500 !border-white !w-2 !h-2" />
         <div className={`bg-gradient-to-r ${colors.bg} px-2 py-1.5 flex-1 min-w-0`}>
@@ -305,6 +473,8 @@ export default function EntityNode({ data }) {
         </div>
         <Handle type="source" position={Position.Right} className="!bg-blue-500 !border-white !w-2 !h-2" />
       </div>
+      {ctxMenuEl}
+      </>
     );
   }
 
@@ -327,7 +497,11 @@ export default function EntityNode({ data }) {
   const relCount = data.relationshipCount || 0;
 
   return (
-    <div className={`w-[280px] rounded-lg border ${colors.border} bg-white shadow-md shadow-slate-200/60 overflow-hidden flex`}>
+    <>
+    <div
+      onContextMenu={handleContextMenu}
+      className={`w-[280px] rounded-lg border ${colors.border} bg-white shadow-md shadow-slate-200/60 overflow-hidden flex`}
+    >
       {/* Schema color accent bar */}
       <div className={`w-1.5 shrink-0 ${schemaColor.bg}`} />
 
@@ -436,10 +610,29 @@ export default function EntityNode({ data }) {
                 {field.name}
                 {field.deprecated && <AlertTriangle size={8} className="inline ml-0.5 text-amber-500" />}
               </span>
-              {!isConceptual && <span className="font-mono text-slate-400 text-[10px] shrink-0">{field.type}</span>}
-              {!isConceptual && <FieldBadges field={field} entityName={data.name} classifications={classifications} indexedFields={indexedFields} />}
-              {isPhysical && field.nullable === false && (
-                <span className="text-[8px] text-accent-red font-bold">NN</span>
+              {!isConceptual && (() => {
+                // "unknown" / empty type → em-dash. The dbt importer writes
+                // "unknown" when a manifest node has no data_type (user hasn't
+                // run `dbt compile`). Rendering the raw string would look like
+                // a real type; the em-dash signals "fill me in" and pairs with
+                // the Inspector's inline type editor.
+                const t = String(field.type || "").trim();
+                const isUnknown = !t || t.toLowerCase() === "unknown";
+                return (
+                  <span
+                    className={`font-mono text-[10px] shrink-0 ${isUnknown ? "text-slate-300 italic" : "text-slate-400"}`}
+                    title={isUnknown ? "Type not set — click Inspector to fill in (or run `dbt compile`)." : t}
+                  >
+                    {isUnknown ? "—" : field.type}
+                  </span>
+                );
+              })()}
+              {!isConceptual && <FieldBadges field={field} entityName={data.name} classifications={classifications} indexedFields={indexedFields} indexes={entityIndexes} />}
+              {/* NN across all views — legend documents NN and until now it
+                  only rendered in physical mode. Logical/conceptual users
+                  need the same visual cue for required columns. */}
+              {!isConceptual && field.nullable === false && (
+                <span className="text-[8px] text-accent-red font-bold" title="NOT NULL">NN</span>
               )}
             </div>
           ))}
@@ -459,5 +652,7 @@ export default function EntityNode({ data }) {
       <Handle type="source" position={Position.Right} className="!bg-blue-500 !border-white !w-2 !h-2" />
       </div>{/* end flex-1 wrapper */}
     </div>
+    {ctxMenuEl}
+    </>
   );
 }

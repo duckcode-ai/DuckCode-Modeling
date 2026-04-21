@@ -284,6 +284,46 @@ export function addDiagramEntries(yamlText, newEntries) {
   return dump(doc);
 }
 
+/* Append a diagram-level relationship to a `.diagram.yaml` document.
+ * Diagram-level relationships carry FKs authored on the canvas (drag-to-
+ * relate, "Add Relationship" dialog) without mutating any of the
+ * referenced model files. Shape matches `diagram.schema.json`:
+ *   {name, from:{entity,field}, to:{entity,field}, cardinality,
+ *    identifying?, label?}
+ *
+ * Dedupes by `{from, to}` endpoint pair — the same edge authored twice
+ * is a no-op. Returns new YAML text, or null when the doc doesn't
+ * parse as an object. */
+export function addDiagramRelationship(yamlText, rel) {
+  const doc = loadDoc(yamlText);
+  if (!doc) return null;
+  const fromEnt = String(rel?.from?.entity || "").trim();
+  const fromFld = String(rel?.from?.field || "").trim();
+  const toEnt = String(rel?.to?.entity || "").trim();
+  const toFld = String(rel?.to?.field || "").trim();
+  if (!fromEnt || !fromFld || !toEnt || !toFld) return null;
+
+  if (!Array.isArray(doc.relationships)) doc.relationships = [];
+  const dupe = doc.relationships.some((r) =>
+    String(r?.from?.entity || "").toLowerCase() === fromEnt.toLowerCase() &&
+    String(r?.from?.field || "").toLowerCase() === fromFld.toLowerCase() &&
+    String(r?.to?.entity || "").toLowerCase() === toEnt.toLowerCase() &&
+    String(r?.to?.field || "").toLowerCase() === toFld.toLowerCase()
+  );
+  if (dupe) return yamlText;
+
+  const entry = {
+    name: rel?.name ? String(rel.name) : `${fromEnt}_to_${toEnt}`.toLowerCase(),
+    from: { entity: fromEnt, field: fromFld },
+    to: { entity: toEnt, field: toFld },
+  };
+  if (rel?.cardinality) entry.cardinality = String(rel.cardinality);
+  if (rel?.identifying) entry.identifying = true;
+  if (rel?.label) entry.label = String(rel.label);
+  doc.relationships.push(entry);
+  return dump(doc);
+}
+
 /* Patch a relationship by name. `patch` may set any of:
      { name, from, to, cardinality, on_delete, on_update, identifying,
        optional, description }.

@@ -118,6 +118,11 @@ def sync_dbt_project(
 
     # Step 1: parse manifest (merge-preserving re-import)
     imported = import_manifest(str(manifest), existing_project_root=str(out_root))
+    # Surface the manifest-level warnings (e.g. "N columns have no data type
+    # — run `dbt compile`") up through the sync report so both the CLI and
+    # the API server see them in a single place.
+    for w in imported.warnings or []:
+        report.warnings.append(w)
 
     # Step 2: resolve warehouse target (optional)
     target: Optional[ProfileTarget] = None

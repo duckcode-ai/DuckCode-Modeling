@@ -130,6 +130,12 @@ const useWorkspaceStore = create((set, get) => ({
   projects: [],
   activeProjectId: null,
   projectFiles: [],
+  // Empty folders created via the "New folder" action that don't yet contain
+  // any .yaml/.yml file — the server's `walkYamlFiles` won't return them, so
+  // we track them client-side as POSIX subpaths and merge them into the tree
+  // at render time. Auto-pruned on the next `fetchProjectFiles` if a real
+  // file lands under the same path.
+  optimisticFolders: [],
   projectPath: "",
   projectModelPath: "",
   projectConfig: null,
@@ -614,6 +620,7 @@ const useWorkspaceStore = create((set, get) => ({
     if (!id) return;
     const snapshot = {
       projectFiles: s.projectFiles,
+      optimisticFolders: s.optimisticFolders || [],
       projectPath: s.projectPath,
       projectModelPath: s.projectModelPath,
       projectConfig: s.projectConfig,
@@ -632,6 +639,7 @@ const useWorkspaceStore = create((set, get) => ({
     set({
       activeProjectId: projectId,
       projectFiles: cached.projectFiles || [],
+      optimisticFolders: cached.optimisticFolders || [],
       projectPath: cached.projectPath || "",
       projectModelPath: cached.projectModelPath || "",
       projectConfig: cached.projectConfig || null,
@@ -682,6 +690,10 @@ const useWorkspaceStore = create((set, get) => ({
       const data = await fetchProjectFiles(projectId);
       set({
         projectFiles: data.files || [],
+        // Project switch invalidates client-only empty-folder entries —
+        // the new project has its own tree and any stale optimisticFolders
+        // would otherwise leak across project boundaries.
+        optimisticFolders: [],
         projectPath: data.projectPath || "",
         projectModelPath: data.projectModelPath || data.projectPath || "",
         projectConfig: data.projectConfig || null,
@@ -941,16 +953,42 @@ const useWorkspaceStore = create((set, get) => ({
     }
 
     if (!activeProjectId) return;
-    set({ loading: true, error: null });
+    // Optimistic: don't flip the full-screen `loading` spinner — the file
+    // appears in the Explorer instantly on POST resolve. selectProject()
+    // used to fire a GET and stall the UI for 1–2s before anything
+    // rendered; now we splice the returned descriptor into projectFiles
+    // and open it, no round-trip.
+    set({ error: null });
     try {
       const file = await createProjectFile(activeProjectId, name, content || SAMPLE_MODEL);
-      await get().selectProject(activeProjectId);
+      const desc = {
+        name: file.name,
+        path: file.path,
+        fullPath: file.fullPath,
+        size: file.size,
+        modifiedAt: file.modifiedAt,
+      };
+      set((s) => {
+        // Dedupe by fullPath — if the user triggered the same create twice
+        // the POST would 409, but belt-and-braces for refresh races.
+        const already = (s.projectFiles || []).some(
+          (f) => (f.fullPath || f.path) === (desc.fullPath || desc.path)
+        );
+        const nextFiles = already ? s.projectFiles : [...(s.projectFiles || []), desc];
+        // Prune any optimistic empty-folder entries that this new file
+        // now lives inside — they're no longer "empty".
+        const parentDir = String(desc.path || "").split("/").slice(0, -1).join("/");
+        const nextFolders = (s.optimisticFolders || []).filter(
+          (p) => p !== parentDir && !(parentDir + "/").startsWith(p + "/")
+        );
+        return { projectFiles: nextFiles, optimisticFolders: nextFolders };
+      });
       if (file.fullPath) {
-        await get().openFile(file);
+        await get().openFile(desc);
       }
-      set({ loading: false });
     } catch (err) {
-      set({ error: err.message, loading: false });
+      set({ error: err.message });
+      throw err;
     }
   },
 
@@ -1149,13 +1187,24 @@ const useWorkspaceStore = create((set, get) => ({
     if (offlineMode) throw new Error("Folder creation requires API mode.");
     if (!activeProjectId) throw new Error("No active project.");
     if (!subpath) throw new Error("Folder path is required.");
-    set({ loading: true, error: null });
+    // Optimistic: push the new folder into `optimisticFolders` immediately
+    // so the Explorer shows it without waiting for the disk write + GET
+    // round-trip. If the POST fails we roll back.
+    const norm = String(subpath).replace(/\\/g, "/").replace(/^\/+|\/+$/g, "");
+    set((s) => ({
+      optimisticFolders: (s.optimisticFolders || []).includes(norm)
+        ? s.optimisticFolders
+        : [...(s.optimisticFolders || []), norm],
+      error: null,
+    }));
     try {
       await createProjectFolder(activeProjectId, subpath);
-      const data = await fetchProjectFiles(activeProjectId);
-      set({ projectFiles: data.files || [], loading: false });
     } catch (err) {
-      set({ error: err.message, loading: false });
+      // Rollback the optimistic entry on disk-write failure.
+      set((s) => ({
+        optimisticFolders: (s.optimisticFolders || []).filter((p) => p !== norm),
+        error: err.message,
+      }));
       throw err;
     }
   },

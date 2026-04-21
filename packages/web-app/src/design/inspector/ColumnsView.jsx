@@ -156,16 +156,29 @@ export default function ColumnsView({ table, col, setSelectedCol, entityName, on
           />
 
           <label>Type</label>
-          <input
-            key={`type-${col.name}`}
-            className="panel-input"
-            defaultValue={col.type}
-            list="datalex-types"
-            onBlur={(e) => {
-              const v = e.target.value.trim();
-              if (v && v !== col.type) applyPatch({ type: v });
-            }}
-          />
+          {(() => {
+            // Treat "unknown" (what the dbt importer writes when manifest has
+            // no data_type) and empty as "needs attention" — prefill an empty
+            // editable input with a suggestive placeholder so the user sees
+            // exactly what to fix. Saving an empty string via blur is a
+            // no-op (patchField only fires when the new value differs).
+            const raw = String(col.type || "");
+            const isUnknown = !raw || raw.toLowerCase() === "unknown";
+            return (
+              <input
+                key={`type-${col.name}`}
+                className="panel-input"
+                defaultValue={isUnknown ? "" : raw}
+                placeholder={isUnknown ? "e.g. varchar(255) — run `dbt compile` or set inline" : ""}
+                list="datalex-types"
+                style={isUnknown ? { borderColor: "var(--cat-billing, #f5b544)" } : undefined}
+                onBlur={(e) => {
+                  const v = e.target.value.trim();
+                  if (v && v !== col.type) applyPatch({ type: v });
+                }}
+              />
+            );
+          })()}
           <datalist id="datalex-types">
             <option value="string" /><option value="integer" /><option value="bigint" />
             <option value="boolean" /><option value="float" /><option value="decimal" />
@@ -258,7 +271,15 @@ export default function ColumnsView({ table, col, setSelectedCol, entityName, on
                       )}
                     </span>
                   </td>
-                  <td style={{ color: "var(--text-secondary)", fontFamily: "var(--font-mono)", fontSize: 11 }}>{c.type}</td>
+                  <td style={{ color: "var(--text-secondary)", fontFamily: "var(--font-mono)", fontSize: 11 }}>
+                    {(() => {
+                      const raw = String(c.type || "");
+                      const isUnknown = !raw || raw.toLowerCase() === "unknown";
+                      return isUnknown
+                        ? <span style={{ color: "var(--text-muted, #94a3b8)", fontStyle: "italic" }} title="Type not set">—</span>
+                        : c.type;
+                    })()}
+                  </td>
                   <td style={{ textAlign: "right", color: "var(--text-tertiary)", fontSize: 10 }}>
                     {[c.pk && "PK", c.nn && "NN", c.unique && "UQ", c.fk && "FK"].filter(Boolean).join(" ") || "—"}
                   </td>

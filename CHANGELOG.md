@@ -7,6 +7,69 @@ from `v0.1.0` onward.
 
 ## [Unreleased]
 
+## [0.3.3] — 2026-04-20
+
+### Fixed
+
+- **New file / folder / diagram now shows up instantly.** Previously
+  every create round-tripped through `fetchProjectFiles()` before the
+  tree updated — users saw a 1–2s spinner flash. The workspace store
+  now optimistically splices the new record into `projectFiles` as soon
+  as the POST resolves (and rolls back on error). Empty folders go into
+  a companion `optimisticFolders` array that merges into the Explorer
+  tree at render, since the server only lists YAML files.
+- **All imported columns rendering as `string`.** Root cause was in
+  `datalex_core/dbt/manifest.py` — when a dbt manifest lacks
+  `data_type` (uncompiled projects), the importer silently omitted
+  `type:` and downstream code defaulted to `"string"`. The importer
+  now writes the sentinel `type: unknown`, emits a warning at import
+  end pointing users at `dbt compile`, the schema adapter preserves
+  empty/unknown types verbatim, and EntityNode + Inspector render
+  unknown as an em-dash (`—`) with an inline type editor + placeholder
+  so one-click fixes are obvious.
+- **Diagram-level relationships now persist.** Drag-to-relate across
+  two different model files used to mutate whichever model YAML the
+  dialog last touched, and `adaptDiagramYaml` didn't read the diagram's
+  own relationships, so edges orphaned on reload. Added a top-level
+  `relationships: []` block to the diagram schema (new `addDiagramRelationship`
+  helper in `yamlPatch.js`), routed `NewRelationshipDialog.handleSubmit`
+  through it whenever the active file is a `.diagram.yaml`, and extended
+  `adaptDiagramYaml` to merge diagram-level edges into the combined
+  relationship set (deduped against edges already declared by referenced
+  model files).
+
+### Added
+
+- **Four new entry points for creating a relationship** so it no longer
+  requires hunting for the canvas drag-to-relate handles:
+  - **Toolbar "Add Relationship" button** in `DiagramToolbar` next to
+    Auto Layout (canEdit() gated).
+  - **Inspector "Add" button** in the RELATIONS tab with the current
+    entity pre-filled as the `from` side.
+  - **Right-click context menu** on each entity node — "Add Relationship
+    from here…" opens the dialog with the clicked entity as `from` and
+    the full model as the picker's `to` source.
+  - **Command palette "New relationship…"** (previously a no-op toast
+    stub at `Shell.jsx:808`) now opens the dialog in picker mode.
+- **Picker mode in `NewRelationshipDialog`.** When opened without
+  drag-pinned endpoints, the dialog renders entity + column dropdowns
+  sourced from the caller's `modalPayload.tables`, with smart defaults
+  (preselects `id` when present).
+- **Identifying vs non-identifying edges.** `modelToFlow.js` now renders
+  a solid stroke for identifying relationships and a dashed stroke for
+  non-identifying, auto-detected from the `identifying:` flag or from
+  whether the FK column is itself part of the referenced entity's PK.
+  Legend updated to document the distinction.
+- **Hover tooltips on column badges.** CHK badges reveal the constraint
+  expression, DEF badges show the default value, IDX badges name the
+  index + list its composite fields + flag uniqueness, FK badges name
+  the target table, COMP badges show the computed expression, and a new
+  **`ENUM` badge** renders for `enum(...)` columns (expanding the enum
+  values in its tooltip).
+- **`NOT NULL` in all view modes.** The `NN` flag was previously only
+  visible in physical view despite being documented in the legend —
+  it now renders in logical and diagram modes too.
+
 ## [0.3.2] — 2026-04-20
 
 ### Fixed

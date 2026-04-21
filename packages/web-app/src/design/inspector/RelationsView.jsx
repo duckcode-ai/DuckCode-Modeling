@@ -17,6 +17,7 @@ import { Trash2, Pencil, ArrowRight, Plus, X as XIcon } from "lucide-react";
 import { PanelSection, PanelCard, StatusPill, PanelEmpty } from "../../components/panels/PanelFrame";
 import { NOTATION } from "../notation";
 import useWorkspaceStore from "../../stores/workspaceStore";
+import useUiStore from "../../stores/uiStore";
 import { patchRelationship } from "../yamlPatch";
 import { deleteRelationship } from "../../lib/yamlRoundTrip";
 
@@ -230,7 +231,8 @@ function RelationshipInspector({ rel }) {
 }
 
 /* Table-level relationships list */
-function TableRelationships({ table, relationships, onSelect }) {
+function TableRelationships({ table, relationships, onSelect, tables }) {
+  const openModal = useUiStore((s) => s.openModal);
   const mine = React.useMemo(() => {
     const id = String(table.id || table.name || "").toLowerCase();
     return (relationships || []).filter(
@@ -238,18 +240,53 @@ function TableRelationships({ table, relationships, onSelect }) {
     );
   }, [table, relationships]);
 
+  // Opens NewRelationshipDialog with the current table's id/column pre-filled
+  // on the `from` side and a picker populated from the full diagram.
+  const handleAdd = () => {
+    const entityList = Array.isArray(tables) ? tables : [];
+    const firstColName = (table.columns || [])[0]?.name || "";
+    openModal("newRelationship", {
+      fromEntity: table.id || table.name,
+      fromColumn: firstColName,
+      toEntity: "",
+      toColumn: "",
+      tables: entityList.map((t) => ({
+        id: t.id || t.name,
+        name: t.name || t.id,
+        columns: (t.columns || []).map((c) => ({ name: c.name })),
+      })),
+    });
+  };
+
   if (!mine.length) {
     return (
-      <PanelEmpty
-        icon={Plus}
-        title="No relationships"
-        description="FK columns on this table will appear here once declared."
-      />
+      <PanelSection
+        title="Relationships"
+        action={
+          <button className="panel-btn primary" onClick={handleAdd} title="Add a relationship from this table">
+            <Plus size={12} /> Add
+          </button>
+        }
+      >
+        <PanelEmpty
+          icon={Plus}
+          title="No relationships"
+          description="FK columns on this table will appear here once declared. Click Add to create one now."
+        />
+      </PanelSection>
     );
   }
 
   return (
-    <PanelSection title="Incoming & outgoing" count={mine.length}>
+    <PanelSection
+      title="Incoming & outgoing"
+      count={mine.length}
+      action={
+        <button className="panel-btn" onClick={handleAdd} title="Add a relationship from this table">
+          <Plus size={12} /> Add
+        </button>
+      }
+    >
       <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
         {mine.map((r) => (
           <PanelCard
@@ -274,9 +311,9 @@ function TableRelationships({ table, relationships, onSelect }) {
   );
 }
 
-export default function RelationsView({ table, rel, relationships, onSelect }) {
+export default function RelationsView({ table, rel, relationships, onSelect, tables }) {
   if (rel) return <RelationshipInspector rel={rel} />;
-  if (table) return <TableRelationships table={table} relationships={relationships} onSelect={onSelect} />;
+  if (table) return <TableRelationships table={table} relationships={relationships} onSelect={onSelect} tables={tables} />;
   return (
     <PanelEmpty
       icon={XIcon}
