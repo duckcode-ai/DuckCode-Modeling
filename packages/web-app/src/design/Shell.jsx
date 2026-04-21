@@ -515,6 +515,53 @@ export default function Shell() {
     [schema.subjectAreas]
   );
 
+  /* v0.4.1 — top-bar domain switcher. Turns the adapted `subjectAreas`
+     into the switcher's data model (name, count, color) and tallies
+     how many tables have no `subject_area` at all so we can render the
+     "Unassigned" section. Derived from `schema.tables` rather than
+     the post-filter `tables` state so the switcher counts the full
+     model, not whichever subset is currently shown. */
+  const topBarDomains = React.useMemo(() => {
+    const raw = Array.isArray(schema.subjectAreas) ? schema.subjectAreas : [];
+    return raw
+      .map((a) => ({
+        name: a.name || a.label || a.id,
+        count: Number.isFinite(a.count) ? a.count : 0,
+        color: a.color,
+      }))
+      .filter((d) => !!d.name);
+  }, [schema.subjectAreas]);
+
+  const unassignedCount = React.useMemo(
+    () => (schema.tables || []).reduce((n, t) => n + (t?.subject_area ? 0 : 1), 0),
+    [schema.tables]
+  );
+  const hasUnassignedInModel = unassignedCount > 0 && topBarDomains.length > 0;
+
+  /* Filter the post-layout `tables` down to the selected domain. The
+     relationships array also gets filtered so dangling edges don't
+     linger after the endpoints leave the canvas. When no filter is
+     active we pass everything through unchanged — the filter work is
+     cheap enough (O(n)) that memoising on the raw arrays is enough. */
+  const activeSchemaFilter = useDiagramStore((s) => s.activeSchemaFilter);
+  const UNASSIGNED_DOMAIN = "__unassigned_subject_area__";
+  const filteredTables = React.useMemo(() => {
+    if (!activeSchemaFilter) return tables;
+    if (activeSchemaFilter === UNASSIGNED_DOMAIN) {
+      return tables.filter((t) => !t?.subject_area);
+    }
+    return tables.filter((t) => t?.subject_area === activeSchemaFilter);
+  }, [tables, activeSchemaFilter]);
+  const filteredTableIds = React.useMemo(
+    () => new Set(filteredTables.map((t) => t.id)),
+    [filteredTables]
+  );
+  const filteredRelationships = React.useMemo(() => {
+    const rels = schema.relationships || [];
+    if (!activeSchemaFilter) return rels;
+    return rels.filter((r) => filteredTableIds.has(r.from?.table) && filteredTableIds.has(r.to?.table));
+  }, [schema.relationships, activeSchemaFilter, filteredTableIds]);
+
   /* ── Handlers wiring TopBar / tabs / tree into store ───────────── */
   const handleNewProject = () => openModal("addProject");
   const handleCloseProject = (pid) => {
@@ -765,6 +812,9 @@ export default function Shell() {
         onSearch={() => setCommandPaletteOpen(true)}
         isDirty={isDirty}
         canSave={!!activeFile}
+        domains={topBarDomains}
+        hasUnassigned={hasUnassignedInModel}
+        unassignedCount={unassignedCount}
       />
 
       <ProjectTabs
@@ -806,9 +856,9 @@ export default function Shell() {
           click so the diagram path is not penalised. */}
       {shellViewMode === "diagram" && (
         <Canvas
-          tables={tables}
+          tables={filteredTables}
           setTables={setTables}
-          relationships={schema.relationships}
+          relationships={filteredRelationships}
           areas={schema.subjectAreas || []}
           selected={selected}
           onSelect={handleSelect}
@@ -824,8 +874,8 @@ export default function Shell() {
       {shellViewMode === "table" && (
         <React.Suspense fallback={<div className="shell-view" style={{ padding: 20, color: "var(--text-tertiary)", fontSize: 12 }}>Loading table view…</div>}>
           <TableView
-            tables={tables}
-            relationships={schema.relationships}
+            tables={filteredTables}
+            relationships={filteredRelationships}
             activeTableId={selected?.type === "table" ? selected.id : null}
             onSelectTable={(id) => handleSelect({ type: "table", id })}
           />

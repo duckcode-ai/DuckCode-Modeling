@@ -4,6 +4,7 @@ import Icon from "./icons";
 import { THEMES } from "./notation";
 import useUiStore from "../stores/uiStore";
 import BellMenu from "./BellMenu";
+import DomainSwitcher from "./DomainSwitcher";
 
 /* Segmented view-mode switcher. Drives `uiStore.shellViewMode`, which the
    Shell inspects to decide whether to render the diagram, the table list,
@@ -47,6 +48,7 @@ export function TopBar({
   onUndo, onRedo, onRunSql, onSettings, onConnections, onCommit,
   onImport, onImportDbt, onSearch,
   isDirty = false, canSave = true, canSaveAll = false,
+  domains = [], hasUnassigned = false, unassignedCount = 0,
 }) {
   const I = Icon;
   const [open, setOpen] = React.useState(false);
@@ -102,6 +104,13 @@ export function TopBar({
         </div>
         {/* View-mode switcher replaces the old Diagram/View/Enum triple. */}
         <ViewSwitcher />
+        <div className="tool-group">
+          <DomainSwitcher
+            domains={domains}
+            hasUnassigned={hasUnassigned}
+            unassignedCount={unassignedCount}
+          />
+        </div>
         <div className="tool-group">
           <button className="tool-btn" onClick={onRunSql}><I.Play />Run SQL</button>
           <button className="tool-btn" title="Commit (git)" onClick={onCommit}><I.Branch /></button>

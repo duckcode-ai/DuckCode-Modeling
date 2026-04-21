@@ -97,12 +97,21 @@ export function adaptDataLexYaml(yamlText) {
     // come from the YAML `display:` block; a fallback-grid cell doesn't count.
     const manualPosition = hasManualX && hasManualY;
 
+    // `subject_area` is the canonical YAML field (schema v0.3.1+);
+    // `subject` is the older alias some demo fixtures still use. Prefer
+    // the canonical name so the domain switcher and the bottom-panel
+    // Subject Areas view agree on keys.
+    const subjectArea = typeof e.subject_area === "string" && e.subject_area.trim()
+      ? e.subject_area.trim()
+      : (typeof e.subject === "string" && e.subject.trim() ? e.subject.trim() : "");
+
     return {
       id,
       name: id,
       schema: String(doc.model?.name || "public"),
       cat,
-      subject: e.subject || cat,
+      subject: subjectArea || cat,
+      subject_area: subjectArea || undefined,
       x,
       y,
       width,
@@ -159,7 +168,39 @@ export function adaptDataLexYaml(yamlText) {
     });
   });
 
-  const subjectAreas = []; // future: derive from doc.subject_areas or diagram
+  /* subjectAreas: the set of all domains present on the tables, plus any
+     top-level `subject_areas:` catalog the YAML declares (so an empty
+     domain with no members still shows up in the switcher). Preserves
+     declaration order — useful when the YAML orders domains
+     intentionally (e.g. by business priority). */
+  const catalog = Array.isArray(doc.subject_areas) ? doc.subject_areas : [];
+  const seen = new Set();
+  const subjectAreas = [];
+  for (const c of catalog) {
+    const name = typeof c === "string" ? c : c?.name;
+    if (name && !seen.has(name)) {
+      seen.add(name);
+      subjectAreas.push({
+        name,
+        color: (c && typeof c === "object" && c.color) || undefined,
+        description: (c && typeof c === "object" && c.description) || undefined,
+        count: 0,
+      });
+    }
+  }
+  for (const t of tables) {
+    const name = t.subject_area;
+    if (!name) continue;
+    if (!seen.has(name)) {
+      seen.add(name);
+      subjectAreas.push({ name, count: 0 });
+    }
+  }
+  // Second pass: count table membership per domain. O(n·m) but both
+  // dimensions are small (domains rarely exceed ~20, tables ~200).
+  for (const area of subjectAreas) {
+    area.count = tables.reduce((n, t) => n + (t.subject_area === area.name ? 1 : 0), 0);
+  }
 
   return {
     name: String(doc.model?.name || "DataLex Model"),
@@ -313,6 +354,10 @@ function dataLexModelDocToEntity(doc) {
   };
   if (doc?.display && typeof doc.display === "object") entity.display = doc.display;
   if (Array.isArray(doc?.tags)) entity.tags = doc.tags;
+  // Surface both spellings so a per-file `kind: model` picks up its
+  // domain the same way an `entities:` block does. The downstream
+  // schemaAdapter path already prefers `subject_area` over `subject`.
+  if (doc?.subject_area) entity.subject_area = doc.subject_area;
   if (doc?.subject) entity.subject = doc.subject;
   return entity;
 }
@@ -493,13 +538,29 @@ export function adaptDiagramYaml(yamlText, projectFiles) {
     })
     .filter(Boolean);
 
+  // Collect domains referenced by any of the composed tables. We do
+  // this post-merge so diagram views pick up subject_area from every
+  // referenced model file without the diagram YAML needing its own
+  // `subject_areas:` catalog. Preserves first-seen order.
+  const diagramSeen = new Set();
+  const diagramSubjectAreas = [];
+  for (const t of allTables) {
+    const name = t?.subject_area;
+    if (!name || diagramSeen.has(name)) continue;
+    diagramSeen.add(name);
+    diagramSubjectAreas.push({ name, count: 0 });
+  }
+  for (const area of diagramSubjectAreas) {
+    area.count = allTables.reduce((n, t) => n + (t.subject_area === area.name ? 1 : 0), 0);
+  }
+
   return {
     name: String(diagram.title || diagram.name || "Diagram"),
     engine: "DataLex Diagram",
     schema: "diagram",
     tables: allTables,
     relationships: filteredRels,
-    subjectAreas: [],
+    subjectAreas: diagramSubjectAreas,
     notes,
   };
 }

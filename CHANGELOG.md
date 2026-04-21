@@ -7,6 +7,47 @@ from `v0.1.0` onward.
 
 ## [Unreleased]
 
+## [0.4.1] — 2026-04-21
+
+### Added
+
+- **Top-bar domain switcher.** New `DomainSwitcher` dropdown
+  (`packages/web-app/src/design/DomainSwitcher.jsx`) lives in the
+  TopBar between the view-mode switch and the Run-SQL group. Clicking
+  it opens a scoped popover listing every subject area declared at
+  the `subject_areas:` catalog level plus any domain derived from
+  entity `subject_area:` fields, with membership counts pulled live
+  from the adapted model. Picking a domain sets
+  `diagramStore.activeSchemaFilter`; clicking the active row clears
+  it (toggle semantics match the bottom-panel Subject Areas view).
+  An "Unassigned" row surfaces entities with no domain assigned,
+  using the `__unassigned_subject_area__` sentinel shared with
+  `SubjectAreasPanel.jsx`.
+- **Domain filter applied to diagram + table surfaces.** `Shell.jsx`
+  derives `filteredTables` / `filteredRelationships` from
+  `activeSchemaFilter` and threads them into both `<Canvas>` and
+  `<TableView>`. Relationships are filtered to edges whose endpoints
+  both live in the visible set, so a cross-domain FK disappears when
+  you drill into either side — matching SQLDBM's "focus on a single
+  subject area" flow. The ViewsView and EnumsView surfaces stay
+  unfiltered since views/enums do not carry `subject_area:` in today's
+  schema.
+
+### Fixed
+
+- **`subject_area` now round-trips through the live adapter pipeline.**
+  `schemaAdapter.js` previously fell back to `e.subject` and returned
+  `subjectAreas: []` as a stub, which meant any subject area declared
+  in YAML was invisible to the switcher and the bottom-panel count
+  widgets. The adapter now (a) reads `subject_area` from entities with
+  a legacy `subject:` fallback, (b) unions the workspace-level
+  `subject_areas:` catalog with domains derived from entity fields,
+  (c) computes membership counts against the adapted table list, and
+  (d) mirrors the same merge inside `adaptDiagramYaml` so diagram
+  views see identical metadata. `dataLexModelDocToEntity` also
+  surfaces `subject_area` on the selected-entity shape for Inspector
+  editing.
+
 ## [0.4.0] — 2026-04-20
 
 ### Added
