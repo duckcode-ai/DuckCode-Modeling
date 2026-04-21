@@ -1,5 +1,5 @@
 import yaml from "js-yaml";
-import { pickCrowsFootMarkers } from "./components/diagram/CrowsFootMarkers";
+import { pickCrowsFootMarkers } from "./components/diagram/crowsFootMarkerIds.js";
 
 export const CARDINALITY_COLOR = {
   one_to_one: "#2f7d32",
