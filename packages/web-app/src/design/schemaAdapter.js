@@ -158,3 +158,177 @@ export function adaptDataLexYaml(yamlText) {
     subjectAreas,
   };
 }
+
+/* ------------------------------------------------------------------ *
+ * dbt schema.yml adapter — converts a dbt v2 schema file
+ * ({version: 2, models: [{name, columns: [{name, data_type, tests}]}]})
+ * into an intermediate DataLex-shaped doc so we can reuse the entire
+ * `adaptDataLexYaml` pipeline above. `tests: - relationships:` test
+ * blocks are converted into synthetic `foreign_key` metadata so the
+ * existing FK inference at lines 127-148 emits edges.
+ * ------------------------------------------------------------------ */
+function dbtRelationshipsTarget(test) {
+  // Each test can be either a string ("not_null") or `{name: {...}}`.
+  if (!test || typeof test !== "object") return null;
+  const rel = test.relationships;
+  if (!rel || typeof rel !== "object") return null;
+  // `to` is typically `"ref('other_model')"` or `"source('s','t')"`.
+  const raw = String(rel.to || "").trim();
+  const refMatch = raw.match(/ref\(\s*['"]([^'"]+)['"]\s*\)/);
+  const srcMatch = raw.match(/source\(\s*['"][^'"]+['"]\s*,\s*['"]([^'"]+)['"]\s*\)/);
+  const target = refMatch ? refMatch[1] : (srcMatch ? srcMatch[1] : null);
+  if (!target) return null;
+  return { entity: target, field: String(rel.field || "id") };
+}
+
+function dbtModelToDataLexEntity(model) {
+  const name = String(model?.name || "").trim();
+  if (!name) return null;
+  const cols = Array.isArray(model?.columns) ? model.columns : [];
+  const fields = cols.map((c) => {
+    const tests = Array.isArray(c?.tests) ? c.tests : [];
+    const hasNotNull = tests.some((t) => t === "not_null" || t?.not_null);
+    const hasUnique = tests.some((t) => t === "unique" || t?.unique);
+    const fk = (() => {
+      for (const t of tests) {
+        const target = dbtRelationshipsTarget(t);
+        if (target) return target;
+      }
+      return null;
+    })();
+    const out = {
+      name: String(c?.name || ""),
+      type: String(c?.data_type || c?.type || "string"),
+    };
+    if (hasNotNull) out.nullable = false;
+    if (hasUnique) out.unique = true;
+    if (fk) out.foreign_key = fk;
+    if (c?.description) out.description = String(c.description);
+    return out;
+  });
+  return { name, type: "table", description: String(model?.description || ""), fields };
+}
+
+/* Public adapter: parses a dbt schema.yml and emits DataLex-shaped output
+   (same return shape as `adaptDataLexYaml`). Returns null on non-dbt docs
+   so callers can chain try-dbt-then-datalex. */
+export function adaptDbtSchemaYaml(yamlText) {
+  let doc;
+  try { doc = yaml.load(yamlText); } catch (_e) { return null; }
+  if (!doc || typeof doc !== "object") return null;
+  const models = Array.isArray(doc.models) ? doc.models : null;
+  const sources = Array.isArray(doc.sources) ? doc.sources : null;
+  if (!models && !sources) return null;
+
+  const entities = [];
+  (models || []).forEach((m) => {
+    const e = dbtModelToDataLexEntity(m);
+    if (e) entities.push(e);
+  });
+  // Sources: each source can have N tables; emit one entity per table.
+  (sources || []).forEach((s) => {
+    const tables = Array.isArray(s?.tables) ? s.tables : [];
+    tables.forEach((t) => {
+      const e = dbtModelToDataLexEntity(t);
+      if (e) entities.push(e);
+    });
+  });
+  if (entities.length === 0) return null;
+
+  // Round-trip through the canonical DataLex adapter so one code path owns
+  // column/FK inference — avoids drift if the DataLex shape evolves.
+  const synthetic = yaml.dump({ model: { name: "dbt_schema" }, entities }, { lineWidth: 120 });
+  return adaptDataLexYaml(synthetic);
+}
+
+/* ------------------------------------------------------------------ *
+ * Diagram adapter — reads a .diagram.yaml and unions entities from N
+ * referenced files. `fileLookup` is a map-like `{fullPath → content}`.
+ * ------------------------------------------------------------------ */
+function isDbtSchemaLike(yamlText) {
+  try {
+    const doc = yaml.load(yamlText);
+    if (!doc || typeof doc !== "object") return false;
+    return Array.isArray(doc.models) || Array.isArray(doc.sources);
+  } catch (_e) { return false; }
+}
+
+export function adaptDiagramYaml(yamlText, projectFiles) {
+  let diagram;
+  try { diagram = yaml.load(yamlText); } catch (_e) { return null; }
+  if (!diagram || typeof diagram !== "object") return null;
+  const entries = Array.isArray(diagram.entities) ? diagram.entities : [];
+
+  // Build a fast lookup from projectFiles: [{fullPath, content?, path}].
+  const byPath = new Map();
+  (projectFiles || []).forEach((f) => {
+    if (!f) return;
+    const key = (f.fullPath || f.path || "").replace(/^[/\\]+/, "");
+    if (key) byPath.set(key, f);
+  });
+
+  // Dedupe by {file, entity} so dropping the same file twice doesn't
+  // duplicate tables on canvas.
+  const seen = new Set();
+  const refs = [];
+  entries.forEach((e) => {
+    const file = String(e?.file || "").replace(/^[/\\]+/, "");
+    const entity = String(e?.entity || "").trim();
+    if (!file) return;
+    const key = `${file}::${entity || "*"}`;
+    if (seen.has(key)) return;
+    seen.add(key);
+    refs.push({ file, entity, x: e?.x, y: e?.y, width: e?.width });
+  });
+
+  const allTables = [];
+  const allRelationships = [];
+  const relSeen = new Set();
+
+  refs.forEach((ref) => {
+    const file = byPath.get(ref.file);
+    if (!file || typeof file.content !== "string") return;
+    const content = file.content;
+    const adapted = isDbtSchemaLike(content)
+      ? adaptDbtSchemaYaml(content)
+      : adaptDataLexYaml(content);
+    if (!adapted) return;
+
+    const wantAll = !ref.entity || ref.entity === "*";
+    const wantId = String(ref.entity || "").toLowerCase();
+    adapted.tables.forEach((t) => {
+      if (!wantAll && t.id !== wantId) return;
+      // Overlay diagram-provided position if present.
+      const x = Number.isFinite(Number(ref.x)) ? Number(ref.x) : t.x;
+      const y = Number.isFinite(Number(ref.y)) ? Number(ref.y) : t.y;
+      const width = Number.isFinite(Number(ref.width)) ? Number(ref.width) : t.width;
+      // Dedupe by entity id — last-wins on position (diagram overrides).
+      const existingIdx = allTables.findIndex((x2) => x2.id === t.id);
+      const tagged = { ...t, x, y, width, _sourceFile: ref.file };
+      if (existingIdx >= 0) allTables[existingIdx] = tagged;
+      else allTables.push(tagged);
+    });
+
+    adapted.relationships.forEach((r) => {
+      const key = `${r.from.table}.${r.from.col}->${r.to.table}.${r.to.col}`;
+      if (relSeen.has(key)) return;
+      relSeen.add(key);
+      allRelationships.push(r);
+    });
+  });
+
+  // Filter relationships to those whose both endpoints are on the canvas.
+  const onCanvas = new Set(allTables.map((t) => t.id));
+  const filteredRels = allRelationships.filter(
+    (r) => onCanvas.has(r.from.table) && onCanvas.has(r.to.table)
+  );
+
+  return {
+    name: String(diagram.title || diagram.name || "Diagram"),
+    engine: "DataLex Diagram",
+    schema: "diagram",
+    tables: allTables,
+    relationships: filteredRels,
+    subjectAreas: [],
+  };
+}

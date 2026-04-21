@@ -400,7 +400,7 @@ function Legend({ open, onToggle }) {
   );
 }
 
-export default function Canvas({ tables, setTables, relationships, areas, selected, onSelect, onMoveEnd, onConnect, title, engine, legendOpen, setLegendOpen }) {
+export default function Canvas({ tables, setTables, relationships, areas, selected, onSelect, onMoveEnd, onConnect, onDropYamlSource, title, engine, legendOpen, setLegendOpen }) {
   const I = Icon;
   const [hovered, setHovered] = React.useState(null);
   const innerRef = React.useRef(null);
@@ -487,9 +487,34 @@ export default function Canvas({ tables, setTables, relationships, areas, select
       </div>
 
       <div className="canvas">
-        <div className="canvas-inner" ref={innerRef} onClick={(e) => {
-          if (e.target.classList.contains("canvas-inner")) onSelect(null);
-        }}>
+        <div
+          className="canvas-inner"
+          ref={innerRef}
+          onClick={(e) => {
+            if (e.target.classList.contains("canvas-inner")) onSelect(null);
+          }}
+          onDragOver={onDropYamlSource ? (e) => {
+            // Accept the drag only if it advertises a YAML source payload —
+            // plain file-path drags (folder moves) fall through.
+            if (Array.from(e.dataTransfer.types || []).includes("application/x-datalex-yaml-source")) {
+              e.preventDefault();
+              e.dataTransfer.dropEffect = "copy";
+            }
+          } : undefined}
+          onDrop={onDropYamlSource ? (e) => {
+            const raw = e.dataTransfer.getData("application/x-datalex-yaml-source");
+            if (!raw) return;
+            e.preventDefault();
+            let payload;
+            try { payload = JSON.parse(raw); } catch (_err) { return; }
+            if (!payload || !payload.path) return;
+            const inner = innerRef.current;
+            const rect = inner?.getBoundingClientRect();
+            const x = rect ? Math.max(0, e.clientX - rect.left) : 60;
+            const y = rect ? Math.max(0, e.clientY - rect.top) : 60;
+            onDropYamlSource({ path: payload.path, x, y });
+          } : undefined}
+        >
           <SubjectAreas areas={areas} />
           <Relationships tables={tables} relationships={relationships}
                          selected={selected} onSelect={onSelect}

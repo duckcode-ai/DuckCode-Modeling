@@ -210,6 +210,80 @@ export function setEntityDisplay(yamlText, entityName, { x, y, width } = {}) {
   return dump(doc);
 }
 
+/* Patch the position of a diagram entry inside a `.diagram.yaml`. The
+   diagram file has shape `{kind: diagram, entities: [{file, entity, x, y, width}]}`
+   — so we match by `(file, entity)` rather than by entity name alone
+   (two different files can define an entity with the same name).
+
+   Positions round to integers (same as setEntityDisplay). Returns null
+   when the doc can't be parsed or the entry isn't found. */
+export function setDiagramEntityDisplay(yamlText, file, entityName, { x, y, width } = {}) {
+  let doc;
+  try {
+    doc = yaml.load(yamlText);
+  } catch (_e) {
+    return null;
+  }
+  if (!doc || typeof doc !== "object" || Array.isArray(doc)) return null;
+  if (!Array.isArray(doc.entities)) return null;
+
+  const fileKey = String(file || "").replace(/^[/\\]+/, "");
+  const entityKey = String(entityName || "").toLowerCase();
+  const entry = doc.entities.find(
+    (e) =>
+      String(e?.file || "").replace(/^[/\\]+/, "") === fileKey &&
+      String(e?.entity || "").toLowerCase() === entityKey
+  );
+  if (!entry) return null;
+
+  const applyNum = (key, value) => {
+    if (value === undefined) return;
+    if (value === null) { delete entry[key]; return; }
+    const n = Number(value);
+    if (!Number.isFinite(n)) return;
+    entry[key] = Math.round(n);
+  };
+  applyNum("x", x);
+  applyNum("y", y);
+  applyNum("width", width);
+
+  return dump(doc);
+}
+
+/* Append a batch of `{file, entity}` references to a .diagram.yaml's
+   `entities:` array. Dedupes by `(file, entity)` so dropping the same
+   file twice is idempotent. Creates `entities: []` if absent. Used by
+   the drag-to-canvas path. Returns new YAML or null if parse fails. */
+export function addDiagramEntries(yamlText, newEntries) {
+  let doc;
+  try {
+    doc = yaml.load(yamlText);
+  } catch (_e) {
+    return null;
+  }
+  if (!doc || typeof doc !== "object" || Array.isArray(doc)) return null;
+  if (!Array.isArray(doc.entities)) doc.entities = [];
+  const seen = new Set(
+    doc.entities.map(
+      (e) =>
+        `${String(e?.file || "").replace(/^[/\\]+/, "")}::${String(e?.entity || "").toLowerCase()}`
+    )
+  );
+  (newEntries || []).forEach((e) => {
+    const file = String(e?.file || "").replace(/^[/\\]+/, "");
+    const entity = String(e?.entity || "");
+    if (!file || !entity) return;
+    const key = `${file}::${entity.toLowerCase()}`;
+    if (seen.has(key)) return;
+    seen.add(key);
+    const entry = { file, entity };
+    if (Number.isFinite(Number(e?.x))) entry.x = Math.round(Number(e.x));
+    if (Number.isFinite(Number(e?.y))) entry.y = Math.round(Number(e.y));
+    doc.entities.push(entry);
+  });
+  return dump(doc);
+}
+
 /* Patch a relationship by name. `patch` may set any of:
      { name, from, to, cardinality, on_delete, on_update, identifying,
        optional, description }.

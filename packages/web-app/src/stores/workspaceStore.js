@@ -169,6 +169,12 @@ const useWorkspaceStore = create((set, get) => ({
   // save will overwrite sibling models in those files.
   dbtImportCollisions: [],
 
+  // Content cache keyed by full-path, used by the .diagram.yaml adapter
+  // so Canvas can render entities from files the user hasn't opened as a
+  // tab. Filled lazily by `ensureFilesLoaded`. Eagerly populated entries
+  // from `loadDbtImportTreeAsProject` also land here.
+  fileContentCache: {},
+
   // --- Project actions ---
   loadProjects: async () => {
     set({ loading: true, error: null });
@@ -509,6 +515,11 @@ const useWorkspaceStore = create((set, get) => ({
 
     get()._snapshotActiveProject();
 
+    // Seed the content cache so .diagram.yaml files can render entities
+    // from dbt-imported sources without an extra fetch round-trip.
+    const contentCache = {};
+    docs.forEach((d) => { contentCache[d.fullPath] = d.content; });
+
     set({
       offlineMode: false,
       projects: mergedProjects,
@@ -522,6 +533,7 @@ const useWorkspaceStore = create((set, get) => ({
       // switches before the first save. Once Save All lands files on disk,
       // subsequent reads come from the server like any other project.
       localDocuments: docs,
+      fileContentCache: { ...(get().fileContentCache || {}), ...contentCache },
       openTabs: firstModel ? [firstModel] : [],
       activeFile: firstModel || null,
       activeFileContent: firstModel?.content || "",
@@ -939,6 +951,96 @@ const useWorkspaceStore = create((set, get) => ({
       set({ loading: false });
     } catch (err) {
       set({ error: err.message, loading: false });
+    }
+  },
+
+  /* Create a new .diagram.yaml file under `datalex/diagrams/`. The
+     diagram YAML starts as an empty `entities: []` so the canvas
+     renders an empty state until the user drags model files onto it. */
+  createNewDiagram: async (slug) => {
+    const clean = String(slug || "untitled")
+      .trim()
+      .toLowerCase()
+      .replace(/[^a-z0-9_]+/g, "_")
+      .replace(/^_+|_+$/g, "") || "untitled";
+    const subpath = `datalex/diagrams/${clean}.diagram.yaml`;
+    const content =
+      `kind: diagram\n` +
+      `name: ${clean}\n` +
+      `title: ${clean.replace(/_/g, " ")}\n` +
+      `entities: []\n`;
+    await get().createNewFile(subpath, content);
+    return subpath;
+  },
+
+  /* Prefetch file contents into `fileContentCache`. Skips entries that
+     are already cached or that don't appear in `projectFiles`. No-op in
+     offline mode (content is already in `localDocuments`). */
+  ensureFilesLoaded: async (paths) => {
+    const { projectFiles, fileContentCache, offlineMode, localDocuments } = get();
+    if (!Array.isArray(paths) || paths.length === 0) return;
+
+    // Offline: mirror localDocuments into the cache so adaptDiagramYaml
+    // sees the same content on either path.
+    if (offlineMode) {
+      const next = { ...fileContentCache };
+      let changed = false;
+      (localDocuments || []).forEach((d) => {
+        const key = (d.fullPath || d.path || d.name || "").replace(/^[/\\]+/, "");
+        if (key && !(key in next) && typeof d.content === "string") {
+          next[key] = d.content;
+          changed = true;
+        }
+      });
+      if (changed) set({ fileContentCache: next });
+      return;
+    }
+
+    const byPath = new Map();
+    (projectFiles || []).forEach((f) => {
+      const key = (f?.fullPath || f?.path || "").replace(/^[/\\]+/, "");
+      if (key) byPath.set(key, f);
+    });
+
+    const toFetch = paths
+      .map((p) => String(p || "").replace(/^[/\\]+/, ""))
+      .filter((p) => p && !(p in fileContentCache) && byPath.has(p));
+    if (toFetch.length === 0) return;
+
+    const results = await Promise.all(
+      toFetch.map(async (p) => {
+        const file = byPath.get(p);
+        try {
+          const data = await fetchFileContent(file.fullPath);
+          return [p, String(data?.content ?? "")];
+        } catch (_err) {
+          return [p, ""];
+        }
+      })
+    );
+    set((s) => {
+      const next = { ...s.fileContentCache };
+      results.forEach(([k, v]) => { next[k] = v; });
+      return { fileContentCache: next };
+    });
+  },
+
+  /* Append one or more file references to the active diagram buffer.
+     `entries` = [{file, entity, x?, y?}]. Routes through updateContent
+     so the file is flagged dirty and Save All picks it up. */
+  addDiagramReferences: async (entries) => {
+    const { activeFile, activeFileContent } = get();
+    if (!activeFile || !/\.diagram\.ya?ml$/i.test(activeFile.name || "")) {
+      throw new Error("addDiagramReferences: active file is not a diagram.");
+    }
+    // Lazy-import to avoid a circular import with yamlPatch if any.
+    const { addDiagramEntries } = await import("../design/yamlPatch");
+    const next = addDiagramEntries(activeFileContent || "", entries || []);
+    if (next && next !== activeFileContent) {
+      get().updateContent(next);
+      // Make sure the referenced files' contents are cached for rendering.
+      const paths = (entries || []).map((e) => e.file).filter(Boolean);
+      await get().ensureFilesLoaded(paths);
     }
   },
 

@@ -1,0 +1,56 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://duckcode.dev/schemas/datalex/diagram.schema.json",
+  "title": "DataLex diagram (ER diagram composed from entity files)",
+  "type": "object",
+  "required": ["kind", "name"],
+  "additionalProperties": false,
+  "properties": {
+    "kind": { "const": "diagram" },
+    "name": { "type": "string", "pattern": "^[a-z][a-z0-9_]*$" },
+    "title": { "type": "string" },
+    "description": { "type": "string" },
+    "entities": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["file", "entity"],
+        "additionalProperties": false,
+        "properties": {
+          "file": { "type": "string" },
+          "entity": { "type": "string" },
+          "x": { "type": "number" },
+          "y": { "type": "number" },
+          "width": { "type": "number" }
+        }
+      }
+    },
+    "edges_overrides": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": true,
+        "properties": {
+          "from": { "type": "string" },
+          "to": { "type": "string" },
+          "hidden": { "type": "boolean" },
+          "label": { "type": "string" }
+        }
+      }
+    },
+    "viz": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "layoutMode": { "type": "string" },
+        "groupBySubjectArea": { "type": "boolean" },
+        "edgeType": { "type": "string" }
+      }
+    },
+    "tags": {
+      "type": "array",
+      "items": { "type": "string", "pattern": "^[a-z][a-z0-9-]*$" }
+    },
+    "meta": { "type": "object", "additionalProperties": true }
+  }
+}

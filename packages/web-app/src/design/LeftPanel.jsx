@@ -41,6 +41,7 @@ export default function LeftPanel({ activeTable, onSelectTable, tables, theme, s
   const deleteFileAction = useWorkspaceStore((s) => s.deleteFile);
   const deleteFolderAction = useWorkspaceStore((s) => s.deleteFolder);
   const createNewFile = useWorkspaceStore((s) => s.createNewFile);
+  const createNewDiagram = useWorkspaceStore((s) => s.createNewDiagram);
   const fileTree = React.useMemo(() => buildFileTree(projectFiles || []), [projectFiles]);
 
   const [folded, setFolded] = React.useState({});
@@ -278,6 +279,25 @@ export default function LeftPanel({ activeTable, onSelectTable, tables, theme, s
                   >
                     <I.Folder />
                   </button>
+                  <button
+                    className="icon-btn"
+                    title="New diagram"
+                    onClick={async () => {
+                      const name = window.prompt(
+                        "Diagram name (saved as datalex/diagrams/<name>.diagram.yaml):",
+                        "untitled"
+                      );
+                      if (!name || !name.trim()) return;
+                      try {
+                        await createNewDiagram(name.trim());
+                      } catch (err) {
+                        window.alert(`Could not create diagram: ${err?.message || err}`);
+                      }
+                    }}
+                    style={{ padding: 2 }}
+                  >
+                    <I.Layers />
+                  </button>
                 </>
               )}
               <div style={{ fontSize: 10, color: "var(--text-tertiary)", fontFamily: "var(--font-mono)" }}>{(projectFiles || []).length}</div>
@@ -462,7 +482,18 @@ function TreeRender({
               // Carry the source file's subpath through the drag payload.
               // The drop target is a folder row that knows how to move it.
               e.dataTransfer.setData("application/x-datalex-file-path", n.path);
-              e.dataTransfer.effectAllowed = "move";
+              // YAML sources also carry a second payload so the canvas drop
+              // zone can reject non-YAML drags cleanly. We don't peek at the
+              // content here — the canvas adapter figures out dbt-schema vs
+              // datalex-model shape at render time.
+              if (/\.ya?ml$/i.test(n.name || "")) {
+                const fullPath = (fd.fullPath || fd.path || n.path || "").replace(/^[/\\]+/, "");
+                e.dataTransfer.setData(
+                  "application/x-datalex-yaml-source",
+                  JSON.stringify({ path: fullPath })
+                );
+              }
+              e.dataTransfer.effectAllowed = "copyMove";
             } : undefined}
             title={fullPath || n.path}
             style={{ paddingLeft: indent + 10, cursor: onDropOnFolder ? "grab" : undefined }}

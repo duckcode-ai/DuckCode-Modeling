@@ -7,6 +7,48 @@ from `v0.1.0` onward.
 
 ## [Unreleased]
 
+## [0.3.0] — 2026-04-20
+
+### Added
+
+- **Diagrams as files (`.diagram.yaml`).** A new file kind that composes an
+  ER diagram from N referenced entity/model files. The diagram YAML stores
+  only `{file, entity, x, y, width}` per entry — entity definitions stay
+  in their source `.model.yaml` or dbt `schema.yml`. Canvas positions
+  persist to the diagram file (not per-model `display:`), so moving a node
+  inside one diagram doesn't leak into a sibling diagram of the same
+  model. Ships with a JSON Schema at
+  `_schemas/datalex/diagram.schema.json`.
+- **"New Diagram" Explorer button.** Creates
+  `datalex/diagrams/<slug>.diagram.yaml` seeded with an empty
+  `entities: []` and opens it on the canvas.
+- **Drag-to-canvas from the Explorer.** Dropping any `.yml`/`.yaml` file
+  onto an open diagram appends its reference to the diagram's
+  `entities:` list. dbt `schema.yml` files with N models land as N
+  entities on one drop; FK edges inferred from
+  `tests: - relationships: {to: "ref('x')"}` render as dashed edges
+  immediately. Drops are deduped by `(file, entity)` so dropping the same
+  file twice is idempotent.
+- **dbt schema.yml → ER adapter** (`adaptDbtSchemaYaml`). Round-trips
+  through the existing DataLex adapter so a single code path owns
+  FK/PK/column inference. `not_null` / `unique` tests become column
+  flags; `relationships` tests become synthetic foreign keys.
+- **File-content cache + prefetch** (`fileContentCache`,
+  `ensureFilesLoaded`). The diagram adapter needs raw YAML for every
+  referenced file — not just metadata. The cache is eagerly seeded by
+  `loadDbtImportTreeAsProject` and lazily populated by the Shell when
+  opening a diagram, so diagrams render without round-tripping through
+  per-file `/api/files` fetches on every re-render.
+
+### Known limitations
+
+- A dbt shared `schema.yml` with N models still persists as a single
+  DataLex model with N entities on save (Phase 4 in the roadmap). Diagrams
+  render all N entities correctly via the new adapter, but edits to a
+  single entity rewrite the whole file.
+- Layout state briefly lives in both `localStorage` and the diagram YAML.
+  Scheduled to drop localStorage in 0.3.1.
+
 ## [0.2.3] — 2026-04-20
 
 ### Fixed
