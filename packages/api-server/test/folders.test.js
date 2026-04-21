@@ -39,6 +39,7 @@ describe("POST /api/projects/:id/folders", () => {
       .post(`/api/projects/${project.id}/folders`)
       .send({ path: "../evil" });
     assert.equal(res.status, 400);
+    assert.equal(res.body.error.code, "PATH_ESCAPE");
   });
 
   test("rejects empty path", async () => {
@@ -46,6 +47,7 @@ describe("POST /api/projects/:id/folders", () => {
       .post(`/api/projects/${project.id}/folders`)
       .send({ path: "" });
     assert.equal(res.status, 400);
+    assert.equal(res.body.error.code, "VALIDATION");
   });
 });
 
@@ -77,7 +79,8 @@ describe("PATCH /api/projects/:id/folders (rename)", () => {
       .patch(`/api/projects/${project.id}/folders`)
       .send({ fromPath: "raw", toPath: "raw/nested" });
     assert.equal(res.status, 400);
-    assert.match(res.body.error, /into itself/);
+    assert.equal(res.body.error.code, "VALIDATION");
+    assert.match(res.body.error.message, /into itself/);
   });
 
   test("returns 404 when source folder missing", async () => {
@@ -85,6 +88,7 @@ describe("PATCH /api/projects/:id/folders (rename)", () => {
       .patch(`/api/projects/${project.id}/folders`)
       .send({ fromPath: "ghost", toPath: "whatever" });
     assert.equal(res.status, 404);
+    assert.equal(res.body.error.code, "NOT_FOUND");
   });
 });
 
@@ -114,7 +118,8 @@ describe("DELETE /api/projects/:id/folders", () => {
       .delete(`/api/projects/${project.id}/folders`)
       .send({ path: "." });
     assert.equal(res.status, 400);
-    assert.match(res.body.error, /model root/);
+    assert.equal(res.body.error.code, "VALIDATION");
+    assert.match(res.body.error.message, /model root/);
   });
 
   test("returns 404 when folder missing", async () => {
@@ -122,5 +127,6 @@ describe("DELETE /api/projects/:id/folders", () => {
       .delete(`/api/projects/${project.id}/folders`)
       .send({ path: "never-existed" });
     assert.equal(res.status, 404);
+    assert.equal(res.body.error.code, "NOT_FOUND");
   });
 });

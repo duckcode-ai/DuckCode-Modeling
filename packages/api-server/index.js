@@ -22,6 +22,37 @@ app.use((req, _res, next) => {
   next();
 });
 
+// ---------------------------------------------------------------------------
+// Error envelope (Phase 1 slice B)
+// ---------------------------------------------------------------------------
+// Every new or converted route writes errors as:
+//   { error: { code: "<ERROR_CODE>", message: "<human>", details?: <any> } }
+// Legacy routes that still use `res.status(X).json({ error: "..." })` keep
+// working — the frontend `request()` helper accepts both shapes. Codes:
+//   VALIDATION         — malformed input, missing required field, bad enum value
+//   NOT_FOUND          — project, file, folder, or resource not present
+//   CONFLICT           — destination already exists / duplicate create
+//   PATH_ESCAPE        — path would resolve outside the project model root
+//   PARSE_FAILED       — YAML / JSON from disk or subprocess is unreadable
+//   SUBPROCESS_FAILED  — shelled-out CLI (datalex, git, dbt) exited non-zero
+//   INTERNAL           — uncaught exception, fallback code from errorHandler
+class ApiError extends Error {
+  constructor(status, code, message, details = null) {
+    super(message);
+    this.name = "ApiError";
+    this.status = status;
+    this.code = code;
+    this.details = details;
+  }
+}
+
+function apiFail(res, status, code, message, details = null) {
+  const body = { code, message };
+  if (details != null) body.details = details;
+  return res.status(status).json({ error: body });
+}
+
+
 // Project root defaults to the monorepo root (two levels up from packages/api-server)
 const REPO_ROOT = process.env.REPO_ROOT || join(process.cwd(), "../..");
 const PROJECTS_FILE = join(REPO_ROOT, ".dm-projects.json");
@@ -1777,18 +1808,15 @@ app.put("/api/files", requireAdmin, async (req, res) => {
 });
 
 // Create a new file in a project
-app.post("/api/projects/:id/files", requireAdmin, async (req, res) => {
+app.post("/api/projects/:id/files", requireAdmin, async (req, res, next) => {
   try {
     const projects = await loadProjects();
     const project = projects.find((p) => p.id === req.params.id);
-    if (!project) {
-      return res.status(404).json({ error: "Project not found" });
-    }
+    if (!project) return apiFail(res, 404, "NOT_FOUND", "Project not found");
 
     const { name, content = "" } = req.body;
-    if (!name) {
-      return res.status(400).json({ error: "name is required" });
-    }
+    if (!name) return apiFail(res, 400, "VALIDATION", "name is required");
+    if (String(name).includes("\0")) return apiFail(res, 400, "VALIDATION", "invalid name");
 
     const structure = await loadProjectStructure(project.path);
     if (!existsSync(structure.modelPath)) {
@@ -1798,12 +1826,10 @@ app.post("/api/projects/:id/files", requireAdmin, async (req, res) => {
     const relativeName = toPosixPath(String(name));
     const filePath = resolve(structure.modelPath, relativeName);
     if (!isPathInside(structure.modelPath, filePath)) {
-      return res.status(400).json({ error: "name must stay inside project model path" });
+      return apiFail(res, 400, "PATH_ESCAPE", "name must stay inside project model path");
     }
 
-    if (existsSync(filePath)) {
-      return res.status(409).json({ error: "File already exists" });
-    }
+    if (existsSync(filePath)) return apiFail(res, 409, "CONFLICT", "File already exists");
 
     await mkdir(dirname(filePath), { recursive: true });
     await writeFile(filePath, content, "utf-8");
@@ -1816,7 +1842,7 @@ app.post("/api/projects/:id/files", requireAdmin, async (req, res) => {
       modifiedAt: stats.mtime.toISOString(),
     });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    next(err);
   }
 });
 
@@ -1916,7 +1942,7 @@ app.post("/api/projects/:id/move-file", requireAdmin, async (req, res) => {
 async function resolveProjectAndModelPath(projectId) {
   const projects = await loadProjects();
   const project = projects.find((p) => p.id === projectId);
-  if (!project) return { project: null, structure: null, error: { status: 404, msg: "Project not found" } };
+  if (!project) return { project: null, structure: null, error: { status: 404, code: "NOT_FOUND", msg: "Project not found" } };
   const structure = await loadProjectStructure(project.path);
   if (!existsSync(structure.modelPath)) {
     await mkdir(structure.modelPath, { recursive: true });
@@ -1926,23 +1952,23 @@ async function resolveProjectAndModelPath(projectId) {
 
 function resolveInsideModelPath(modelPath, rawSubpath) {
   const rel = toPosixPath(String(rawSubpath || "")).replace(/^\/+|\/+$/g, "");
-  if (!rel) return { ok: false, msg: "path is required" };
-  if (rel.includes("\0")) return { ok: false, msg: "invalid path" };
+  if (!rel) return { ok: false, code: "VALIDATION", msg: "path is required" };
+  if (rel.includes("\0")) return { ok: false, code: "VALIDATION", msg: "invalid path" };
   const full = resolve(modelPath, rel);
   if (!isPathInside(modelPath, full)) {
-    return { ok: false, msg: "path must stay inside project model path" };
+    return { ok: false, code: "PATH_ESCAPE", msg: "path must stay inside project model path" };
   }
   return { ok: true, full, rel };
 }
 
 // Create a folder (recursive mkdir — no-op if exists)
-app.post("/api/projects/:id/folders", requireAdmin, async (req, res) => {
+app.post("/api/projects/:id/folders", requireAdmin, async (req, res, next) => {
   try {
-    const { project, structure, error } = await resolveProjectAndModelPath(req.params.id);
-    if (error) return res.status(error.status).json({ error: error.msg });
+    const { structure, error } = await resolveProjectAndModelPath(req.params.id);
+    if (error) return apiFail(res, error.status, error.code, error.msg);
     const { path: subpath } = req.body || {};
     const resolved = resolveInsideModelPath(structure.modelPath, subpath);
-    if (!resolved.ok) return res.status(400).json({ error: resolved.msg });
+    if (!resolved.ok) return apiFail(res, 400, resolved.code, resolved.msg);
     await mkdir(resolved.full, { recursive: true });
     res.json({
       ok: true,
@@ -1951,24 +1977,24 @@ app.post("/api/projects/:id/folders", requireAdmin, async (req, res) => {
       name: basename(resolved.full),
     });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    next(err);
   }
 });
 
 // Rename / move a single file inside the project model path
-app.patch("/api/projects/:id/files", requireAdmin, async (req, res) => {
+app.patch("/api/projects/:id/files", requireAdmin, async (req, res, next) => {
   try {
-    const { project, structure, error } = await resolveProjectAndModelPath(req.params.id);
-    if (error) return res.status(error.status).json({ error: error.msg });
+    const { structure, error } = await resolveProjectAndModelPath(req.params.id);
+    if (error) return apiFail(res, error.status, error.code, error.msg);
     const { fromPath, toPath } = req.body || {};
     const from = resolveInsideModelPath(structure.modelPath, fromPath);
-    if (!from.ok) return res.status(400).json({ error: `fromPath: ${from.msg}` });
+    if (!from.ok) return apiFail(res, 400, from.code, `fromPath: ${from.msg}`);
     const to = resolveInsideModelPath(structure.modelPath, toPath);
-    if (!to.ok) return res.status(400).json({ error: `toPath: ${to.msg}` });
-    if (!existsSync(from.full)) return res.status(404).json({ error: "Source file not found" });
+    if (!to.ok) return apiFail(res, 400, to.code, `toPath: ${to.msg}`);
+    if (!existsSync(from.full)) return apiFail(res, 404, "NOT_FOUND", "Source file not found");
     const srcStat = await stat(from.full);
-    if (!srcStat.isFile()) return res.status(400).json({ error: "Source is not a file" });
-    if (existsSync(to.full)) return res.status(409).json({ error: "Destination already exists" });
+    if (!srcStat.isFile()) return apiFail(res, 400, "VALIDATION", "Source is not a file");
+    if (existsSync(to.full)) return apiFail(res, 409, "CONFLICT", "Destination already exists");
     await mkdir(dirname(to.full), { recursive: true });
     try {
       await rename(from.full, to.full);
@@ -1994,28 +2020,28 @@ app.patch("/api/projects/:id/files", requireAdmin, async (req, res) => {
       },
     });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    next(err);
   }
 });
 
 // Rename / move a folder inside the project model path
-app.patch("/api/projects/:id/folders", requireAdmin, async (req, res) => {
+app.patch("/api/projects/:id/folders", requireAdmin, async (req, res, next) => {
   try {
-    const { project, structure, error } = await resolveProjectAndModelPath(req.params.id);
-    if (error) return res.status(error.status).json({ error: error.msg });
+    const { structure, error } = await resolveProjectAndModelPath(req.params.id);
+    if (error) return apiFail(res, error.status, error.code, error.msg);
     const { fromPath, toPath } = req.body || {};
     const from = resolveInsideModelPath(structure.modelPath, fromPath);
-    if (!from.ok) return res.status(400).json({ error: `fromPath: ${from.msg}` });
+    if (!from.ok) return apiFail(res, 400, from.code, `fromPath: ${from.msg}`);
     const to = resolveInsideModelPath(structure.modelPath, toPath);
-    if (!to.ok) return res.status(400).json({ error: `toPath: ${to.msg}` });
-    if (!existsSync(from.full)) return res.status(404).json({ error: "Source folder not found" });
+    if (!to.ok) return apiFail(res, 400, to.code, `toPath: ${to.msg}`);
+    if (!existsSync(from.full)) return apiFail(res, 404, "NOT_FOUND", "Source folder not found");
     const srcStat = await stat(from.full);
-    if (!srcStat.isDirectory()) return res.status(400).json({ error: "Source is not a directory" });
-    if (existsSync(to.full)) return res.status(409).json({ error: "Destination already exists" });
+    if (!srcStat.isDirectory()) return apiFail(res, 400, "VALIDATION", "Source is not a directory");
+    if (existsSync(to.full)) return apiFail(res, 409, "CONFLICT", "Destination already exists");
     // Reject moving a folder into itself
     const toRel = relative(from.full, to.full);
     if (toRel === "" || (!toRel.startsWith("..") && !isAbsolute(toRel))) {
-      return res.status(400).json({ error: "Cannot move folder into itself" });
+      return apiFail(res, 400, "VALIDATION", "Cannot move folder into itself");
     }
     await mkdir(dirname(to.full), { recursive: true });
     try {
@@ -2031,7 +2057,7 @@ app.patch("/api/projects/:id/folders", requireAdmin, async (req, res) => {
     }
     res.json({ ok: true, fromPath: from.rel, toPath: to.rel });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    next(err);
   }
 });
 
@@ -2050,66 +2076,67 @@ async function copyDirRecursive(src, dst) {
 }
 
 // Delete a single file
-app.delete("/api/projects/:id/files", requireAdmin, async (req, res) => {
+app.delete("/api/projects/:id/files", requireAdmin, async (req, res, next) => {
   try {
-    const { project, structure, error } = await resolveProjectAndModelPath(req.params.id);
-    if (error) return res.status(error.status).json({ error: error.msg });
+    const { structure, error } = await resolveProjectAndModelPath(req.params.id);
+    if (error) return apiFail(res, error.status, error.code, error.msg);
     const subpath = req.body?.path || req.query?.path;
     const resolved = resolveInsideModelPath(structure.modelPath, subpath);
-    if (!resolved.ok) return res.status(400).json({ error: resolved.msg });
-    if (!existsSync(resolved.full)) return res.status(404).json({ error: "File not found" });
+    if (!resolved.ok) return apiFail(res, 400, resolved.code, resolved.msg);
+    if (!existsSync(resolved.full)) return apiFail(res, 404, "NOT_FOUND", "File not found");
     const st = await stat(resolved.full);
-    if (!st.isFile()) return res.status(400).json({ error: "Path is not a file" });
+    if (!st.isFile()) return apiFail(res, 400, "VALIDATION", "Path is not a file");
     await unlinkFile(resolved.full);
     res.json({ ok: true, path: resolved.rel });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    next(err);
   }
 });
 
 // Delete a folder (recursive)
-app.delete("/api/projects/:id/folders", requireAdmin, async (req, res) => {
+app.delete("/api/projects/:id/folders", requireAdmin, async (req, res, next) => {
   try {
-    const { project, structure, error } = await resolveProjectAndModelPath(req.params.id);
-    if (error) return res.status(error.status).json({ error: error.msg });
+    const { structure, error } = await resolveProjectAndModelPath(req.params.id);
+    if (error) return apiFail(res, error.status, error.code, error.msg);
     const subpath = req.body?.path || req.query?.path;
     const resolved = resolveInsideModelPath(structure.modelPath, subpath);
-    if (!resolved.ok) return res.status(400).json({ error: resolved.msg });
+    if (!resolved.ok) return apiFail(res, 400, resolved.code, resolved.msg);
     if (resolve(resolved.full) === resolve(structure.modelPath)) {
-      return res.status(400).json({ error: "Refusing to delete project model root" });
+      return apiFail(res, 400, "VALIDATION", "Refusing to delete project model root");
     }
-    if (!existsSync(resolved.full)) return res.status(404).json({ error: "Folder not found" });
+    if (!existsSync(resolved.full)) return apiFail(res, 404, "NOT_FOUND", "Folder not found");
     const st = await stat(resolved.full);
-    if (!st.isDirectory()) return res.status(400).json({ error: "Path is not a folder" });
+    if (!st.isDirectory()) return apiFail(res, 400, "VALIDATION", "Path is not a folder");
     rmSync(resolved.full, { recursive: true, force: true });
     res.json({ ok: true, path: resolved.rel });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    next(err);
   }
 });
 
 // Batch-save a set of files. Body: { files: [{ path, content }] }
 // Each path is relative to the project model path. All-or-nothing per item —
 // one failed write doesn't abort the whole batch, but the response reports
-// per-file status so the client can surface partial failure.
-app.post("/api/projects/:id/save-all", requireAdmin, async (req, res) => {
+// per-file status so the client can surface partial failure. Per-item errors
+// carry a `code` alongside the message so the UI can group failures.
+app.post("/api/projects/:id/save-all", requireAdmin, async (req, res, next) => {
   try {
-    const { project, structure, error } = await resolveProjectAndModelPath(req.params.id);
-    if (error) return res.status(error.status).json({ error: error.msg });
+    const { structure, error } = await resolveProjectAndModelPath(req.params.id);
+    if (error) return apiFail(res, error.status, error.code, error.msg);
     const files = Array.isArray(req.body?.files) ? req.body.files : [];
-    if (!files.length) return res.status(400).json({ error: "files array is required" });
+    if (!files.length) return apiFail(res, 400, "VALIDATION", "files array is required");
 
     const results = [];
     for (const item of files) {
       const subpath = item?.path;
       const content = item?.content;
       if (typeof content !== "string") {
-        results.push({ path: subpath || "", ok: false, error: "content must be a string" });
+        results.push({ path: subpath || "", ok: false, code: "VALIDATION", error: "content must be a string" });
         continue;
       }
       const resolved = resolveInsideModelPath(structure.modelPath, subpath);
       if (!resolved.ok) {
-        results.push({ path: subpath || "", ok: false, error: resolved.msg });
+        results.push({ path: subpath || "", ok: false, code: resolved.code, error: resolved.msg });
         continue;
       }
       try {
@@ -2124,13 +2151,13 @@ app.post("/api/projects/:id/save-all", requireAdmin, async (req, res) => {
           modifiedAt: stats.mtime.toISOString(),
         });
       } catch (err) {
-        results.push({ path: resolved.rel, ok: false, error: err.message });
+        results.push({ path: resolved.rel, ok: false, code: "INTERNAL", error: err.message });
       }
     }
     const okCount = results.filter((r) => r.ok).length;
     res.json({ ok: okCount === results.length, saved: okCount, total: results.length, results });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    next(err);
   }
 });
 
@@ -3701,6 +3728,21 @@ if (existsSync(WEB_DIST)) {
     res.sendFile(join(WEB_DIST, "index.html"));
   });
 }
+
+// Global error handler — must be registered after all routes. Converted
+// routes forward uncaught errors via `next(err)`; we also catch any thrown
+// `ApiError` for the structured envelope. Everything else becomes INTERNAL.
+// Legacy routes that still do `res.status(500).json({ error: err.message })`
+// inline are unaffected.
+// eslint-disable-next-line no-unused-vars
+app.use((err, _req, res, _next) => {
+  if (res.headersSent) return;
+  if (err instanceof ApiError) {
+    return apiFail(res, err.status, err.code, err.message, err.details);
+  }
+  console.error("[datalex] unhandled error:", err);
+  return apiFail(res, 500, "INTERNAL", err?.message || "Internal server error");
+});
 
 // When imported by the test harness we set DATALEX_NO_LISTEN=1 so the module
 // exports `app` without binding to PORT. Any other caller (node index.js,
