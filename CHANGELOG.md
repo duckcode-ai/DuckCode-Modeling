@@ -7,6 +7,24 @@ from `v0.1.0` onward.
 
 ## [Unreleased]
 
+## [0.2.3] — 2026-04-20
+
+### Fixed
+
+- **"Demo mode" stuck in UI after importing a real dbt project.** The
+  demo/offline flag was only set on the initial `fetchProjects` failure
+  and was never cleared by a later successful project switch, so the
+  workspace chip still showed `prod-analytics-01`, the canvas rendered
+  the Subscription-Tracking fixture, and the status bar said "Demo mode"
+  even though a real project was active. `selectProject` now explicitly
+  clears `offlineMode`, and the canvas falls back to an empty schema
+  (not the demo) when a real project is active but the active file
+  doesn't parse as a DataLex model.
+- **Hardcoded workspace label in the Explorer.** `LeftPanel` previously
+  rendered a literal `prod-analytics-01` string in the workspace chip.
+  It now binds to the active project's name (and path as the subtitle)
+  and renders a dropdown to switch projects when more than one is open.
+
 ## [0.2.2] — 2026-04-20
 
 ### Fixed

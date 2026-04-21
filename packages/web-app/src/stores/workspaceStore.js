@@ -646,6 +646,12 @@ const useWorkspaceStore = create((set, get) => ({
       set({ openProjects: [...openProjects, projectId] });
     }
 
+    // Selecting a real project always exits offline/demo mode. A prior
+    // `loadProjects` failure or an offline dbt import may have stuck this
+    // flag true; leaving it set here is what made the UI keep rendering
+    // DEMO_SCHEMA even after a successful project switch.
+    set({ offlineMode: false });
+
     // Try hydrating from cache first — instant switch.
     if (get()._hydrateFromCache(projectId)) return;
 

@@ -14,7 +14,7 @@ import { buildFileTree, countFiles } from "../lib/fileTree";
 import useWorkspaceStore from "../stores/workspaceStore";
 import ExplorerContextMenu from "../components/panels/ExplorerContextMenu";
 
-export default function LeftPanel({ activeTable, onSelectTable, tables, theme, setTheme, subjectAreas = [], connectionLabel = "prod-analytics-01", connectionDsn = "postgres://…5432/subscriptions", schemas = [], onAddEntity }) {
+export default function LeftPanel({ activeTable, onSelectTable, tables, theme, setTheme, subjectAreas = [], connectionLabel = "workspace", connectionDsn = "", schemas = [], onAddEntity, projects = [], activeProjectId = null, onSelectProject = null }) {
   const I = Icon;
   const [tab, setTab] = React.useState("OBJECTS");
   const [query, setQuery] = React.useState("");
@@ -28,7 +28,8 @@ export default function LeftPanel({ activeTable, onSelectTable, tables, theme, s
   const projectFiles = useWorkspaceStore((s) => s.projectFiles);
   const activeFullPath = useWorkspaceStore((s) => s.activeFile?.fullPath || "");
   const offlineMode = useWorkspaceStore((s) => s.offlineMode);
-  const activeProjectId = useWorkspaceStore((s) => s.activeProjectId);
+  // Note: `activeProjectId` comes from props (threaded from Shell) — don't
+  // re-subscribe here or it shadows the prop. Use prop directly below.
   // `switchTab` branches on offline vs api-backed mode internally — so a user
   // who loaded the jaffle-shop demo (offline) and a user with a real project
   // on disk both route through the same click handler.
@@ -228,7 +229,29 @@ export default function LeftPanel({ activeTable, onSelectTable, tables, theme, s
           <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "10px 12px", background: "var(--bg-2)", border: "1px solid var(--border-default)", borderRadius: 6, marginBottom: 12 }}>
             <I.Db />
             <div style={{ flex: 1, minWidth: 0 }}>
-              <div style={{ fontSize: 12, fontFamily: "var(--font-mono)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{connectionLabel}</div>
+              {projects.length > 1 && onSelectProject ? (
+                <select
+                  value={activeProjectId || ""}
+                  onChange={(e) => onSelectProject(e.target.value)}
+                  style={{
+                    width: "100%",
+                    fontSize: 12,
+                    fontFamily: "var(--font-mono)",
+                    background: "transparent",
+                    color: "var(--text-primary)",
+                    border: "none",
+                    padding: 0,
+                    cursor: "pointer",
+                  }}
+                  title="Switch project"
+                >
+                  {projects.map((p) => (
+                    <option key={p.id} value={p.id}>{p.name}</option>
+                  ))}
+                </select>
+              ) : (
+                <div style={{ fontSize: 12, fontFamily: "var(--font-mono)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{connectionLabel}</div>
+              )}
               <div style={{ fontSize: 10, color: "var(--text-tertiary)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{connectionDsn}</div>
             </div>
             <span className="dot" style={{ width: 6, height: 6, borderRadius: "50%", background: "var(--status-success)" }} />

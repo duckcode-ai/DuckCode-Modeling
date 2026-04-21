@@ -316,10 +316,19 @@ export default function Shell() {
     if (error) { addToast({ type: "error", message: error }); clearError(); }
   }, [error, clearError, addToast]);
 
-  /* ── Schema source: adapt active YAML; fall back to demo ───────── */
+  /* ── Schema source: adapt active YAML; fall back to demo ─────────
+     "Demo mode" = we have no real project on disk (the offline sample
+     fixture). If the user has a registered project but the active file
+     just doesn't parse as a DataLex model (e.g. a raw dbt schema.yml),
+     show an empty diagram — NOT the Subscription Tracking demo — so the
+     workspace chip / status bar / canvas all reflect reality. */
   const adapted = React.useMemo(() => adaptDataLexYaml(activeFileContent), [activeFileContent]);
-  const schema = adapted || DEMO_SCHEMA;
-  const isDemo = !adapted;
+  const isDemo = useWorkspaceStore((s) => s.offlineMode && !s.activeProjectId);
+  const emptySchema = React.useMemo(
+    () => ({ name: "Project", engine: "DataLex", schema: "public", tables: [], relationships: [], subjectAreas: [] }),
+    []
+  );
+  const schema = adapted || (isDemo ? DEMO_SCHEMA : emptySchema);
 
   /* Raw index list straight from the YAML, used by the inspector's
      IndexesView. Parsed lazily and cached per content change — js-yaml
@@ -607,8 +616,19 @@ export default function Shell() {
         setTheme={setTheme}
         subjectAreas={subjectAreaTreeItems}
         schemas={schemaList}
-        connectionLabel={isDemo ? "prod-analytics-01" : (activeFile?.name || activeProjectId || "workspace")}
-        connectionDsn={isDemo ? "postgres://…5432/subscriptions" : `datalex://${activeProjectId || "local"}`}
+        connectionLabel={
+          isDemo
+            ? "demo workspace"
+            : (projects.find((p) => p.id === activeProjectId)?.name || activeProjectId || "workspace")
+        }
+        connectionDsn={
+          isDemo
+            ? "offline sample project"
+            : (projects.find((p) => p.id === activeProjectId)?.path || `datalex://${activeProjectId || "local"}`)
+        }
+        projects={projects}
+        activeProjectId={activeProjectId}
+        onSelectProject={(id) => selectProject(id)}
         onAddEntity={handleAddEntity}
       />
 
