@@ -23,8 +23,10 @@ import {
 } from "lucide-react";
 import yaml from "js-yaml";
 import useWorkspaceStore from "../../stores/workspaceStore";
+import useUiStore from "../../stores/uiStore";
 import { runModelChecks } from "../../modelQuality";
 import { lintDoc as lintDbtDoc } from "../../lib/dbtLint";
+import { scanDangling, pruneDangling } from "../../lib/danglingScan";
 import {
   PanelFrame,
   PanelSection,
@@ -328,12 +330,39 @@ function IssueRow({ issue }) {
 /* Main panel                                                          */
 /* ────────────────────────────────────────────────────────────────── */
 export default function ValidationPanel() {
-  const { activeFileContent, activeFile } = useWorkspaceStore();
+  const { activeFileContent, activeFile, updateContent } = useWorkspaceStore();
+  const addToast = useUiStore((s) => s.addToast);
 
   const currentCheck = useMemo(() => {
     if (!activeFileContent) return null;
     return runModelChecks(activeFileContent);
   }, [activeFileContent]);
+
+  /* Phase 4.4 — scan `relationships:` for dangling endpoints (missing
+     entity or column). Runs independently of runModelChecks so users
+     get a single-click "Remove dangling" path without wading through
+     the general warnings list. */
+  const danglingFindings = useMemo(() => {
+    if (!activeFileContent) return [];
+    return scanDangling(activeFileContent);
+  }, [activeFileContent]);
+
+  const handleRemoveDangling = () => {
+    if (!activeFileContent) return;
+    const count = danglingFindings.length;
+    if (count === 0) return;
+    const ok = window.confirm(
+      `Remove ${count} dangling relationship${count === 1 ? "" : "s"}?\n\nThis rewrites the active file's relationships: block to drop any entry whose endpoints reference a missing entity or column.`
+    );
+    if (!ok) return;
+    const next = pruneDangling(activeFileContent);
+    if (next === activeFileContent) return;
+    updateContent(next);
+    addToast({
+      type: "success",
+      message: `Removed ${count} dangling relationship${count === 1 ? "" : "s"}.`,
+    });
+  };
 
   /* dbt-specific findings — runs in parallel with `runModelChecks` rather
      than replacing it. Different rule set (dbt contract hygiene vs. DataLex
@@ -421,6 +450,62 @@ export default function ValidationPanel() {
       subtitle={totalIssues === 0 ? "All checks passed" : `${totalIssues} total findings`}
       actions={headerStatus}
     >
+      {/* Dangling relationships banner (Phase 4.4) */}
+      {danglingFindings.length > 0 && (
+        <PanelSection
+          title="Dangling relationships"
+          count={danglingFindings.length}
+          icon={<AlertTriangle size={11} style={{ color: "#ef4444" }} />}
+          description="Relationships whose endpoints reference a missing entity or column."
+          action={
+            <button
+              type="button"
+              className="panel-btn primary"
+              onClick={handleRemoveDangling}
+              title="Drop every dangling relationship from this file"
+            >
+              Remove dangling
+            </button>
+          }
+        >
+          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+            {danglingFindings.map((d) => (
+              <PanelCard key={`dangle-${d.index}`} tone="error" dense>
+                <div
+                  style={{
+                    display: "flex",
+                    flexDirection: "column",
+                    gap: 2,
+                    minWidth: 0,
+                  }}
+                >
+                  <div
+                    style={{
+                      fontSize: 12,
+                      fontWeight: 600,
+                      color: "var(--text-primary)",
+                      fontFamily: "var(--font-mono)",
+                    }}
+                  >
+                    {d.name}
+                  </div>
+                  <div
+                    style={{
+                      fontSize: 11,
+                      color: "var(--text-secondary)",
+                      fontFamily: "var(--font-mono)",
+                    }}
+                  >
+                    {d.from} <span style={{ opacity: 0.5 }}>→</span> {d.to}
+                  </div>
+                  <div style={{ fontSize: 11, color: "#ef4444" }}>{d.reason}</div>
+                </div>
+              </PanelCard>
+            ))}
+          </div>
+        </PanelSection>
+      )}
+
       {/* Completeness gauge + per-entity list */}
       {completeness && (
         <PanelSection

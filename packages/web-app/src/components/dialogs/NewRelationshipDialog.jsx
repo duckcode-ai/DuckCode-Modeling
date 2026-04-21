@@ -88,9 +88,38 @@ export default function NewRelationshipDialog() {
 
   const canSubmit = !!name.trim() && !!fromEntity && !!toEntity && !!fromColumn && !!toColumn;
 
+  // Phase 4.3 — inline endpoint validation. When the user opened the dialog
+  // via toolbar/command-palette, pickableTables has the authoritative column
+  // list for every diagram entity. Assert the chosen entity + column actually
+  // exist before we write YAML; silent "no change produced" errors meant bad
+  // rows slipped past. The drag-from-canvas path fills endpoints from the
+  // gesture so we skip validation there.
+  const validateEndpoint = React.useCallback((entityId, column, side) => {
+    if (!pickableTables) return null;
+    const hit = pickableTables.find(
+      (t) => (t?.id || t?.name || "").toLowerCase() === String(entityId || "").toLowerCase(),
+    );
+    if (!hit) return `${side} entity "${entityId}" is not on this diagram.`;
+    const cols = (hit.columns || []).map((c) => c.name).filter(Boolean);
+    if (column && !cols.includes(column)) {
+      return `${side} column "${column}" does not exist on ${hit.name || entityId}.`;
+    }
+    return null;
+  }, [pickableTables]);
+
+  const endpointError = React.useMemo(() => {
+    if (!fromEntity || !toEntity) return "";
+    return (
+      validateEndpoint(fromEntity, fromColumn, "From") ||
+      validateEndpoint(toEntity, toColumn, "To") ||
+      ""
+    );
+  }, [fromEntity, toEntity, fromColumn, toColumn, validateEndpoint]);
+
   const handleSubmit = (e) => {
     e.preventDefault();
     if (!canSubmit) return;
+    if (endpointError) { setError(endpointError); return; }
     setError("");
 
     const s = useWorkspaceStore.getState();
@@ -195,7 +224,12 @@ export default function NewRelationshipDialog() {
       footer={
         <>
           <button type="button" className="panel-btn" onClick={closeModal}>Cancel</button>
-          <button type="submit" form="new-rel-form" className="panel-btn primary" disabled={!canSubmit}>
+          <button
+            type="submit"
+            form="new-rel-form"
+            className="panel-btn primary"
+            disabled={!canSubmit || !!endpointError}
+          >
             Create
           </button>
         </>
@@ -376,10 +410,10 @@ export default function NewRelationshipDialog() {
           </label>
         </div>
 
-        {error && (
+        {(error || endpointError) && (
           <div className="dlx-modal-alert">
             <AlertCircle size={12} style={{ marginTop: 1, flexShrink: 0 }} />
-            <span>{error}</span>
+            <span>{error || endpointError}</span>
           </div>
         )}
       </form>

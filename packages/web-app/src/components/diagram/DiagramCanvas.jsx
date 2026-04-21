@@ -558,10 +558,12 @@ function FlowCanvas() {
   }, []);
   const onPaneContextMenu = useCallback((event) => {
     event.preventDefault();
+    const activeName = useWorkspaceStore.getState().activeFile?.name || "";
     setContextMenu({
       target: "pane",
       x: event.clientX,
       y: event.clientY,
+      isDiagram: /\.diagram\.ya?ml$/i.test(activeName),
     });
   }, []);
 
@@ -592,6 +594,7 @@ function FlowCanvas() {
     } else if (menu.target === "pane") {
       if (actionId === "fit") diagram.requestFitDiagram();
       else if (actionId === "add-entity") ui.openModal?.("newEntity");
+      else if (actionId === "add-entities") ui.openModal?.("entityPicker");
     }
   }, []);
 
@@ -708,13 +711,30 @@ export default function DiagramCanvas() {
       const relName = id.startsWith("rel-") ? id.slice(4) : id;
       applyMutation(removeRelationship(yaml, relName));
     };
+    // Phase 4.2 — auto-layout after EntityPickerDialog appends entities.
+    // Debounced so batch picks trigger one ELK pass, not N. Only runs when
+    // the user has Auto (ELK) layout selected; grid/star-schema layouts
+    // already reflow deterministically on model change.
+    let layoutDebounce = null;
+    const onAutoLayout = () => {
+      const { vizSettings, requestLayoutRefresh } = useDiagramStore.getState();
+      if (vizSettings?.layoutMode !== "elk") return;
+      if (layoutDebounce) clearTimeout(layoutDebounce);
+      layoutDebounce = setTimeout(() => {
+        layoutDebounce = null;
+        useDiagramStore.getState().requestLayoutRefresh();
+      }, 150);
+    };
     window.addEventListener("dl:entity:delete", onDeleteEntity);
     window.addEventListener("dl:entity:duplicate", onDuplicateEntity);
     window.addEventListener("dl:relationship:delete", onDeleteRelationship);
+    window.addEventListener("dl:diagram:autolayout", onAutoLayout);
     return () => {
       window.removeEventListener("dl:entity:delete", onDeleteEntity);
       window.removeEventListener("dl:entity:duplicate", onDuplicateEntity);
       window.removeEventListener("dl:relationship:delete", onDeleteRelationship);
+      window.removeEventListener("dl:diagram:autolayout", onAutoLayout);
+      if (layoutDebounce) clearTimeout(layoutDebounce);
     };
   }, []);
 

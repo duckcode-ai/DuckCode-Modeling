@@ -20,9 +20,11 @@ import {
   Image,
   StickyNote,
   GitBranch,
+  LayoutDashboard,
 } from "lucide-react";
 import useDiagramStore from "../../stores/diagramStore";
 import useUiStore from "../../stores/uiStore";
+import useWorkspaceStore from "../../stores/workspaceStore";
 import useAuthStore from "../../stores/authStore";
 import { SCHEMA_COLORS } from "../../lib/schemaColors";
 
@@ -104,6 +106,8 @@ export default function DiagramToolbar() {
   } = useDiagramStore();
 
   const { diagramFullscreen, toggleDiagramFullscreen, openModal } = useUiStore();
+  const activeFileName = useWorkspaceStore((s) => s.activeFile?.name || "");
+  const isDiagramFile = /\.diagram\.ya?ml$/i.test(activeFileName);
   const { canEdit } = useAuthStore();
   const [showLegend, setShowLegend] = useState(false);
   const [showSchemaLegend, setShowSchemaLegend] = useState(false);
@@ -262,6 +266,14 @@ export default function DiagramToolbar() {
         <ToolbarButton onClick={() => requestLayoutRefresh()} title="Auto arrange and fit">
           <RefreshCw size={10} /> Auto Layout
         </ToolbarButton>
+        {canEdit() && isDiagramFile && (
+          <ToolbarButton
+            onClick={() => openModal("entityPicker")}
+            title="Add one or more entities to this diagram"
+          >
+            <LayoutDashboard size={10} /> Add Entities
+          </ToolbarButton>
+        )}
         {canEdit() && (
           <ToolbarButton
             onClick={handleOpenNewRelationship}

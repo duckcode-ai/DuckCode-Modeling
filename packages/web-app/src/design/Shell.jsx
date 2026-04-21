@@ -51,6 +51,7 @@ const PanelDialog         = React.lazy(() => import("../components/dialogs/Panel
 const GitBranchDialog     = React.lazy(() => import("../components/dialogs/GitBranchDialog"));
 const ImportDbtRepoDialog = React.lazy(() => import("../components/dialogs/ImportDbtRepoDialog"));
 const NewRelationshipDialog = React.lazy(() => import("../components/dialogs/NewRelationshipDialog"));
+const EntityPickerDialog  = React.lazy(() => import("../components/dialogs/EntityPickerDialog"));
 const BulkRenameColumnDialog = React.lazy(() => import("../components/dialogs/BulkRenameColumnDialog"));
 const ShareBundleDialog   = React.lazy(() => import("../components/dialogs/ShareBundleDialog"));
 const SnapshotsDialog     = React.lazy(() => import("../components/dialogs/SnapshotsDialog"));
@@ -1006,6 +1007,7 @@ export default function Shell() {
         {activeModal === "importDialog"       && <PanelDialog kind="import" />}
         {activeModal === "importDbtRepo"      && <ImportDbtRepoDialog />}
         {activeModal === "newRelationship"    && <NewRelationshipDialog />}
+        {activeModal === "entityPicker"       && <EntityPickerDialog />}
         {activeModal === "bulkRenameColumn"   && <BulkRenameColumnDialog />}
         {activeModal === "shareBundle"        && <ShareBundleDialog />}
         {activeModal === "snapshots"          && <SnapshotsDialog />}

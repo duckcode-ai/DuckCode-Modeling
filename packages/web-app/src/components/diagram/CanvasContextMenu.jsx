@@ -1,5 +1,5 @@
 import React, { useEffect, useRef } from "react";
-import { Edit3, Trash2, Copy, Crosshair, Plus } from "lucide-react";
+import { Edit3, Trash2, Copy, Crosshair, Plus, LayoutDashboard } from "lucide-react";
 
 export default function CanvasContextMenu({ menu, onClose, onAction }) {
   const ref = useRef(null);
@@ -36,6 +36,7 @@ export default function CanvasContextMenu({ menu, onClose, onAction }) {
       ]
     : [
         { id: "add-entity", label: "New entity…", icon: Plus },
+        ...(menu.isDiagram ? [{ id: "add-entities", label: "Add entities to diagram…", icon: LayoutDashboard }] : []),
         { id: "fit", label: "Fit diagram", icon: Crosshair },
       ];
 
