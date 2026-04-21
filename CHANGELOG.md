@@ -7,6 +7,59 @@ from `v0.1.0` onward.
 
 ## [Unreleased]
 
+## [1.0.0] — 2026-04-21
+
+First stable release. The modeling loop — import a dbt repo, lay out
+YAMLs, build diagrams, wire relationships, save back to git — is now
+correctness-hardened end-to-end, backed by an integration test harness,
+and guided by a first-run onboarding tour. This is the baseline we'll
+support going forward under semver.
+
+### Added
+
+- **First-run onboarding tour.** Nine-step spotlight walkthrough
+  (driver.js) covering import, explorer, diagram creation, entity
+  picker, relationships, validation, and save. Skip/continue welcome
+  modal on first visit; replay + reset from Settings → Help & Tour.
+- **Help & Tour** Settings tab with links to the tutorial docs.
+- **Entity picker dialog** with search, domain filter, multi-select, and
+  auto-layout on add (Phase 4).
+- **Dangling relationship banner** in Validation with one-click prune.
+- **Folder-aware Explorer**: new folder / new diagram here from the
+  context menu, rename & delete with impact preview (Phase 3).
+- **Structured error envelope** `{ error: { code, message, details? } }`
+  surfaced to UI toasts (Phase 1).
+- **API integration test harness** under `packages/api-server/test/`
+  wired to CI — 41 tests covering CRUD, save-all partial failure, and
+  path-traversal adversarials.
+
+### Changed
+
+- **Merge-safe Save All** routes shared `schema.yml` writes through the
+  core-engine merge helper so sibling models are never clobbered.
+  Partial failures return **207 Multi-Status** with a per-file error
+  list instead of a generic toast (Phase 2).
+- **Relationship creation** validates endpoints against the resolved
+  model graph before writing — no more silent writes to non-existent
+  columns (Phase 4).
+- **Wildcard-diagram moves** dedupe in place instead of appending a new
+  row on every drag (Phase 4 + v0.5.1 follow-up).
+- **AboutPane** license label corrected to MIT to match `LICENSE`.
+
+### Fixed
+
+- **dbt import** no longer leaks tmp dirs and no longer swallows
+  per-file write failures silently (Phase 2).
+- **Cascade cleanup on file delete** rewrites FK references in sibling
+  files instead of leaving dangling edges (Phase 2).
+- Folder rename now propagates into `imports:` blocks and
+  `.diagram.yaml` `file:` refs (Phase 3).
+
+### Versioning
+
+- Root `pyproject.toml`, `packages/web-app`, and `packages/api-server`
+  all bumped from `0.5.1` → `1.0.0`.
+
 ## [0.5.1] — 2026-04-21
 
 Patch release — the modeling loop had a grab-bag of silent data-loss
