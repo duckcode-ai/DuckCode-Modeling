@@ -7,6 +7,34 @@ from `v0.1.0` onward.
 
 ## [Unreleased]
 
+## [0.5.1] — 2026-04-21
+
+Patch release — the modeling loop had a silent data-loss bug in the
+drag-and-drop diagram workflow. Fixing it was the whole point.
+
+### Fixed
+
+- **Entity moves persist on wildcard diagrams.** Dropping a model file
+  onto a `.diagram.yaml` writes a `{file, entity: "*"}` wildcard
+  reference that expands to every entity in the file. Before this
+  release, dragging an individual entity on the canvas called
+  `setDiagramEntityDisplay` with a concrete entity name — which failed
+  to match the wildcard row in the YAML and silently returned `null`,
+  meaning `updateContent` never fired, the file never went dirty, and
+  the new position was lost on reload. This was the root cause of the
+  "I arrange them and they keep snapping back" complaint. Fix: the
+  patcher now appends a concrete `{file, entity: <name>, x, y}`
+  override next to the wildcard when no explicit row exists. The
+  adapter's last-wins dedupe picks up the override on the next render
+  without touching the wildcard, so the remaining entities stay on
+  their adapter-default positions.
+  - `packages/web-app/src/design/yamlPatch.js` — `setDiagramEntityDisplay`
+    now falls back to the wildcard row (also handles entries with an
+    empty or omitted `entity:` field for backward compat).
+  - `packages/web-app/tests/yamlPatchDiagram.test.js` — regression
+    suite covering explicit match, wildcard fallback, repeated moves,
+    and the null-fallback path.
+
 ## [0.5.0] — 2026-04-21
 
 First SQLDBM-parity minor: shareability. The v0.4.x line closed the

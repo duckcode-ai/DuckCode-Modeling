@@ -215,8 +215,18 @@ export function setEntityDisplay(yamlText, entityName, { x, y, width } = {}) {
    — so we match by `(file, entity)` rather than by entity name alone
    (two different files can define an entity with the same name).
 
+   Drag-and-drop from the Explorer writes wildcard entries — shape
+   `{file, entity: "*"}` — that expand to every entity in the referenced
+   model file. When the user subsequently moves an individual entity,
+   there's no concrete `(file, entityName)` row to patch. Rather than
+   silently dropping the move, we append a concrete override row next
+   to the wildcard. The adapter's last-wins dedupe by entity id picks
+   up the override without disturbing the wildcard (so the remaining
+   entities stay positioned by the adapter defaults).
+
    Positions round to integers (same as setEntityDisplay). Returns null
-   when the doc can't be parsed or the entry isn't found. */
+   when the doc can't be parsed or when neither a concrete entry nor a
+   wildcard for the file is found. */
 export function setDiagramEntityDisplay(yamlText, file, entityName, { x, y, width } = {}) {
   let doc;
   try {
@@ -229,12 +239,29 @@ export function setDiagramEntityDisplay(yamlText, file, entityName, { x, y, widt
 
   const fileKey = String(file || "").replace(/^[/\\]+/, "");
   const entityKey = String(entityName || "").toLowerCase();
-  const entry = doc.entities.find(
+  if (!fileKey || !entityKey) return null;
+
+  let entry = doc.entities.find(
     (e) =>
       String(e?.file || "").replace(/^[/\\]+/, "") === fileKey &&
       String(e?.entity || "").toLowerCase() === entityKey
   );
-  if (!entry) return null;
+
+  if (!entry) {
+    // Fall back to wildcard-expansion case: if the diagram references
+    // this file with `entity: "*"` (or an empty/omitted entity), append
+    // a new concrete entry so the move persists. Without this, dragging
+    // entities around on a wildcard-sourced diagram was a silent no-op.
+    const hasWildcard = doc.entities.some((e) => {
+      if (!e || typeof e !== "object") return false;
+      if (String(e.file || "").replace(/^[/\\]+/, "") !== fileKey) return false;
+      const ent = String(e.entity || "").trim();
+      return ent === "" || ent === "*";
+    });
+    if (!hasWildcard) return null;
+    entry = { file: fileKey, entity: entityName };
+    doc.entities.push(entry);
+  }
 
   const applyNum = (key, value) => {
     if (value === undefined) return;
