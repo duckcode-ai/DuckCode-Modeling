@@ -953,6 +953,83 @@ app.get("/api/git/diff", async (req, res) => {
   }
 });
 
+// Git: structured file-level diff vs a baseline ref (default: main).
+// Drives the v0.4.2 canvas overlay — "show me what changed since main".
+// Returns path arrays grouped by change kind so the browser can map each
+// path to an entity via `workspace.projectFiles` and decorate the canvas.
+//
+// `git diff --name-status <ref>...HEAD` uses a three-dot so only HEAD-side
+// commits count as changes; shared ancestors drop out even if the ref
+// itself has diverged locally.
+app.get("/api/git/diff-files", async (req, res) => {
+  try {
+    const projectId = String(req.query.projectId || "").trim();
+    if (!projectId) {
+      return res.status(400).json({ error: "projectId query param required" });
+    }
+    const projectPath = await resolveProjectPath(projectId);
+    if (!projectPath) {
+      return res.status(404).json({ error: "Project not found" });
+    }
+    const rawRef = String(req.query.ref || "main").trim();
+    // Guardrail: refuse refs with shell metacharacters. `git` itself would
+    // reject them but we prefer an explicit 400 over a noisy stderr leak.
+    if (!/^[A-Za-z0-9._/\-@]+$/.test(rawRef)) {
+      return res.status(400).json({ error: "invalid ref" });
+    }
+
+    let output = "";
+    try {
+      output = runGit(["diff", "--name-status", `${rawRef}...HEAD`], projectPath);
+    } catch (err) {
+      const stderr = (err.stderr || err.message || "").toString();
+      if (stderr.includes("unknown revision") || stderr.includes("bad revision")) {
+        return res.status(404).json({ error: `ref not found: ${rawRef}` });
+      }
+      throw err;
+    }
+
+    const added = [];
+    const modified = [];
+    const removed = [];
+    const renamed = []; // { from, to }
+    for (const line of output.split("\n")) {
+      if (!line) continue;
+      const parts = line.split("\t");
+      const status = parts[0] || "";
+      if (status.startsWith("A")) added.push(parts[1]);
+      else if (status.startsWith("M")) modified.push(parts[1]);
+      else if (status.startsWith("D")) removed.push(parts[1]);
+      else if (status.startsWith("R")) {
+        // Treat a rename as remove(from) + add(to) so the overlay shows
+        // both sides; callers that care can inspect `renamed` directly.
+        renamed.push({ from: parts[1], to: parts[2] });
+        if (parts[1]) removed.push(parts[1]);
+        if (parts[2]) added.push(parts[2]);
+      } else if (status.startsWith("C")) {
+        // Copy — surface as an add on the new path.
+        if (parts[2]) added.push(parts[2]);
+      }
+      // Typechanges (T) and unmerged (U) are rare for YAML — fall through.
+    }
+    res.json({
+      ok: true,
+      projectId,
+      ref: rawRef,
+      added,
+      modified,
+      removed,
+      renamed,
+    });
+  } catch (err) {
+    const stderr = (err.stderr || err.message || "").toString();
+    if (stderr.includes("not a git repository")) {
+      return res.status(400).json({ error: "Selected project is not a git repository" });
+    }
+    res.status(500).json({ error: stderr.trim() || String(err.message || err) });
+  }
+});
+
 // Git: commit changes (optionally only selected paths)
 app.post("/api/git/commit", requireAdmin, express.json(), async (req, res) => {
   try {

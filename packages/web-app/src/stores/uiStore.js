@@ -148,6 +148,17 @@ const useUiStore = create((set, get) => ({
   // ── Pending search query (ViewerWelcome → GlobalSearchPanel handoff) ──
   pendingSearchQuery: "",
 
+  // ── Git-diff canvas overlay (v0.4.2) ──
+  // When `diffVsRef` is a branch name, `diffState.entities` holds a
+  // { [entityName]: "added" | "modified" | "removed" } map driven by the
+  // `/api/git/diff-files` endpoint, mapped through `workspace.projectFiles`
+  // to turn file paths into entity names. `diffLoading` gates the TopBar
+  // toggle spinner; `diffError` surfaces refresh failures inline.
+  diffVsRef: null,
+  diffState: { entities: {}, files: { added: [], modified: [], removed: [] } },
+  diffLoading: false,
+  diffError: null,
+
   // ── Actions ──
   setActiveActivity: (activity) => set({ activeActivity: activity }),
   setPendingConnectorType: (type) => set({ pendingConnectorType: type }),
@@ -273,6 +284,98 @@ const useUiStore = create((set, get) => ({
   removeToast: (id) => {
     set((s) => ({ toasts: s.toasts.filter((t) => t.id !== id) }));
   },
+
+  // ── Git-diff overlay actions (v0.4.2) ──
+  // Callers pass the live `projectFiles` tree so the store can map file
+  // paths back to entity names without importing workspaceStore here (that
+  // would invert the dependency direction).
+  setDiffVsRef: async (ref, { projectId, projectFiles } = {}) => {
+    if (!ref) {
+      set({
+        diffVsRef: null,
+        diffState: { entities: {}, files: { added: [], modified: [], removed: [] } },
+        diffError: null,
+        diffLoading: false,
+      });
+      return;
+    }
+    if (!projectId) {
+      set({ diffError: "No active project for diff", diffVsRef: null });
+      return;
+    }
+    set({ diffVsRef: ref, diffLoading: true, diffError: null });
+    try {
+      const q = new URLSearchParams({ projectId, ref });
+      const resp = await fetch(`/api/git/diff-files?${q.toString()}`);
+      if (!resp.ok) {
+        const j = await resp.json().catch(() => ({}));
+        throw new Error(j.error || `HTTP ${resp.status}`);
+      }
+      const data = await resp.json();
+      // Walk the projectFiles tree once and build a path→entityName map.
+      // Entity names live on `node.yamlData.entities[0].name` for the
+      // dbt-model shape and `node.yamlData.name` for single-entity docs.
+      const pathToEntity = {};
+      const walk = (nodes) => {
+        for (const n of nodes || []) {
+          if (n.type === "file" && n.path) {
+            const y = n.yamlData || {};
+            const ents = Array.isArray(y.entities) ? y.entities : [];
+            const names = ents.map((e) => e?.name).filter(Boolean);
+            if (typeof y.name === "string" && y.name && (y.kind === "model" || names.length === 0)) {
+              names.push(y.name);
+            }
+            for (const nm of names) pathToEntity[n.path] = nm;
+          }
+          if (n.children) walk(n.children);
+        }
+      };
+      walk(projectFiles || []);
+
+      const entities = {};
+      const applyStatus = (paths, status) => {
+        for (const p of paths || []) {
+          const name = pathToEntity[p];
+          if (!name) continue;
+          // Preserve strongest signal: added > removed > modified.
+          const prev = entities[name];
+          if (prev === "added") continue;
+          if (status === "added") entities[name] = "added";
+          else if (status === "removed" && prev !== "added") entities[name] = "removed";
+          else if (status === "modified" && !prev) entities[name] = "modified";
+        }
+      };
+      applyStatus(data.added, "added");
+      applyStatus(data.removed, "removed");
+      applyStatus(data.modified, "modified");
+
+      set({
+        diffLoading: false,
+        diffError: null,
+        diffState: {
+          entities,
+          files: {
+            added: data.added || [],
+            modified: data.modified || [],
+            removed: data.removed || [],
+          },
+        },
+      });
+    } catch (err) {
+      set({
+        diffLoading: false,
+        diffError: String(err?.message || err),
+        diffState: { entities: {}, files: { added: [], modified: [], removed: [] } },
+      });
+    }
+  },
+
+  clearDiff: () => set({
+    diffVsRef: null,
+    diffState: { entities: {}, files: { added: [], modified: [], removed: [] } },
+    diffError: null,
+    diffLoading: false,
+  }),
 }));
 
 export default useUiStore;

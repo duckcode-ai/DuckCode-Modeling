@@ -2,8 +2,18 @@
 import React from "react";
 import Icon from "./icons";
 import { NOTATION, FK_COLOR_MAP } from "./notation";
+import useUiStore from "../stores/uiStore";
 
-function TableCard({ table, selected, onSelect, onMove, onMoveEnd, onStartConnect }) {
+// Visual lexicon for the git-diff overlay (v0.4.2). Kept as a module
+// constant so Legend / tests / future tooltip work can import the same
+// colors without drifting. Matches the Pill palette in DiffToggle.jsx.
+const DIFF_COLORS = {
+  added:    { stroke: "#10b981", fill: "rgba(16,185,129,0.10)", label: "ADD", title: "Added since baseline" },
+  modified: { stroke: "#f59e0b", fill: "rgba(245,158,11,0.10)", label: "MOD", title: "Modified since baseline" },
+  removed:  { stroke: "#ef4444", fill: "rgba(239,68,68,0.10)",  label: "DEL", title: "Removed since baseline" },
+};
+
+function TableCard({ table, selected, onSelect, onMove, onMoveEnd, onStartConnect, diffStatus }) {
   const I = Icon;
   const cardRef = React.useRef(null);
   const drag = React.useRef(null);
@@ -54,12 +64,22 @@ function TableCard({ table, selected, onSelect, onMove, onMoveEnd, onStartConnec
     return flags;
   };
 
+  const diffTheme = diffStatus ? DIFF_COLORS[diffStatus] : null;
+  // Apply the diff outline via inline style rather than a CSS class — the
+  // overlay is dynamic and we don't want to ship a new stylesheet just for
+  // three classes. The outline sits *outside* the existing selection ring
+  // so users can see both selection + diff simultaneously.
+  const diffStyle = diffTheme ? {
+    outline: `2px solid ${diffTheme.stroke}`,
+    outlineOffset: 2,
+  } : null;
+
   return (
     <div
       ref={cardRef}
       className={`table-card cat-${table.cat} ${selected ? "selected" : ""} ${table.junction ? "junction" : ""}`}
       id={`tc-${table.id}`}
-      style={{ left: table.x, top: table.y }}
+      style={{ left: table.x, top: table.y, ...(diffStyle || {}) }}
       onMouseDown={onMouseDown}
     >
       <div className="tc-header">
@@ -67,6 +87,19 @@ function TableCard({ table, selected, onSelect, onMove, onMoveEnd, onStartConnec
         <span className="tc-name">{table.name}</span>
         <span className="tc-schema">{table.schema}</span>
         <div className="tc-badges">
+          {diffTheme && (
+            <span
+              className="tc-badge"
+              title={diffTheme.title}
+              style={{
+                border: `1px solid ${diffTheme.stroke}`,
+                background: diffTheme.fill,
+                color: diffTheme.stroke,
+                fontWeight: 700,
+                letterSpacing: "0.04em",
+              }}
+            >{diffTheme.label}</span>
+          )}
           {(table.badges || []).map((b) => (
             <span key={b} className={`tc-badge ${b.toLowerCase()}`}>{b}</span>
           ))}
@@ -401,6 +434,11 @@ function Legend({ open, onToggle }) {
 }
 
 export default function Canvas({ tables, setTables, relationships, areas, selected, onSelect, onMoveEnd, onConnect, onDropYamlSource, title, engine, legendOpen, setLegendOpen }) {
+  // Git-diff overlay (v0.4.2). Subscribe to the entity→status map so each
+  // TableCard can render an ADD/MOD/DEL decoration. Pulled here at the
+  // Canvas level (not individual TableCards) so every card reads the same
+  // snapshot per render pass, avoiding N subscriptions for large diagrams.
+  const diffEntities = useUiStore((s) => s.diffState?.entities) || {};
   const I = Icon;
   const [hovered, setHovered] = React.useState(null);
   const innerRef = React.useRef(null);
@@ -525,7 +563,8 @@ export default function Canvas({ tables, setTables, relationships, areas, select
                        onSelect={onSelect}
                        onMove={onMoveTable}
                        onMoveEnd={onMoveEnd}
-                       onStartConnect={handleStartConnect} />
+                       onStartConnect={handleStartConnect}
+                       diffStatus={diffEntities[t.name] || diffEntities[t.id] || null} />
           ))}
           {connectDrag && (
             <svg

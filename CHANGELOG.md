@@ -7,6 +7,48 @@ from `v0.1.0` onward.
 
 ## [Unreleased]
 
+## [0.4.2] — 2026-04-21
+
+### Added
+
+- **Git-diff overlay on the canvas — "show me what changed since `main`."**
+  Third v0.4+ roadmap item. A new `DiffToggle` dropdown in the TopBar
+  (next to the DomainSwitcher) accepts a git ref (default `main`) and
+  renders ADD / MOD / DEL decorations on every affected entity in both
+  the diagram and the legacy table-list view.
+  - **Backend:** new `GET /api/git/diff-files?projectId=&ref=` endpoint
+    in `packages/api-server/index.js`. Runs
+    `git diff --name-status <ref>...HEAD` (three-dot so only HEAD-side
+    commits count) and returns `{added, modified, removed, renamed}`
+    arrays of file paths. Renames surface as both an add on the new
+    path and a remove on the old path so the overlay shows both sides.
+    Invalid refs → 404; non-git projects → 400.
+  - **Store:** `uiStore` gained `diffVsRef`, `diffState`, `diffLoading`,
+    `diffError` plus a `setDiffVsRef(ref, {projectId, projectFiles})`
+    action that walks the `workspace.projectFiles` tree once and maps
+    each file path to its entity name via `yamlData.entities[*].name`
+    (with a `yamlData.name` fallback for the dbt-model shape). Strongest
+    signal wins when the same entity appears in multiple buckets
+    (added > removed > modified).
+  - **UI:** `DiffToggle.jsx` is a click-outside-dismiss popover with a
+    ref input, Enable/Refresh/Disable buttons, and a summary row of
+    colored pills ("3 added · 2 modified · 1 removed"). When the
+    overlay is active, the TopBar button gains an `accent-dim` chip
+    with the total-changed count badge. Hidden entirely when there's
+    no active project.
+  - **Canvas:** `TableCard` accepts a new `diffStatus` prop and renders
+    a 2px outline in the status color plus an ADD / MOD / DEL badge in
+    the card header. Palette is exposed as a module-level
+    `DIFF_COLORS` constant so future legend work and DiffToggle share
+    the same lexicon. Cards stay in the ordinary DOM flow so selection
+    rings, junction-box styling, and FK-color cues all continue to work.
+
+### Changed
+
+- `Chrome.jsx` TopBar now mounts `<DiffToggle />` alongside
+  `<DomainSwitcher />` in the same tool group so the two "filter the
+  canvas by X" affordances live next to each other.
+
 ## [0.4.1] — 2026-04-21
 
 ### Added

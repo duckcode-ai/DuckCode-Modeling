@@ -5,6 +5,7 @@ import { THEMES } from "./notation";
 import useUiStore from "../stores/uiStore";
 import BellMenu from "./BellMenu";
 import DomainSwitcher from "./DomainSwitcher";
+import DiffToggle from "./DiffToggle";
 
 /* Segmented view-mode switcher. Drives `uiStore.shellViewMode`, which the
    Shell inspects to decide whether to render the diagram, the table list,
@@ -110,6 +111,7 @@ export function TopBar({
             hasUnassigned={hasUnassigned}
             unassignedCount={unassignedCount}
           />
+          <DiffToggle />
         </div>
         <div className="tool-group">
           <button className="tool-btn" onClick={onRunSql}><I.Play />Run SQL</button>
