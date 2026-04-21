@@ -3702,12 +3702,20 @@ if (existsSync(WEB_DIST)) {
   });
 }
 
-app.listen(PORT, () => {
-  console.log(`[datalex] Local file server running on http://localhost:${PORT}`);
-  console.log(`[datalex] Repo root: ${REPO_ROOT}`);
-  if (existsSync(WEB_DIST)) {
-    console.log(`[datalex] Serving web app from: ${WEB_DIST}`);
-  } else {
-    console.log(`[datalex] Web dist not found at: ${WEB_DIST}`);
-  }
-});
+// When imported by the test harness we set DATALEX_NO_LISTEN=1 so the module
+// exports `app` without binding to PORT. Any other caller (node index.js,
+// `datalex serve`) keeps the original behavior.
+if (!process.env.DATALEX_NO_LISTEN) {
+  app.listen(PORT, () => {
+    console.log(`[datalex] Local file server running on http://localhost:${PORT}`);
+    console.log(`[datalex] Repo root: ${REPO_ROOT}`);
+    if (existsSync(WEB_DIST)) {
+      console.log(`[datalex] Serving web app from: ${WEB_DIST}`);
+    } else {
+      console.log(`[datalex] Web dist not found at: ${WEB_DIST}`);
+    }
+  });
+}
+
+export { app };
+export default app;
