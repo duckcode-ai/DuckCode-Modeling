@@ -12,6 +12,7 @@ import Icon from "./icons";
 import { THEMES } from "./notation";
 import { buildFileTree, countFiles } from "../lib/fileTree";
 import useWorkspaceStore from "../stores/workspaceStore";
+import useUiStore from "../stores/uiStore";
 import ExplorerContextMenu from "../components/panels/ExplorerContextMenu";
 
 export default function LeftPanel({ activeTable, onSelectTable, tables, theme, setTheme, subjectAreas = [], connectionLabel = "workspace", connectionDsn = "", schemas = [], onAddEntity, projects = [], activeProjectId = null, onSelectProject = null }) {
@@ -41,6 +42,7 @@ export default function LeftPanel({ activeTable, onSelectTable, tables, theme, s
   const renameFolderAction = useWorkspaceStore((s) => s.renameFolder);
   const deleteFileAction = useWorkspaceStore((s) => s.deleteFile);
   const deleteFolderAction = useWorkspaceStore((s) => s.deleteFolder);
+  const addToast = useUiStore((s) => s.addToast);
   const createNewFile = useWorkspaceStore((s) => s.createNewFile);
   const createNewDiagram = useWorkspaceStore((s) => s.createNewDiagram);
   const fileTree = React.useMemo(
@@ -107,6 +109,22 @@ export default function LeftPanel({ activeTable, onSelectTable, tables, theme, s
           if (!confirmed) return;
           await deleteFileAction(menu.path);
         }
+        // Surface the cascade: "also rewrote N file(s) to remove M reference(s)"
+        // so the user isn't surprised by silent edits to sibling model files.
+        const cascade = useWorkspaceStore.getState().lastDeleteCascade;
+        if (cascade && cascade.filesUpdated && cascade.filesUpdated.length) {
+          addToast({
+            type: "info",
+            message: `Removed ${cascade.entities.length} entity${cascade.entities.length === 1 ? "" : "s"} and rewrote ${cascade.filesUpdated.length} related file${cascade.filesUpdated.length === 1 ? "" : "s"}.`,
+          });
+        }
+        if (cascade && cascade.failures && cascade.failures.length) {
+          addToast({
+            type: "warning",
+            message: `Cascade partially failed (${cascade.failures.length} file${cascade.failures.length === 1 ? "" : "s"}). See console.`,
+          });
+          console.warn("[datalex] delete-cascade failures:", cascade.failures);
+        }
       }
     } catch (err) {
       window.alert(`Action failed: ${err?.message || err}`);
@@ -120,6 +138,7 @@ export default function LeftPanel({ activeTable, onSelectTable, tables, theme, s
     moveFileAction,
     deleteFileAction,
     deleteFolderAction,
+    addToast,
   ]);
 
   // Drag-and-drop: drop a file onto a folder to move it there.

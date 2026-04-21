@@ -562,12 +562,26 @@ function deriveDbtRepoName(repoPath) {
   return token.replace(/[^A-Za-z0-9]+/g, "_").replace(/^_+|_+$/g, "").toLowerCase() || "dbt";
 }
 
+// Parses a YAML file for the dbt repo summary endpoint.
+// Return shape:
+//   null                                 — not a dbt doc (sources/models/metrics empty); caller skips silently.
+//   { parseError: { reason, line, col } }— YAML is malformed; caller surfaces to user.
+//   { models, sources, ... }             — parsed successfully.
+// Previously a parse failure looked identical to "not a dbt doc", so broken
+// schema.yml files vanished from the UI with no explanation.
 function parseDbtDocSummary(text, relPath) {
   let loaded;
   try {
     loaded = yaml.load(text);
-  } catch (_err) {
-    return null;
+  } catch (err) {
+    const mark = err?.mark || {};
+    return {
+      parseError: {
+        reason: String(err?.reason || err?.message || "YAML parse failed").slice(0, 300),
+        line: typeof mark.line === "number" ? mark.line + 1 : null,
+        column: typeof mark.column === "number" ? mark.column + 1 : null,
+      },
+    };
   }
   if (!loaded || typeof loaded !== "object" || Array.isArray(loaded)) return null;
 
@@ -1950,6 +1964,70 @@ async function resolveProjectAndModelPath(projectId) {
   return { project, structure, error: null };
 }
 
+// Merge N DataLex-style YAML model docs that all target the same destination
+// path. This is the Save-All collision case — a dbt `schema.yml` that
+// describes multiple models becomes N in-memory docs after import, one per
+// model. Writing them sequentially would clobber siblings (last-wins). We
+// union entities/relationships/indexes/metrics, deduped by name.
+//
+// First-seen wins on overlap. That mirrors the Python
+// `merge_models_preserving_docs(current, candidate)` in core_engine: the
+// first doc's handwritten docs/tags/descriptions are preserved even if a
+// later doc declares the same entity. The CLI still uses the richer Python
+// merge for two-way sync; this JS variant is scoped to the "N candidates,
+// no prior current" save-all path.
+function mergeDbtDocsForPath(docContents) {
+  if (!Array.isArray(docContents) || docContents.length === 0) return "";
+  if (docContents.length === 1) return docContents[0];
+
+  const parsed = [];
+  for (const text of docContents) {
+    try {
+      const doc = yaml.load(text);
+      if (doc && typeof doc === "object" && !Array.isArray(doc)) parsed.push(doc);
+    } catch (_err) {
+      // Skip unparseable — can't merge what we can't read. The rest still
+      // fold into a valid combined doc.
+    }
+  }
+  if (parsed.length === 0) return docContents[0];
+  if (parsed.length === 1) return yaml.dump(parsed[0], { lineWidth: 120, noRefs: true, sortKeys: false });
+
+  const merged = JSON.parse(JSON.stringify(parsed[0]));
+  const unionByName = (targetList, incomingList) => {
+    const seen = new Set(
+      (targetList || []).map((x) => (x && typeof x.name === "string" ? x.name : null)).filter(Boolean),
+    );
+    for (const item of incomingList || []) {
+      if (!item || typeof item !== "object") continue;
+      const name = typeof item.name === "string" ? item.name : null;
+      if (name && seen.has(name)) continue;
+      if (name) seen.add(name);
+      targetList.push(JSON.parse(JSON.stringify(item)));
+    }
+  };
+
+  for (let i = 1; i < parsed.length; i += 1) {
+    const next = parsed[i];
+    if (!Array.isArray(merged.entities)) merged.entities = [];
+    unionByName(merged.entities, next.entities);
+    if (Array.isArray(next.relationships)) {
+      if (!Array.isArray(merged.relationships)) merged.relationships = [];
+      unionByName(merged.relationships, next.relationships);
+    }
+    if (Array.isArray(next.indexes)) {
+      if (!Array.isArray(merged.indexes)) merged.indexes = [];
+      unionByName(merged.indexes, next.indexes);
+    }
+    if (Array.isArray(next.metrics)) {
+      if (!Array.isArray(merged.metrics)) merged.metrics = [];
+      unionByName(merged.metrics, next.metrics);
+    }
+  }
+
+  return yaml.dump(merged, { lineWidth: 120, noRefs: true, sortKeys: false });
+}
+
 function resolveInsideModelPath(modelPath, rawSubpath) {
   const rel = toPosixPath(String(rawSubpath || "")).replace(/^\/+|\/+$/g, "");
   if (!rel) return { ok: false, code: "VALIDATION", msg: "path is required" };
@@ -2126,7 +2204,12 @@ app.post("/api/projects/:id/save-all", requireAdmin, async (req, res, next) => {
     const files = Array.isArray(req.body?.files) ? req.body.files : [];
     if (!files.length) return apiFail(res, 400, "VALIDATION", "files array is required");
 
+    // First pass: validate + resolve paths. Group by canonical destination
+    // so that N in-memory docs sharing a destination (dbt's shared
+    // `schema.yml` pattern) merge into one YAML document rather than
+    // clobbering each other last-wins.
     const results = [];
+    const groups = new Map(); // resolved.rel -> { full, rel, contents: string[], inputPaths: string[] }
     for (const item of files) {
       const subpath = item?.path;
       const content = item?.content;
@@ -2139,19 +2222,32 @@ app.post("/api/projects/:id/save-all", requireAdmin, async (req, res, next) => {
         results.push({ path: subpath || "", ok: false, code: resolved.code, error: resolved.msg });
         continue;
       }
+      const key = resolved.rel;
+      if (!groups.has(key)) {
+        groups.set(key, { full: resolved.full, rel: resolved.rel, contents: [], inputPaths: [] });
+      }
+      const g = groups.get(key);
+      g.contents.push(content);
+      g.inputPaths.push(subpath);
+    }
+
+    for (const g of groups.values()) {
+      const merged = g.contents.length > 1 ? mergeDbtDocsForPath(g.contents) : g.contents[0];
       try {
-        await mkdir(dirname(resolved.full), { recursive: true });
-        await writeFile(resolved.full, content, "utf-8");
-        const stats = await stat(resolved.full);
+        await mkdir(dirname(g.full), { recursive: true });
+        await writeFile(g.full, merged, "utf-8");
+        const stats = await stat(g.full);
         results.push({
-          path: resolved.rel,
-          fullPath: resolved.full,
+          path: g.rel,
+          fullPath: g.full,
           ok: true,
           size: stats.size,
           modifiedAt: stats.mtime.toISOString(),
+          merged: g.contents.length > 1,
+          mergedFrom: g.contents.length > 1 ? g.inputPaths.slice() : undefined,
         });
       } catch (err) {
-        results.push({ path: resolved.rel, ok: false, code: "INTERNAL", error: err.message });
+        results.push({ path: g.rel, ok: false, code: "INTERNAL", error: err.message });
       }
     }
     const okCount = results.filter((r) => r.ok).length;
@@ -2376,10 +2472,15 @@ app.post("/api/import", requireAdmin, express.json({ limit: "10mb" }), async (re
 
     let model;
     try {
-      // The output may contain issue lines before the YAML
       model = yaml.load(yamlText);
-    } catch (_) {
-      model = null;
+    } catch (err) {
+      const mark = err?.mark || {};
+      return apiFail(res, 500, "PARSE_FAILED",
+        `Imported YAML could not be parsed: ${err?.reason || err?.message || "yaml error"}`,
+        {
+          line: typeof mark.line === "number" ? mark.line + 1 : null,
+          column: typeof mark.column === "number" ? mark.column + 1 : null,
+        });
     }
 
     const entities = model?.entities || [];
@@ -2780,39 +2881,42 @@ app.post("/api/forward/dbt-sync", requireAdmin, express.json({ limit: "5mb" }), 
  * Response:
  *   { success: true, tree: Array<{path,content}>, report: SyncReport, outDir }
  * ------------------------------------------------------------------ */
-app.post("/api/dbt/import", requireAdmin, express.json({ limit: "2mb" }), async (req, res) => {
+app.post("/api/dbt/import", requireAdmin, express.json({ limit: "2mb" }), async (req, res, next) => {
+  const {
+    projectDir,
+    gitUrl,
+    gitRef = "main",
+    out,
+    target,
+    skipWarehouse,
+    manifest,
+    // When true, the user's dbt folder is registered as a DataLex project
+    // and the response includes `{projectId, projectName}`. The GUI then
+    // opens the imported tree *against* that project, so Save All writes
+    // back into the same dbt repo at each file's original path. Only valid
+    // with `projectDir` (nothing to save to for a git URL clone).
+    editInPlace,
+    editInPlaceName,
+  } = req.body || {};
+
+  if (!projectDir && !gitUrl) {
+    return apiFail(res, 400, "VALIDATION",
+      "Provide either `projectDir` (local path) or `gitUrl` (public git URL).");
+  }
+  if (editInPlace && !projectDir) {
+    return apiFail(res, 400, "VALIDATION",
+      "`editInPlace` requires `projectDir` — git URLs have no local folder to save into.");
+  }
+
+  let cloneDir = "";
+  let outDir = "";
+  // Track whether we auto-provisioned outDir. If the caller passed `out`, they
+  // own the directory; we leave it alone. Otherwise we must rm it in `finally`
+  // or it leaks into $TMPDIR for every import.
+  let outDirIsOwned = false;
+  let resolvedProjectDir = "";
+
   try {
-    const {
-      projectDir,
-      gitUrl,
-      gitRef = "main",
-      out,
-      target,
-      skipWarehouse,
-      manifest,
-      // When true, the user's dbt folder is registered as a DataLex project
-      // and the response includes `{projectId, projectName}`. The GUI then
-      // opens the imported tree *against* that project, so Save All writes
-      // back into the same dbt repo at each file's original path. Only valid
-      // with `projectDir` (nothing to save to for a git URL clone).
-      editInPlace,
-      editInPlaceName,
-    } = req.body || {};
-
-    if (!projectDir && !gitUrl) {
-      return res.status(400).json({
-        error: "Provide either `projectDir` (local path) or `gitUrl` (public git URL).",
-      });
-    }
-    if (editInPlace && !projectDir) {
-      return res.status(400).json({
-        error: "`editInPlace` requires `projectDir` — git URLs have no local folder to save into.",
-      });
-    }
-
-    // Resolve the dbt project directory — either user-supplied or a fresh clone.
-    let resolvedProjectDir = "";
-    let cloneDir = "";
     if (gitUrl) {
       cloneDir = join(tmpdir(), `datalex-dbt-${Date.now()}-${randomBytes(4).toString("hex")}`);
       mkdirSync(cloneDir, { recursive: true });
@@ -2821,7 +2925,7 @@ app.post("/api/dbt/import", requireAdmin, express.json({ limit: "2mb" }), async 
           stdio: ["ignore", "pipe", "pipe"],
           timeout: 60000,
         });
-      } catch (err) {
+      } catch (_err) {
         // Branch/tag may not exist; retry without --branch so we at least get the default.
         try {
           execFileSync("git", ["clone", "--depth", "1", gitUrl, cloneDir], {
@@ -2829,24 +2933,25 @@ app.post("/api/dbt/import", requireAdmin, express.json({ limit: "2mb" }), async 
             timeout: 60000,
           });
         } catch (err2) {
-          try { rmSync(cloneDir, { recursive: true, force: true }); } catch (_) {}
-          return res.status(400).json({
-            error: `git clone failed: ${String(err2?.stderr || err2?.message || err2).slice(0, 400)}`,
-          });
+          return apiFail(res, 400, "SUBPROCESS_FAILED",
+            `git clone failed: ${String(err2?.stderr || err2?.message || err2).slice(0, 400)}`);
         }
       }
       resolvedProjectDir = cloneDir;
     } else {
       if (!existsSync(String(projectDir))) {
-        return res.status(400).json({ error: `projectDir not found: ${projectDir}` });
+        return apiFail(res, 400, "VALIDATION", `projectDir not found: ${projectDir}`);
       }
       resolvedProjectDir = String(projectDir);
     }
 
-    // Output dir: caller-specified or auto-provisioned tmp dir we return in the response.
-    const outDir = out
-      ? String(out)
-      : join(tmpdir(), `datalex-dbt-out-${Date.now()}-${randomBytes(4).toString("hex")}`);
+    if (out) {
+      outDir = String(out);
+      outDirIsOwned = false;
+    } else {
+      outDir = join(tmpdir(), `datalex-dbt-out-${Date.now()}-${randomBytes(4).toString("hex")}`);
+      outDirIsOwned = true;
+    }
     mkdirSync(outDir, { recursive: true });
 
     // Default: skip warehouse for git-clone imports (we almost never have warehouse creds
@@ -2896,10 +3001,7 @@ app.post("/api/dbt/import", requireAdmin, express.json({ limit: "2mb" }), async 
     }
 
     if (importError) {
-      if (cloneDir) {
-        try { rmSync(cloneDir, { recursive: true, force: true }); } catch (_) {}
-      }
-      return res.status(500).json({ error: importError });
+      return apiFail(res, 500, "SUBPROCESS_FAILED", importError);
     }
 
     // Walk outDir and build an in-memory tree of produced YAML files. Keeping the
@@ -2928,16 +3030,17 @@ app.post("/api/dbt/import", requireAdmin, express.json({ limit: "2mb" }), async 
     };
     walk(outDir);
 
-    if (cloneDir) {
-      try { rmSync(cloneDir, { recursive: true, force: true }); } catch (_) {}
-    }
-
     // Edit-in-place mode: materialise the imported YAMLs inside the user's
     // dbt folder so clicking a file in the Explorer can read it from disk.
     // We only write files that don't already exist — never clobber a
-    // hand-authored schema.yml the user already maintains. This turns the
-    // in-memory import into a real round-trippable state on first import.
-    if (editInPlace && resolvedProjectDir && !cloneDir) {
+    // hand-authored schema.yml the user already maintains.
+    //
+    // `writeFailures` collects per-file errors instead of swallowing them so
+    // the caller learns which files actually landed. A single unwritable
+    // destination used to silently log to the server console and return
+    // `success: true`; now we return 207 with the failure list.
+    const writeFailures = [];
+    if (editInPlace && resolvedProjectDir) {
       for (const entry of tree) {
         const destRel = entry.path.replace(/\.yaml$/i, ".yml");
         const destAbs = join(resolvedProjectDir, destRel);
@@ -2947,14 +3050,16 @@ app.post("/api/dbt/import", requireAdmin, express.json({ limit: "2mb" }), async 
             writeFileSync(destAbs, entry.content, "utf-8");
           }
         } catch (err) {
-          console.error(`[datalex] editInPlace write failed for ${destRel}: ${err.message}`);
+          writeFailures.push({
+            path: destRel,
+            code: "INTERNAL",
+            error: String(err?.message || err).slice(0, 400),
+          });
         }
       }
       // Seed `datalex/diagrams/` so the Explorer shows the conventional
-      // diagrams location immediately after import — users can then click
-      // "New Diagram" and land a file in a folder that already exists.
-      // `.gitkeep` is used because empty dirs don't round-trip through git
-      // and we don't want a stray untracked file on clean checkouts.
+      // diagrams location immediately after import. `.gitkeep` keeps the
+      // empty dir round-trippable through git.
       try {
         const diagramsDir = join(resolvedProjectDir, "datalex", "diagrams");
         if (!existsSync(diagramsDir)) {
@@ -2963,7 +3068,11 @@ app.post("/api/dbt/import", requireAdmin, express.json({ limit: "2mb" }), async 
           if (!existsSync(keepFile)) writeFileSync(keepFile, "", "utf-8");
         }
       } catch (err) {
-        console.error(`[datalex] diagrams-folder seed failed: ${err.message}`);
+        writeFailures.push({
+          path: "datalex/diagrams/.gitkeep",
+          code: "INTERNAL",
+          error: String(err?.message || err).slice(0, 400),
+        });
       }
     }
 
@@ -2971,15 +3080,11 @@ app.post("/api/dbt/import", requireAdmin, express.json({ limit: "2mb" }), async 
     // project picker work. Idempotent — if the folder is already registered
     // we reuse the existing project.
     let projectRecord = null;
-    if (editInPlace && resolvedProjectDir && !cloneDir) {
+    let registerError = null;
+    if (editInPlace && resolvedProjectDir) {
       try {
         const projects = await loadProjects();
         const absolute = resolve(resolvedProjectDir);
-        // Canonical compare: collapses case-insensitive filesystems
-        // (macOS APFS, Windows) and symlinks so the same folder
-        // imported twice — or imported after typo-renaming the
-        // project — reuses the existing registration instead of
-        // creating a second "Jaffle-shop" entry alongside "jaffle-shop".
         const canonAbs = canonicalProjectPath(absolute);
         const existing = projects.find((p) => canonicalProjectPath(p.path) === canonAbs);
         if (existing) {
@@ -2996,20 +3101,30 @@ app.post("/api/dbt/import", requireAdmin, express.json({ limit: "2mb" }), async 
           await saveProjects(projects);
         }
       } catch (err) {
-        // Don't fail the import — log and fall through to in-memory mode.
-        console.error("[datalex] editInPlace project-register failed:", err.message);
+        registerError = String(err?.message || err).slice(0, 400);
       }
     }
 
-    res.json({
-      success: true,
+    const hasFailures = writeFailures.length > 0 || registerError != null;
+    res.status(hasFailures ? 207 : 200).json({
+      success: !hasFailures,
       outDir,
       tree,
       report,
       project: projectRecord,
+      writeFailures,
+      registerError,
     });
   } catch (err) {
-    res.status(500).json({ error: err?.message || String(err) });
+    if (err instanceof ApiError) return next(err);
+    return apiFail(res, 500, "INTERNAL", err?.message || String(err));
+  } finally {
+    if (cloneDir) {
+      try { rmSync(cloneDir, { recursive: true, force: true }); } catch (_) {}
+    }
+    if (outDir && outDirIsOwned) {
+      try { rmSync(outDir, { recursive: true, force: true }); } catch (_) {}
+    }
   }
 });
 
@@ -3217,6 +3332,7 @@ app.post("/api/connectors/dbt-repo/scan", requireAdmin, express.json(), async (r
 
     const yamlFiles = await walkYamlFiles(repoPath);
     const dbtFiles = [];
+    const parseErrors = [];
 
     for (const file of yamlFiles) {
       let content = "";
@@ -3227,6 +3343,16 @@ app.post("/api/connectors/dbt-repo/scan", requireAdmin, express.json(), async (r
       }
       const summary = parseDbtDocSummary(content, file.path);
       if (!summary) continue;
+      if (summary.parseError) {
+        parseErrors.push({
+          path: file.path,
+          code: "PARSE_FAILED",
+          reason: summary.parseError.reason,
+          line: summary.parseError.line,
+          column: summary.parseError.column,
+        });
+        continue;
+      }
       dbtFiles.push({
         name: file.name,
         path: file.path,
@@ -3250,6 +3376,13 @@ app.post("/api/connectors/dbt-repo/scan", requireAdmin, express.json(), async (r
       { models: 0, sources: 0, semantic_models: 0, metrics: 0 }
     );
 
+    const warnings = dbtFiles.length === 0
+      ? ["No dbt schema/source/semantic/metrics YAML files found under this path."]
+      : [];
+    for (const pe of parseErrors) {
+      const loc = pe.line ? ` (line ${pe.line}${pe.column ? `, col ${pe.column}` : ""})` : "";
+      warnings.push(`Failed to parse ${pe.path}${loc}: ${pe.reason}`);
+    }
     return res.json({
       success: true,
       repoPath,
@@ -3257,14 +3390,13 @@ app.post("/api/connectors/dbt-repo/scan", requireAdmin, express.json(), async (r
       yamlFileCount: yamlFiles.length,
       dbtFiles,
       dbtFileCount: dbtFiles.length,
+      parseErrors,
       totals: totalSections,
       suggestedSubfolder: "datalex-models",
       suggestedTargetPath: join(repoPath, "datalex-models"),
       suggestedProjectName: `${repoName}-datalex`,
       suggestedModelName: sanitizeModelStem(`${repoName}_dbt`, "dbt_model"),
-      warnings: dbtFiles.length === 0
-        ? ["No dbt schema/source/semantic/metrics YAML files found under this path."]
-        : [],
+      warnings,
     });
   } catch (err) {
     res.status(500).json({ error: err.message });

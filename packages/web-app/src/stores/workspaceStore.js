@@ -18,10 +18,105 @@ import {
   deleteProjectFile,
   deleteProjectFolder,
   saveAllProjectFiles,
+  fetchModelGraph,
 } from "../lib/api";
+import { removeEntity } from "../lib/yamlRoundTrip";
 import { SAMPLE_MODEL } from "../sampleModel";
 import { normalizeImportedModelFileName } from "../lib/importModelName";
 import useHistoryStore, { fileKeyOf } from "./historyStore";
+
+// Read a project file and return the names of entities defined inside it.
+// Returns [] for non-model files, unreadable files, or parse errors — the
+// caller uses this to seed a cascade that must be safe when the source
+// file was never a model in the first place (e.g. `.diagram.yaml`, plain
+// YAML, or a schema.yml we couldn't parse).
+async function collectEntitiesInFile(projectId, subpath) {
+  try {
+    const { files } = await fetchProjectFiles(projectId);
+    const match = (files || []).find((f) => f.path === subpath);
+    if (!match?.fullPath) return [];
+    const { content } = await fetchFileContent(match.fullPath);
+    const doc = parseYamlObjectSafe(content);
+    if (!doc || !Array.isArray(doc.entities)) return [];
+    return doc.entities.map((e) => e?.name).filter((n) => typeof n === "string" && n);
+  } catch (_err) {
+    return [];
+  }
+}
+
+// Variant of `collectEntitiesInFile` for folders — reads every model file
+// under the folder and flattens entity names into one list. Deduped so the
+// cascade applies each name at most once.
+async function collectEntitiesInFolder(projectId, folderSubpath) {
+  const prefix = String(folderSubpath).replace(/\/+$/, "") + "/";
+  try {
+    const { files } = await fetchProjectFiles(projectId);
+    const modelFiles = (files || []).filter(
+      (f) => f.path && (f.path === folderSubpath || f.path.startsWith(prefix))
+        && /\.model\.ya?ml$/.test(f.path)
+    );
+    const entityNames = new Set();
+    for (const f of modelFiles) {
+      if (!f.fullPath) continue;
+      try {
+        const { content } = await fetchFileContent(f.fullPath);
+        const doc = parseYamlObjectSafe(content);
+        if (doc && Array.isArray(doc.entities)) {
+          for (const e of doc.entities) {
+            if (typeof e?.name === "string" && e.name) entityNames.add(e.name);
+          }
+        }
+      } catch (_err) {
+        // Unreadable file — skip. Cascade runs on best-effort basis.
+      }
+    }
+    return Array.from(entityNames);
+  } catch (_err) {
+    return [];
+  }
+}
+
+// For every *other* model file in the project, rewrite it with `removeEntity`
+// applied once per deleted-entity name. `skipPaths` optionally excludes more
+// than one file (used by `deleteFolder` to skip every file under the deleted
+// folder). If any file updates fail, they're reported in `failures` — the
+// caller surfaces them so orphans are visible, not silent.
+async function cascadeRemoveEntityReferences(projectId, deletedSubpath, entityNames, skipPaths = null) {
+  const filesUpdated = [];
+  const failures = [];
+  let graph;
+  try {
+    graph = await fetchModelGraph(projectId);
+  } catch (err) {
+    failures.push({ path: "(model-graph)", error: err?.message || String(err) });
+    return { filesUpdated, failures };
+  }
+  const skip = skipPaths instanceof Set ? skipPaths : new Set();
+  if (deletedSubpath) skip.add(deletedSubpath);
+  const candidates = (graph?.models || []).filter((m) => m.path && !skip.has(m.path));
+  for (const model of candidates) {
+    try {
+      const { content } = await fetchFileContent(model.file);
+      let next = content;
+      let mutated = false;
+      for (const name of entityNames) {
+        const result = removeEntity(next, name);
+        if (result.error) continue;
+        if (result.yaml !== next) {
+          next = result.yaml;
+          mutated = true;
+        }
+      }
+      if (mutated) {
+        await saveFileContent(model.file, next);
+        filesUpdated.push(model.path);
+      }
+    } catch (err) {
+      failures.push({ path: model.path, error: err?.message || String(err) });
+    }
+  }
+  return { filesUpdated, failures };
+}
 
 function parseYamlObjectSafe(text) {
   try {
@@ -168,6 +263,11 @@ const useWorkspaceStore = create((set, get) => ({
   // push data: the graph endpoint is cheap and we don't want the store
   // to mirror the model-graph payload.
   modelGraphVersion: 0,
+
+  // Summary of the most recent delete cascade — consumed by toast/UX to
+  // surface "we also rewrote N files to remove M dangling references".
+  // Null when no delete has happened yet; reset on every deleteFile call.
+  lastDeleteCascade: null,
 
   // Loading states
   loading: false,
@@ -1399,7 +1499,23 @@ const useWorkspaceStore = create((set, get) => ({
     if (!subpath) throw new Error("path is required.");
     set({ loading: true, error: null });
     try {
+      // Read the file first so we know which entities it defines. This has
+      // to happen before the disk delete — after the file is gone we can't
+      // recover the entity list and the cascade would silently skip.
+      // Non-model files (plain YAML, `.diagram.yaml`) just yield an empty
+      // entity list and the cascade below is a no-op.
+      const deletedEntities = await collectEntitiesInFile(activeProjectId, subpath);
+
       await deleteProjectFile(activeProjectId, subpath);
+
+      // Cascade: for every *other* model file in the project, remove any
+      // relationships / governance / index / metric entries that reference
+      // the entities that just disappeared. Without this, dangling FK edges
+      // persist and the canvas renders zombies.
+      const cascadeResult = deletedEntities.length
+        ? await cascadeRemoveEntityReferences(activeProjectId, subpath, deletedEntities)
+        : { filesUpdated: [], failures: [] };
+
       const data = await fetchProjectFiles(activeProjectId);
       set((s) => {
         const tabs = s.openTabs.filter((t) => t.path !== subpath);
@@ -1409,6 +1525,12 @@ const useWorkspaceStore = create((set, get) => ({
           openTabs: tabs,
           loading: false,
           modelGraphVersion: (s.modelGraphVersion || 0) + 1,
+          lastDeleteCascade: {
+            deletedPath: subpath,
+            entities: deletedEntities,
+            filesUpdated: cascadeResult.filesUpdated,
+            failures: cascadeResult.failures,
+          },
         };
         if (deletedActive) {
           const next = tabs[tabs.length - 1] || null;
@@ -1433,7 +1555,23 @@ const useWorkspaceStore = create((set, get) => ({
     const prefix = String(subpath).replace(/\/+$/, "") + "/";
     set({ loading: true, error: null });
     try {
+      // Pre-collect entity names from every model file that lives under the
+      // folder — same rationale as `deleteFile`, but spread across many files.
+      const deletedEntities = await collectEntitiesInFolder(activeProjectId, subpath);
+      const deletedPathSet = new Set(); // paths we'll skip when cascading
+      const { files } = await fetchProjectFiles(activeProjectId);
+      for (const f of files || []) {
+        if (f.path && (f.path === subpath || f.path.startsWith(prefix))) {
+          deletedPathSet.add(f.path);
+        }
+      }
+
       await deleteProjectFolder(activeProjectId, subpath);
+
+      const cascadeResult = deletedEntities.length
+        ? await cascadeRemoveEntityReferences(activeProjectId, null, deletedEntities, deletedPathSet)
+        : { filesUpdated: [], failures: [] };
+
       const data = await fetchProjectFiles(activeProjectId);
       set((s) => {
         const tabs = s.openTabs.filter((t) => !t.path || !t.path.startsWith(prefix));
@@ -1443,6 +1581,12 @@ const useWorkspaceStore = create((set, get) => ({
           openTabs: tabs,
           loading: false,
           modelGraphVersion: (s.modelGraphVersion || 0) + 1,
+          lastDeleteCascade: {
+            deletedPath: subpath,
+            entities: deletedEntities,
+            filesUpdated: cascadeResult.filesUpdated,
+            failures: cascadeResult.failures,
+          },
         };
         if (activeRemoved) {
           const next = tabs[tabs.length - 1] || null;
