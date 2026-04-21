@@ -498,7 +498,10 @@ function TreeRender({
             title={fullPath || n.path}
             style={{ paddingLeft: indent + 10, cursor: onDropOnFolder ? "grab" : undefined }}
           >
-            <I.Table />
+            {/* Distinct icon for diagram files so the Explorer surfaces them
+                at a glance — same column as table icons, but a Layers glyph
+                signals "multi-file composition". */}
+            {/\.diagram\.ya?ml$/i.test(n.name || "") ? <I.Layers /> : <I.Table />}
             <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{n.name}</span>
           </div>
         );

@@ -7,6 +7,21 @@ from `v0.1.0` onward.
 
 ## [Unreleased]
 
+## [0.3.1] — 2026-04-20
+
+### Added
+
+- **Python loader dispatch for `diagram` kind.** `KINDS` now includes
+  `"diagram"`, `DataLexLoader` buckets diagram docs into a new
+  `diagrams` dict, the default manifest glob
+  (`datalex/diagrams/**/*.yaml`) discovers them, and
+  `DataLexProject.diagrams` + `to_dict()` surface them to callers. This
+  closes the v0.3.0 gap where diagram files round-tripped through the
+  web app but were invisible to the Python CLI/validator.
+- **Distinct Explorer icon for `.diagram.yaml` files.** The file tree
+  now renders a `Layers` icon for diagrams so they're visually
+  distinguishable from regular `.yaml` entity/model files.
+
 ## [0.3.0] — 2026-04-20
 
 ### Added

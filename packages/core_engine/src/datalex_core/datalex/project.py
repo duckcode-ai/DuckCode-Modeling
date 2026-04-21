@@ -33,8 +33,9 @@ class DataLexProject:
     domains: Dict[str, Dict[str, Any]]
     policies: Dict[str, Dict[str, Any]]
     snippets: Dict[str, Dict[str, Any]]
-    file_of: Dict[Tuple[str, str], str]
-    errors: DataLexErrorBag
+    diagrams: Dict[str, Dict[str, Any]] = field(default_factory=dict)
+    file_of: Dict[Tuple[str, str], str] = field(default_factory=dict)
+    errors: DataLexErrorBag = field(default_factory=DataLexErrorBag)
     # Phase C: imported packages. Each key is the package's alias; value is a
     # loaded sub-project. Sub-projects are validated independently.
     imports: Dict[str, "DataLexProject"] = field(default_factory=dict)
@@ -202,6 +203,7 @@ class DataLexProject:
             "domains": self.domains,
             "policies": self.policies,
             "snippets": self.snippets,
+            "diagrams": self.diagrams,
             "imports": {
                 alias: {
                     "root": str(sub.root),

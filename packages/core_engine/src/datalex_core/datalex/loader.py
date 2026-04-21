@@ -28,7 +28,7 @@ from datalex_core.datalex.parse_cache import (
 )
 
 
-KINDS = ("project", "entity", "source", "model", "term", "domain", "policy", "snippet")
+KINDS = ("project", "entity", "source", "model", "term", "domain", "policy", "snippet", "diagram")
 
 
 class _MarkedSafeLoader(yaml.SafeLoader):
@@ -327,6 +327,7 @@ def load_project(
         "glossary": (manifest or {}).get("glossary", "glossary/**/*.yaml"),
         "snippets": (manifest or {}).get("snippets", ".datalex/snippets/**/*.yaml"),
         "policies": (manifest or {}).get("policies", "policies/**/*.yaml"),
+        "diagrams": (manifest or {}).get("diagrams", "datalex/diagrams/**/*.yaml"),
     }
 
     entities: Dict[str, Dict[str, Any]] = {}
@@ -336,6 +337,7 @@ def load_project(
     domains: Dict[str, Dict[str, Any]] = {}
     policies: Dict[str, Dict[str, Any]] = {}
     snippets: Dict[str, Dict[str, Any]] = {}
+    diagrams: Dict[str, Dict[str, Any]] = {}
     file_of: Dict[Tuple[str, str], str] = {}
 
     def _register(doc: Dict[str, Any], path: Path) -> None:
@@ -351,6 +353,7 @@ def load_project(
             "domain": domains,
             "policy": policies,
             "snippet": snippets,
+            "diagram": diagrams,
         }.get(kind)
         if bucket is None:
             return
@@ -389,6 +392,7 @@ def load_project(
         domains={k: _strip_marks(v) for k, v in domains.items()},
         policies={k: _strip_marks(v) for k, v in policies.items()},
         snippets={k: _strip_marks(v) for k, v in snippets.items()},
+        diagrams={k: _strip_marks(v) for k, v in diagrams.items()},
         file_of=file_of,
         errors=bag,
     )
