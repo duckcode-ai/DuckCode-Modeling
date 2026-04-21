@@ -15,7 +15,7 @@ import {
   SelectInput,
   TextareaInput,
 } from "./InspectorField";
-import { ChevronRight } from "lucide-react";
+import { ChevronRight, Trash2 } from "lucide-react";
 
 /**
  * Edits the top-level properties of a single entity. The column grid at the
@@ -120,6 +120,32 @@ export default function EntityInspector({ entity }) {
           </div>
         )}
       </InspectorSection>
+
+      {!readOnly && (
+        <InspectorSection title="Danger zone">
+          <div className="px-3 py-2">
+            <button
+              type="button"
+              onClick={() => {
+                if (
+                  window.confirm(
+                    `Delete entity "${entity.name}"? This removes it from the YAML and any diagrams/relationships that reference it.`
+                  )
+                ) {
+                  window.dispatchEvent(
+                    new CustomEvent("dl:entity:delete", { detail: { name: entity.name } })
+                  );
+                }
+              }}
+              className="panel-btn danger"
+              style={{ width: "100%", justifyContent: "center" }}
+            >
+              <Trash2 size={12} />
+              Delete entity
+            </button>
+          </div>
+        </InspectorSection>
+      )}
     </div>
   );
 }

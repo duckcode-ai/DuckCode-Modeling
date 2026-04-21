@@ -598,6 +598,47 @@ function FlowCanvas() {
     }
   }, []);
 
+  // Native keyboard delete (Backspace / Delete). We intercept via
+  // onBeforeDelete to (a) confirm before removing entities/enums and
+  // (b) route the actual removal through the same CustomEvent pipeline
+  // that the right-click "Delete" menu uses, so the YAML mutation stays
+  // in a single code path. Annotations and group nodes are removed by
+  // React Flow directly (no YAML side effect).
+  const handleBeforeDelete = useCallback(async ({ nodes, edges }) => {
+    const keptNodes = [];
+    for (const n of nodes) {
+      const isEntity = n.type === "entityNode" || n.type === "enumNode";
+      if (isEntity) {
+        if (!window.confirm(`Delete entity "${n.id}"? This removes it from the YAML and any diagrams that reference it.`)) {
+          continue;
+        }
+      }
+      keptNodes.push(n);
+    }
+    // Edges confirm too — cheaper to undo an accidental entity delete than
+    // a relationship that touches many files.
+    const keptEdges = [];
+    for (const e of edges) {
+      if (!window.confirm(`Delete relationship "${e.id.replace(/^rel-/, "")}"?`)) continue;
+      keptEdges.push(e);
+    }
+    return { nodes: keptNodes, edges: keptEdges };
+  }, []);
+
+  const handleNodesDelete = useCallback((deletedNodes) => {
+    for (const n of deletedNodes) {
+      if (n.type === "entityNode" || n.type === "enumNode") {
+        window.dispatchEvent(new CustomEvent("dl:entity:delete", { detail: { name: n.id } }));
+      }
+    }
+  }, []);
+
+  const handleEdgesDelete = useCallback((deletedEdges) => {
+    for (const e of deletedEdges) {
+      window.dispatchEvent(new CustomEvent("dl:relationship:delete", { detail: { id: e.id } }));
+    }
+  }, []);
+
   // Annotation management
   const addAnnotation = useCallback((position) => {
     const id = `__annotation_${Date.now()}`;
@@ -628,6 +669,9 @@ function FlowCanvas() {
       edges={rfEdges}
       onNodesChange={onNodesChange}
       onEdgesChange={onEdgesChange}
+      onBeforeDelete={handleBeforeDelete}
+      onNodesDelete={handleNodesDelete}
+      onEdgesDelete={handleEdgesDelete}
       nodeTypes={nodeTypes}
       onNodeClick={onNodeClick}
       onPaneClick={onPaneClick}

@@ -23,6 +23,8 @@ from typing import Any, Dict, List, Optional
 
 import yaml
 
+from datalex_core.dbt.catalog import CatalogIndex, load_catalog
+
 
 # ------------------------ public API ------------------------
 
@@ -45,16 +47,24 @@ class ImportResult:
 def import_manifest(
     manifest_path: str,
     existing_project_root: Optional[str] = None,
+    catalog_path: Optional[str] = None,
 ) -> ImportResult:
     """Parse a dbt manifest.json and return merged DataLex source/model docs.
 
     When `existing_project_root` is provided, documents with matching
     `meta.datalex.dbt.unique_id` are merged (user-authored fields preserved).
+
+    When `catalog_path` is provided (typically `<dbt_project>/target/catalog.json`,
+    populated by `dbt docs generate`), column types missing from the manifest
+    fall back to the catalog before defaulting to "unknown". This lets
+    projects that only run `dbt docs generate` (not `dbt compile`) still
+    import real column types.
     """
     with open(manifest_path, "r", encoding="utf-8") as f:
         manifest = json.load(f)
 
     existing = _load_existing_by_unique_id(existing_project_root) if existing_project_root else {}
+    catalog = load_catalog(catalog_path) if catalog_path else CatalogIndex()
 
     result = ImportResult()
 
@@ -68,7 +78,7 @@ def import_manifest(
         sources_grouped.setdefault(source_name, []).append(node)
 
     for source_name, tables in sources_grouped.items():
-        doc = _build_source_doc(source_name, tables, existing)
+        doc = _build_source_doc(source_name, tables, existing, catalog)
         result.sources[doc["name"]] = doc
         src_path = _common_source_path(tables)
         if src_path:
@@ -77,7 +87,7 @@ def import_manifest(
     for uid, node in nodes.items():
         if node.get("resource_type") != "model":
             continue
-        doc = _build_model_doc(node, existing)
+        doc = _build_model_doc(node, existing, catalog)
         result.models[doc["name"]] = doc
         model_path = node.get("original_file_path") or ""
         if model_path:
@@ -210,6 +220,7 @@ def _build_source_doc(
     source_name: str,
     tables: List[Dict[str, Any]],
     existing: Dict[str, Dict[str, Any]],
+    catalog: CatalogIndex,
 ) -> Dict[str, Any]:
     # Source-level attributes come from the first table (dbt stores them per-node; pick any).
     first = tables[0]
@@ -237,7 +248,7 @@ def _build_source_doc(
 
     table_docs: List[Dict[str, Any]] = []
     for t in tables:
-        table_docs.append(_build_source_table_doc(t, existing_doc))
+        table_docs.append(_build_source_table_doc(t, existing_doc, catalog))
     doc["tables"] = table_docs
 
     # meta.datalex.dbt.unique_id list, so re-import can find this doc even if one table is renamed.
@@ -250,6 +261,7 @@ def _build_source_doc(
 def _build_source_table_doc(
     t: Dict[str, Any],
     existing_source: Optional[Dict[str, Any]],
+    catalog: CatalogIndex,
 ) -> Dict[str, Any]:
     name = _safe_name(t.get("name", ""))
     table_doc: Dict[str, Any] = {"name": name}
@@ -277,8 +289,11 @@ def _build_source_table_doc(
     # columns
     cols_out: List[Dict[str, Any]] = []
     prior_cols = {c.get("name"): c for c in (prior_table.get("columns") or []) if c.get("name")}
+    tbl_uid = t.get("unique_id") or ""
     for c in t.get("columns", {}).values() if isinstance(t.get("columns"), dict) else (t.get("columns") or []):
-        cols_out.append(_build_source_column_doc(c, prior_cols.get(c.get("name"), {})))
+        cols_out.append(
+            _build_source_column_doc(c, prior_cols.get(c.get("name"), {}), catalog, tbl_uid)
+        )
     if cols_out:
         table_doc["columns"] = cols_out
 
@@ -291,18 +306,28 @@ def _build_source_table_doc(
     return table_doc
 
 
-def _build_source_column_doc(c: Dict[str, Any], prior: Dict[str, Any]) -> Dict[str, Any]:
+def _build_source_column_doc(
+    c: Dict[str, Any],
+    prior: Dict[str, Any],
+    catalog: CatalogIndex,
+    table_unique_id: str,
+) -> Dict[str, Any]:
     doc: Dict[str, Any] = {"name": c.get("name")}
-    # type: manifest owns it; prefer manifest value if present. Same
-    # "unknown" sentinel as _build_model_column_doc so the UI can flag
-    # columns that didn't pick up a real type (dbt manifest without
-    # `dbt compile`).
+    # Type precedence:
+    #   1. manifest `data_type` (from `dbt compile`) — freshest, already parsed
+    #   2. catalog.json `type` (from `dbt docs generate`) — real warehouse types
+    #   3. prior user-authored type (preserved across re-imports)
+    #   4. "unknown" sentinel — UI renders as "—" and importer warns
     if c.get("data_type"):
         doc["type"] = c["data_type"]
-    elif prior.get("type"):
-        doc["type"] = prior["type"]
     else:
-        doc["type"] = "unknown"
+        catalog_type = catalog.column_type(table_unique_id, c.get("name") or "")
+        if catalog_type:
+            doc["type"] = catalog_type
+        elif prior.get("type"):
+            doc["type"] = prior["type"]
+        else:
+            doc["type"] = "unknown"
 
     # user-authored: preserve
     for k in ("description", "sensitivity", "tags"):
@@ -318,6 +343,7 @@ def _build_source_column_doc(c: Dict[str, Any], prior: Dict[str, Any]) -> Dict[s
 def _build_model_doc(
     node: Dict[str, Any],
     existing: Dict[str, Dict[str, Any]],
+    catalog: CatalogIndex,
 ) -> Dict[str, Any]:
     name = _safe_name(node.get("name", ""))
     uid = node.get("unique_id")
@@ -361,7 +387,9 @@ def _build_model_doc(
     columns_raw = node.get("columns") or {}
     column_iter = columns_raw.values() if isinstance(columns_raw, dict) else columns_raw
     for c in column_iter:
-        cols_out.append(_build_model_column_doc(c, prior_cols.get(c.get("name"), {})))
+        cols_out.append(
+            _build_model_column_doc(c, prior_cols.get(c.get("name"), {}), catalog, uid or "")
+        )
     if cols_out:
         doc["columns"] = cols_out
 
@@ -371,20 +399,29 @@ def _build_model_doc(
     return doc
 
 
-def _build_model_column_doc(c: Dict[str, Any], prior: Dict[str, Any]) -> Dict[str, Any]:
+def _build_model_column_doc(
+    c: Dict[str, Any],
+    prior: Dict[str, Any],
+    catalog: CatalogIndex,
+    model_unique_id: str,
+) -> Dict[str, Any]:
     doc: Dict[str, Any] = {"name": c.get("name")}
-    # Type precedence: dbt `data_type` (populated by `dbt compile` / `dbt docs
-    # generate`), then any prior user-authored type, then an explicit
-    # "unknown" sentinel. Writing "unknown" (rather than omitting `type:`)
-    # makes uncompiled dbt projects surface visibly in the UI — the web-app
-    # renders "unknown" columns as "—" and the caller prints a one-line
-    # warning at import time so users know to run `dbt compile`.
+    # Type precedence:
+    #   1. manifest `data_type` (populated by `dbt compile`)
+    #   2. catalog.json `type` (populated by `dbt docs generate`)
+    #   3. prior user-authored type (preserved across re-imports)
+    #   4. "unknown" sentinel — UI renders as "—" and importer warns so
+    #      users know to run `dbt compile` or `dbt docs generate`.
     if c.get("data_type"):
         doc["type"] = c["data_type"]
-    elif prior.get("type"):
-        doc["type"] = prior["type"]
     else:
-        doc["type"] = "unknown"
+        catalog_type = catalog.column_type(model_unique_id, c.get("name") or "")
+        if catalog_type:
+            doc["type"] = catalog_type
+        elif prior.get("type"):
+            doc["type"] = prior["type"]
+        else:
+            doc["type"] = "unknown"
 
     for k in ("description", "sensitivity", "tags", "terms", "tests", "constraints"):
         if prior.get(k):

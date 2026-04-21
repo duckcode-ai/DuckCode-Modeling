@@ -1,4 +1,5 @@
 import React from "react";
+import { Trash2 } from "lucide-react";
 import useWorkspaceStore from "../../stores/workspaceStore";
 import useDiagramStore from "../../stores/diagramStore";
 import useUiStore from "../../stores/uiStore";
@@ -94,6 +95,31 @@ export default function RelationshipInspector({ relId }) {
           readOnly={readOnly}
         />
       </InspectorSection>
+
+      {!readOnly && (
+        <InspectorSection title="Danger zone">
+          <div className="px-3 py-2">
+            <button
+              type="button"
+              onClick={() => {
+                const relName = rel.name || relId;
+                if (window.confirm(`Delete relationship "${relName}"?`)) {
+                  // Canvas edge ids are "rel-<name>"; the shared handler
+                  // strips that prefix, so either form works here.
+                  window.dispatchEvent(
+                    new CustomEvent("dl:relationship:delete", { detail: { id: relName } })
+                  );
+                }
+              }}
+              className="panel-btn danger"
+              style={{ width: "100%", justifyContent: "center" }}
+            >
+              <Trash2 size={12} />
+              Delete relationship
+            </button>
+          </div>
+        </InspectorSection>
+      )}
     </div>
   );
 }

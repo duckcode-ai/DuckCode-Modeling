@@ -116,8 +116,18 @@ def sync_dbt_project(
 
     report = SyncReport(dbt_project=str(dbt_dir), datalex_root=str(out_root))
 
-    # Step 1: parse manifest (merge-preserving re-import)
-    imported = import_manifest(str(manifest), existing_project_root=str(out_root))
+    # Step 1: parse manifest (merge-preserving re-import). Auto-discover a
+    # catalog.json alongside the manifest — `dbt docs generate` writes both
+    # into `target/`, so if the user has generated docs we pick up types
+    # that aren't yet in the manifest. Missing catalog.json is fine; the
+    # importer silently falls through.
+    catalog_candidate = manifest.parent / "catalog.json"
+    catalog_path = str(catalog_candidate) if catalog_candidate.exists() else None
+    imported = import_manifest(
+        str(manifest),
+        existing_project_root=str(out_root),
+        catalog_path=catalog_path,
+    )
     # Surface the manifest-level warnings (e.g. "N columns have no data type
     # — run `dbt compile`") up through the sync report so both the CLI and
     # the API server see them in a single place.

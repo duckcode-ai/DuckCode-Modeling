@@ -462,9 +462,17 @@ def _cmd_dbt_emit(args: argparse.Namespace) -> int:
 
 
 def _cmd_dbt_import(args: argparse.Namespace) -> int:
+    # Auto-discover catalog.json sibling to the manifest — `dbt docs generate`
+    # writes it to the same `target/` folder and it carries warehouse types
+    # even when manifest.data_type is empty.
+    from pathlib import Path as _Path
+    manifest_p = _Path(args.manifest)
+    catalog_candidate = manifest_p.parent / "catalog.json"
+    catalog_path = str(catalog_candidate) if catalog_candidate.exists() else None
     result = import_manifest(
         args.manifest,
         existing_project_root=args.merge_from or args.out_root,
+        catalog_path=catalog_path,
     )
     written = write_import_result(result, args.out_root)
     print(

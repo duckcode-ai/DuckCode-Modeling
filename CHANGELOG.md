@@ -7,6 +7,46 @@ from `v0.1.0` onward.
 
 ## [Unreleased]
 
+## [1.0.4] — 2026-04-21
+
+Patch release — closes two gaps reported against the v1.0.3 import flow:
+deleting entities/relationships from the diagram canvas now has
+first-class keyboard + Inspector affordances (not just the right-click
+context menu), and dbt import picks up column types from
+`target/catalog.json` when `manifest.json` doesn't carry `data_type`.
+
+### Added
+
+- **Keyboard delete on the diagram canvas.** Pressing Backspace or
+  Delete on a selected entity or relationship now routes through
+  `onBeforeDelete` to show a confirm prompt, then emits the same
+  `dl:entity:delete` / `dl:relationship:delete` CustomEvents the
+  right-click menu uses — so the YAML mutation lives in one code path
+  regardless of how the user triggered it. Annotation and group nodes
+  still delete silently (no YAML side effect).
+  - `packages/web-app/src/components/diagram/DiagramCanvas.jsx` —
+    `onBeforeDelete` / `onNodesDelete` / `onEdgesDelete`.
+- **"Delete entity" and "Delete relationship" buttons in the
+  Inspector.** A "Danger zone" section now surfaces a destructive
+  button in both the Entity and Relationship inspectors, using the
+  same confirm-and-dispatch pattern as the canvas shortcut. Hidden
+  when the workspace is read-only.
+  - `packages/web-app/src/components/inspectors/EntityInspector.jsx`,
+    `packages/web-app/src/components/inspectors/RelationshipInspector.jsx`.
+- **dbt catalog.json type fallback.** `import_manifest` now accepts
+  an optional `catalog_path` and uses it as a fallback when a column
+  has no `data_type` in the manifest. This lets projects that run
+  `dbt docs generate` (but not `dbt compile`) still import real
+  warehouse types into DataLex. `sync_dbt_project` and
+  `_cmd_dbt_import` auto-discover `target/catalog.json` alongside the
+  manifest — missing catalog is fine; the importer silently falls
+  through to the existing "prior type → unknown" chain.
+  - New `packages/core_engine/src/datalex_core/dbt/catalog.py`
+    (`load_catalog`, `CatalogIndex`, `default_catalog_path`).
+  - Type precedence in both model and source column builders:
+    manifest `data_type` → catalog `type` → prior user-authored
+    type → `"unknown"` sentinel.
+
 ## [1.0.3] — 2026-04-21
 
 Patch release — fixes the post-dbt-import landing UX so users land on
