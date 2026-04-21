@@ -161,6 +161,14 @@ const useWorkspaceStore = create((set, get) => ({
   // All open file tabs
   openTabs: [],
 
+  // Bumped any time a write happens that could affect the model graph
+  // (entity delete / rename, save, file delete). Read-only panels that
+  // fetch on demand (ModelGraphPanel, lineage overlays) subscribe to this
+  // counter so they refresh instead of going stale. Bump rather than
+  // push data: the graph endpoint is cheap and we don't want the store
+  // to mirror the model-graph payload.
+  modelGraphVersion: 0,
+
   // Loading states
   loading: false,
   error: null,
@@ -760,6 +768,19 @@ const useWorkspaceStore = create((set, get) => ({
 
   // --- File actions ---
   openFile: async (fileInfo) => {
+    // Guard: if the requested file is already the active file AND has
+    // unsaved in-memory edits, do NOT refetch. Fetching would overwrite
+    // the user's changes with the disk version — exactly the data-loss
+    // path that made diagram edits "suddenly disappear."
+    const existing = get();
+    if (
+      existing.activeFile &&
+      fileInfo &&
+      existing.activeFile.fullPath === fileInfo.fullPath &&
+      existing.isDirty
+    ) {
+      return;
+    }
     set({ loading: true, error: null });
     try {
       const data = await fetchFileContent(fileInfo.fullPath);
@@ -816,6 +837,31 @@ const useWorkspaceStore = create((set, get) => ({
       }
       return;
     }
+
+    // Switching to the currently active file is a no-op. Without this
+    // guard, clicking the same tab (or a cascade of re-renders that
+    // re-invoke switchTab for the same file) would call openFile, which
+    // refetches from disk — clobbering any in-memory edits that haven't
+    // been Saved yet. This was the root cause of relationships built on
+    // a diagram "suddenly disappearing" between actions.
+    const { activeFile } = get();
+    if (activeFile && activeFile.fullPath === fileInfo.fullPath) return;
+
+    // Switching to another already-open tab: rehydrate from its cached
+    // content (updated on every updateContent via this path — see below)
+    // rather than refetching from disk. Preserves unsaved edits on a
+    // file the user left open and comes back to. Falls through to
+    // openFile when the tab's cache is missing (cold tab).
+    const cached = get().openTabs.find((t) => t.fullPath === fileInfo.fullPath);
+    if (cached && typeof cached.content === "string") {
+      set({
+        activeFile: cached,
+        activeFileContent: cached.content,
+        originalContent: cached.originalContent != null ? cached.originalContent : cached.content,
+        isDirty: cached.originalContent != null && cached.content !== cached.originalContent,
+      });
+      return;
+    }
     await get().openFile(fileInfo);
   },
 
@@ -853,7 +899,34 @@ const useWorkspaceStore = create((set, get) => ({
       if (key) useHistoryStore.getState().push(key, prev, content);
     }
 
-    set({ activeFileContent: content, isDirty: content !== originalContent });
+    set((s) => {
+      const nextState = {
+        activeFileContent: content,
+        isDirty: content !== originalContent,
+      };
+      // Keep the active file's openTabs cache in sync so switching away
+      // and back preserves unsaved edits. Without this, switchTab would
+      // fall back to openFile (disk fetch) and wipe the in-memory
+      // relationship / entity-move the user just made.
+      if (activeFile && Array.isArray(s.openTabs)) {
+        const key = s.offlineMode ? "id" : "fullPath";
+        const lookup = activeFile[key];
+        let mutated = false;
+        const nextTabs = s.openTabs.map((t) => {
+          if (!t || t[key] !== lookup) return t;
+          mutated = true;
+          return {
+            ...t,
+            content,
+            // Remember the disk baseline on the tab so switchTab can
+            // recompute isDirty correctly when rehydrating from cache.
+            originalContent: t.originalContent != null ? t.originalContent : originalContent,
+          };
+        });
+        if (mutated) nextState.openTabs = nextTabs;
+      }
+      return nextState;
+    });
 
     if (offlineMode && activeFile) {
       const updated = localDocuments.map((d) =>
@@ -862,6 +935,14 @@ const useWorkspaceStore = create((set, get) => ({
       set({ localDocuments: updated });
       get().saveOfflineDocs();
     }
+  },
+
+  // Bump the model-graph revision so subscribers (e.g. ModelGraphPanel)
+  // know the underlying YAML changed and can refetch. Callers: entity
+  // delete (Shell, ViewsView, EntityPanel), save, file delete — anywhere
+  // we mutate model shape and want the read-only graph to catch up.
+  bumpModelGraphVersion: () => {
+    set((s) => ({ modelGraphVersion: (s.modelGraphVersion || 0) + 1 }));
   },
 
   undo: () => {
@@ -920,10 +1001,26 @@ const useWorkspaceStore = create((set, get) => ({
         set({ lastAutoGenerateError: String(autoErr?.message || autoErr), lastAutoGeneratedDdl: null });
       }
 
-      set({
-        originalContent: activeFileContent,
-        isDirty: false,
-        loading: false,
+      set((s) => {
+        // Also update the cached tab entry so switchTab's rehydrate
+        // path sees the new disk baseline (originalContent) and doesn't
+        // spuriously report isDirty after a clean save.
+        const key = s.offlineMode ? "id" : "fullPath";
+        const lookup = activeFile[key];
+        const openTabs = (s.openTabs || []).map((t) =>
+          t && t[key] === lookup
+            ? { ...t, content: activeFileContent, originalContent: activeFileContent }
+            : t,
+        );
+        return {
+          originalContent: activeFileContent,
+          isDirty: false,
+          loading: false,
+          openTabs,
+          // Save may have changed entity shape / relationships — invalidate
+          // the read-only graph panel so it reflects the new persisted state.
+          modelGraphVersion: (s.modelGraphVersion || 0) + 1,
+        };
       });
     } catch (err) {
       set({ error: err.message, loading: false });
@@ -1231,7 +1328,10 @@ const useWorkspaceStore = create((set, get) => ({
         isDirty: wasActive ? false : s.isDirty,
       }));
       const data = await fetchProjectFiles(activeProjectId);
-      set({ projectFiles: data.files || [] });
+      set((s) => ({
+        projectFiles: data.files || [],
+        modelGraphVersion: (s.modelGraphVersion || 0) + 1,
+      }));
       if (wasActive && result?.file?.fullPath) {
         const moved = (data.files || []).find((f) => f.fullPath === result.file.fullPath);
         if (moved) await get().openFile(moved);
@@ -1304,7 +1404,12 @@ const useWorkspaceStore = create((set, get) => ({
       set((s) => {
         const tabs = s.openTabs.filter((t) => t.path !== subpath);
         const deletedActive = activeFile && activeFile.path === subpath;
-        const newState = { projectFiles: data.files || [], openTabs: tabs, loading: false };
+        const newState = {
+          projectFiles: data.files || [],
+          openTabs: tabs,
+          loading: false,
+          modelGraphVersion: (s.modelGraphVersion || 0) + 1,
+        };
         if (deletedActive) {
           const next = tabs[tabs.length - 1] || null;
           newState.activeFile = next;
@@ -1333,7 +1438,12 @@ const useWorkspaceStore = create((set, get) => ({
       set((s) => {
         const tabs = s.openTabs.filter((t) => !t.path || !t.path.startsWith(prefix));
         const activeRemoved = activeFile && activeFile.path && activeFile.path.startsWith(prefix);
-        const newState = { projectFiles: data.files || [], openTabs: tabs, loading: false };
+        const newState = {
+          projectFiles: data.files || [],
+          openTabs: tabs,
+          loading: false,
+          modelGraphVersion: (s.modelGraphVersion || 0) + 1,
+        };
         if (activeRemoved) {
           const next = tabs[tabs.length - 1] || null;
           newState.activeFile = next;

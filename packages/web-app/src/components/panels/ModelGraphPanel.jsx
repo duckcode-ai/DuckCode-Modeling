@@ -134,7 +134,7 @@ function ModelCard({ model, idx, colorMap, onOpen }) {
 }
 
 export default function ModelGraphPanel() {
-  const { activeProjectId, offlineMode, projectFiles, openFile } = useWorkspaceStore();
+  const { activeProjectId, offlineMode, projectFiles, openFile, modelGraphVersion } = useWorkspaceStore();
   const [graphData, setGraphData] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
@@ -152,7 +152,11 @@ export default function ModelGraphPanel() {
     }
   };
 
-  useEffect(() => { loadGraph(); }, [activeProjectId]);
+  // Refetch when the project changes OR when any model-graph-affecting
+  // write bumps `modelGraphVersion` (save, entity delete, file delete,
+  // rename). Without the version dependency the panel showed stale data
+  // until the user manually clicked Refresh.
+  useEffect(() => { loadGraph(); }, [activeProjectId, modelGraphVersion]);
 
   const colorMap = useMemo(() => {
     if (!graphData?.models) return {};

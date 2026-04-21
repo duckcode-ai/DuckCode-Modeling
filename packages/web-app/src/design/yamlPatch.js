@@ -133,23 +133,97 @@ export function appendEntity(yamlText, entitySpec) {
   return dump(doc);
 }
 
-/* Delete an entity and any relationships that reference it. */
+/* Delete an entity and every dependent reference. Legacy callers
+   expect a YAML string back, so that remains the return shape. Use
+   `deleteEntityDeep` when you need the cascade-impact counts (which
+   the UI surfaces in a toast so users know what got cleaned up).
+
+   Cascade covers:
+     • entities[]         — the target row
+     • relationships[]    — any edge with target on either end (handles
+                             the canonical `from: "entity.field"` string
+                             shape and the diagram-level `{from:{entity}}`
+                             object shape)
+     • indexes[]          — `index.entity === target`
+     • metrics[]          — `metric.entity === target`
+     • governance.classification — keys prefixed `<target>.<field>`
+     • governance.stewards        — same pattern
+*/
 export function deleteEntity(yamlText, entityName) {
+  const result = deleteEntityDeep(yamlText, entityName);
+  return result ? result.yaml : null;
+}
+
+export function deleteEntityDeep(yamlText, entityName) {
   const doc = loadDoc(yamlText);
   if (!doc) return null;
   const target = String(entityName || "").toLowerCase();
   if (!target) return null;
+
+  const impact = {
+    entity: false,
+    relationships: 0,
+    indexes: 0,
+    metrics: 0,
+    governance: 0,
+  };
+
+  const beforeEntities = Array.isArray(doc.entities) ? doc.entities.length : 0;
   doc.entities = (doc.entities || []).filter(
     (e) => String(e.name || "").toLowerCase() !== target
   );
+  impact.entity = doc.entities.length < beforeEntities;
+  if (!impact.entity) return null; // nothing to delete — signal no-op
+
   if (Array.isArray(doc.relationships)) {
+    const before = doc.relationships.length;
     doc.relationships = doc.relationships.filter((r) => {
-      const from = String(r.from || "").split(".")[0].toLowerCase();
-      const to = String(r.to || "").split(".")[0].toLowerCase();
+      // String form: "entity.field"
+      const fromStr = typeof r?.from === "string" ? r.from.split(".")[0].toLowerCase() : "";
+      const toStr = typeof r?.to === "string" ? r.to.split(".")[0].toLowerCase() : "";
+      // Object form: {entity, field} — used by diagram-level relationships
+      const fromObj = String(r?.from?.entity || r?.from?.table || "").toLowerCase();
+      const toObj = String(r?.to?.entity || r?.to?.table || "").toLowerCase();
+      const from = fromStr || fromObj;
+      const to = toStr || toObj;
       return from !== target && to !== target;
     });
+    impact.relationships = before - doc.relationships.length;
   }
-  return dump(doc);
+
+  if (Array.isArray(doc.indexes)) {
+    const before = doc.indexes.length;
+    doc.indexes = doc.indexes.filter(
+      (idx) => String(idx?.entity || "").toLowerCase() !== target
+    );
+    impact.indexes = before - doc.indexes.length;
+  }
+
+  if (Array.isArray(doc.metrics)) {
+    const before = doc.metrics.length;
+    doc.metrics = doc.metrics.filter(
+      (m) => String(m?.entity || "").toLowerCase() !== target
+    );
+    impact.metrics = before - doc.metrics.length;
+  }
+
+  // Governance cleanup — classification and stewards keys are
+  // "<entity>.<field>". Case-insensitive prefix match.
+  if (doc.governance && typeof doc.governance === "object") {
+    for (const bucket of ["classification", "stewards"]) {
+      const map = doc.governance[bucket];
+      if (!map || typeof map !== "object") continue;
+      const prefix = `${target}.`;
+      for (const key of Object.keys(map)) {
+        if (String(key).toLowerCase().startsWith(prefix)) {
+          delete map[key];
+          impact.governance += 1;
+        }
+      }
+    }
+  }
+
+  return { yaml: dump(doc), impact };
 }
 
 /* Delete a field from an entity. */
@@ -215,8 +289,18 @@ export function setEntityDisplay(yamlText, entityName, { x, y, width } = {}) {
    — so we match by `(file, entity)` rather than by entity name alone
    (two different files can define an entity with the same name).
 
+   Drag-and-drop from the Explorer writes wildcard entries — shape
+   `{file, entity: "*"}` — that expand to every entity in the referenced
+   model file. When the user subsequently moves an individual entity,
+   there's no concrete `(file, entityName)` row to patch. Rather than
+   silently dropping the move, we append a concrete override row next
+   to the wildcard. The adapter's last-wins dedupe by entity id picks
+   up the override without disturbing the wildcard (so the remaining
+   entities stay positioned by the adapter defaults).
+
    Positions round to integers (same as setEntityDisplay). Returns null
-   when the doc can't be parsed or the entry isn't found. */
+   when the doc can't be parsed or when neither a concrete entry nor a
+   wildcard for the file is found. */
 export function setDiagramEntityDisplay(yamlText, file, entityName, { x, y, width } = {}) {
   let doc;
   try {
@@ -229,12 +313,29 @@ export function setDiagramEntityDisplay(yamlText, file, entityName, { x, y, widt
 
   const fileKey = String(file || "").replace(/^[/\\]+/, "");
   const entityKey = String(entityName || "").toLowerCase();
-  const entry = doc.entities.find(
+  if (!fileKey || !entityKey) return null;
+
+  let entry = doc.entities.find(
     (e) =>
       String(e?.file || "").replace(/^[/\\]+/, "") === fileKey &&
       String(e?.entity || "").toLowerCase() === entityKey
   );
-  if (!entry) return null;
+
+  if (!entry) {
+    // Fall back to wildcard-expansion case: if the diagram references
+    // this file with `entity: "*"` (or an empty/omitted entity), append
+    // a new concrete entry so the move persists. Without this, dragging
+    // entities around on a wildcard-sourced diagram was a silent no-op.
+    const hasWildcard = doc.entities.some((e) => {
+      if (!e || typeof e !== "object") return false;
+      if (String(e.file || "").replace(/^[/\\]+/, "") !== fileKey) return false;
+      const ent = String(e.entity || "").trim();
+      return ent === "" || ent === "*";
+    });
+    if (!hasWildcard) return null;
+    entry = { file: fileKey, entity: entityName };
+    doc.entities.push(entry);
+  }
 
   const applyNum = (key, value) => {
     if (value === undefined) return;

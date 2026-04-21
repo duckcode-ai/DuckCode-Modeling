@@ -21,7 +21,7 @@ import BottomDrawer from "./BottomDrawer";
 import { DEMO_SCHEMA } from "./demoSchema";
 import { THEMES } from "./notation";
 import { adaptDataLexYaml, adaptDataLexModelYaml, adaptDiagramYaml } from "./schemaAdapter";
-import { appendEntity, deleteEntity, setEntityDisplay, setDiagramEntityDisplay } from "./yamlPatch";
+import { appendEntity, deleteEntityDeep, setEntityDisplay, setDiagramEntityDisplay } from "./yamlPatch";
 
 import { fetchGitStatus } from "../lib/api";
 import {
@@ -604,12 +604,24 @@ export default function Shell() {
     if (!entityName) return;
     const s = useWorkspaceStore.getState();
     if (!s.activeFile) return;
-    if (!window.confirm(`Delete entity “${entityName}”? This removes all fields and any relationships referencing it.`)) return;
-    const next = deleteEntity(s.activeFileContent, entityName);
-    if (next == null) { addToast({ type: "error", message: "Could not delete — invalid YAML." }); return; }
-    s.updateContent(next);
+    if (!window.confirm(`Delete entity “${entityName}”? This removes its fields and every relationship, index, metric, and governance entry referencing it.`)) return;
+    const result = deleteEntityDeep(s.activeFileContent, entityName);
+    if (!result) {
+      addToast({ type: "error", message: `Could not delete “${entityName}” — entity not found or YAML invalid.` });
+      return;
+    }
+    s.updateContent(result.yaml);
     setSelected(null);
-    addToast({ type: "success", message: `Deleted “${entityName}”.` });
+    const extras = [];
+    if (result.impact.relationships) extras.push(`${result.impact.relationships} relationship${result.impact.relationships === 1 ? "" : "s"}`);
+    if (result.impact.indexes)       extras.push(`${result.impact.indexes} index${result.impact.indexes === 1 ? "" : "es"}`);
+    if (result.impact.metrics)       extras.push(`${result.impact.metrics} metric${result.impact.metrics === 1 ? "" : "s"}`);
+    if (result.impact.governance)    extras.push(`${result.impact.governance} governance entr${result.impact.governance === 1 ? "y" : "ies"}`);
+    const suffix = extras.length ? ` (also removed ${extras.join(", ")})` : "";
+    addToast({ type: "success", message: `Deleted “${entityName}”${suffix}.` });
+    // Nudge read-only graph panels that key off modelGraphVersion so they
+    // refetch instead of showing a stale cascade.
+    s.bumpModelGraphVersion?.();
   }, [addToast]);
 
   /* ── ELK auto-layout (palette action) ──────────────────────────────

@@ -12,7 +12,7 @@ import { Eye, Plus, Layers, Trash2 } from "lucide-react";
 import yaml from "js-yaml";
 import useWorkspaceStore from "../../stores/workspaceStore";
 import useUiStore from "../../stores/uiStore";
-import { appendEntity, deleteEntity } from "../yamlPatch";
+import { appendEntity, deleteEntityDeep } from "../yamlPatch";
 import {
   PanelFrame,
   PanelCard,
@@ -140,14 +140,21 @@ export default function ViewsView({ onSelectTable }) {
   };
 
   const handleDelete = (name) => {
-    if (!window.confirm(`Delete view “${name}”? This cannot be undone.`)) return;
-    const next = deleteEntity(activeFileContent, name);
-    if (next == null) {
-      addToast({ type: "error", message: "Could not delete — invalid YAML." });
+    if (!window.confirm(`Delete view “${name}”? This also removes any relationships, indexes, metrics, and governance entries that reference it.`)) return;
+    const result = deleteEntityDeep(activeFileContent, name);
+    if (!result) {
+      addToast({ type: "error", message: `Could not delete “${name}” — view not found or YAML invalid.` });
       return;
     }
-    updateContent(next);
-    addToast({ type: "success", message: `Deleted “${name}”.` });
+    updateContent(result.yaml);
+    const extras = [];
+    if (result.impact.relationships) extras.push(`${result.impact.relationships} relationship${result.impact.relationships === 1 ? "" : "s"}`);
+    if (result.impact.indexes)       extras.push(`${result.impact.indexes} index${result.impact.indexes === 1 ? "" : "es"}`);
+    if (result.impact.metrics)       extras.push(`${result.impact.metrics} metric${result.impact.metrics === 1 ? "" : "s"}`);
+    if (result.impact.governance)    extras.push(`${result.impact.governance} governance entr${result.impact.governance === 1 ? "y" : "ies"}`);
+    const suffix = extras.length ? ` (also removed ${extras.join(", ")})` : "";
+    addToast({ type: "success", message: `Deleted “${name}”${suffix}.` });
+    useWorkspaceStore.getState().bumpModelGraphVersion?.();
   };
 
   const matviewCount = views.filter((v) => String(v.type).toLowerCase() === "materialized_view").length;

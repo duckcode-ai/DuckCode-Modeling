@@ -7,6 +7,93 @@ from `v0.1.0` onward.
 
 ## [Unreleased]
 
+## [0.5.1] — 2026-04-21
+
+Patch release — the modeling loop had a grab-bag of silent data-loss
+and stale-view bugs that all showed up once users started actually
+building diagrams on top of v0.5.0. This release fixes them as a set.
+
+### Fixed
+
+- **Entity moves persist on wildcard diagrams.** Dropping a model file
+  onto a `.diagram.yaml` writes a `{file, entity: "*"}` wildcard
+  reference that expands to every entity in the file. Before this
+  release, dragging an individual entity on the canvas called
+  `setDiagramEntityDisplay` with a concrete entity name — which failed
+  to match the wildcard row in the YAML and silently returned `null`,
+  meaning `updateContent` never fired, the file never went dirty, and
+  the new position was lost on reload. This was the root cause of the
+  "I arrange them and they keep snapping back" complaint. Fix: the
+  patcher now appends a concrete `{file, entity: <name>, x, y}`
+  override next to the wildcard when no explicit row exists. The
+  adapter's last-wins dedupe picks up the override on the next render
+  without touching the wildcard, so the remaining entities stay on
+  their adapter-default positions.
+  - `packages/web-app/src/design/yamlPatch.js` — `setDiagramEntityDisplay`
+    now falls back to the wildcard row (also handles entries with an
+    empty or omitted `entity:` field for backward compat).
+  - `packages/web-app/tests/yamlPatchDiagram.test.js` — regression
+    suite covering explicit match, wildcard fallback, repeated moves,
+    and the null-fallback path.
+- **Diagram relationships no longer vanish between actions.** Building
+  a relationship on a `.diagram.yaml` (drag-to-relate or "Add
+  Relationship" dialog) updates `activeFileContent` in memory, but the
+  per-tab `openTabs` content cache was never kept in sync. `switchTab`
+  unconditionally delegated to `openFile`, which refetched the file
+  from disk and overwrote the in-memory YAML — taking the new
+  relationship with it. Browser reload hit the same path. Fix:
+  - `updateContent` now mirrors the new content into the active file's
+    `openTabs` entry (and records the disk baseline as
+    `originalContent` the first time, so dirty state survives a tab
+    round-trip).
+  - `switchTab` short-circuits when the requested file is already
+    active, and otherwise rehydrates from the cached tab content
+    before falling through to `openFile`.
+  - `openFile` refuses to refetch when the requested file is already
+    active and dirty — prevents any re-entrant call path from
+    clobbering unsaved work.
+  - `saveCurrentFile` updates the tab cache's `originalContent` after
+    a successful write so post-save dirty checks on rehydrate are
+    accurate.
+  - `packages/web-app/tests/diagramRelationshipRoundTrip.test.js` —
+    new suite exercising the full write → adapt read-back loop for
+    cross-file diagram FKs, including the move-then-link combination.
+- **dbt import + every CLI shell-out works from a dev clone again.**
+  Commit `2cac0cc` (Apr 18) renamed the launcher `dm → datalex` but 17
+  call sites in `packages/api-server/index.js` still spawned
+  `<REPO_ROOT>/dm`, producing `can't open file '.../dm': [Errno 2]` on
+  dbt Import, Generate SQL, Transform, Standards, Sync, Pull,
+  Connectors, Apply, and every other flow that shells out. All call
+  sites now reference `<REPO_ROOT>/datalex`; the `dm` legacy path is
+  kept as a fallback so pre-rename checkouts still boot.
+- **Deleting an entity now cascades cleanly across the model.** Shell's
+  "Delete entity" action (and ViewsView's "Delete view") routed through
+  a minimal `deleteEntity` that stripped the entity row but left orphan
+  relationships, indexes, metrics, and `governance.classification` /
+  `governance.stewards` entries pointing at a nonexistent entity. The
+  replacement `deleteEntityDeep` purges every referring block — matching
+  both the string form (`from: "entity.field"`) and the diagram-level
+  object form (`{from: {entity, field}}`) of relationships — and returns
+  an impact report. The success toast now lists what came with the
+  delete: e.g. *“Deleted ‘customer’ (also removed 3 relationships, 1
+  index, 2 governance entries).”* Missing-entity no-ops surface a real
+  error toast instead of silently saving.
+- **Model Graph panel refreshes automatically after edits.** The
+  read-only graph panel only reloaded on project switch, so deletes /
+  renames / saves left it showing a stale model until the user clicked
+  Refresh. A new `modelGraphVersion` counter in `workspaceStore` bumps
+  on save, entity delete, file delete, folder delete, and file rename;
+  `ModelGraphPanel` subscribes to it and refetches.
+
+### Added
+
+- **`deleteEntityDeep(yamlText, entityName)`** in `yamlPatch.js`
+  returns `{yaml, impact}` with cascade counts. Legacy `deleteEntity`
+  is retained as a thin wrapper that returns only the YAML string for
+  older callers. 8 new regression tests cover the cascade path,
+  case-insensitive matching, the diagram-level object form, minimal
+  docs without optional blocks, and the wrapper's back-compat shape.
+
 ## [0.5.0] — 2026-04-21
 
 First SQLDBM-parity minor: shareability. The v0.4.x line closed the

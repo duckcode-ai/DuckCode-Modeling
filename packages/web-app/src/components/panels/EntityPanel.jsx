@@ -233,6 +233,9 @@ export default function EntityPanel() {
     clearSelection();
     addToast?.({ type: "success", message: `Deleted entity ${selectedEntityId}.` });
     setDeleteEntityOpen(false);
+    // Invalidate read-only graph/panel views that fetch on demand so they
+    // reflect the cascade without a manual refresh.
+    useWorkspaceStore.getState().bumpModelGraphVersion?.();
   };
 
   const handleRenameField = (oldName) => {
