@@ -21,8 +21,8 @@ You'll end with:
 ## Step 1 — Install and start the server
 
 ```bash
-pip install datalex-cli
-datalex serve
+pip install 'datalex-cli[serve]'     # CLI + bundled Node, one command
+datalex serve                        # opens http://localhost:3030
 ```
 
 The first `datalex serve` call prints something like:
@@ -68,7 +68,25 @@ call, no git clone. If you ever re-run `dm dbt sync` against the real
 `dbt-labs/jaffle-shop` repo you'll get the same tree (modulo the
 `meta.datalex.dbt.*` timestamps).
 
-## Step 3 — Open a model in the inspector
+## Step 3 — Build your first diagram (v0.3+)
+
+The Explorer tree is your source of truth; diagrams are how you pick
+which models to visualize together.
+
+1. In the Explorer toolbar, click **New Diagram** (the Layers icon).
+   A new file `datalex/diagrams/untitled.diagram.yaml` is created and
+   opens on the canvas (empty).
+2. Drag `models/staging/stg_customers.yml` from the Explorer onto the
+   canvas. The customer entity appears.
+3. Drag `models/staging/stg_orders.yml` onto the canvas too. A dashed
+   FK edge between `stg_orders.customer_id` and `stg_customers.customer_id`
+   renders automatically — inferred from the dbt `tests: - relationships:`
+   on that column.
+4. Reposition nodes by dragging. The positions land in the diagram
+   YAML's `entities[].x/y` — not in the model files — so you can have
+   a second diagram with different coordinates for the same models.
+
+## Step 4 — Open a model in the inspector
 
 Click `models/staging/stg_customers.yml` in the Explorer.
 
@@ -86,7 +104,7 @@ Try renaming a column description: click the description cell, type
 something, hit Enter. The YAML updates in-memory; the **Diff** panel
 at the bottom shows the pending change as a red/green patch.
 
-## Step 4 — Drag to create a relationship
+## Step 5 — Drag to create a relationship
 
 On the canvas, each column has two tiny handles (left = target,
 right = source).
@@ -101,18 +119,15 @@ right = source).
 3. A new FK edge renders. The Diff panel shows a new
    `relationships:` block landed under `stg_orders`.
 
-## Step 5 — Move a node; confirm it sticks
+## Step 6 — Move a node; confirm it sticks
 
 Drag `stg_customers` 300 px to the right. Reload the tab
 (`⌘R` / `Ctrl+R`). The node stays where you put it because the canvas
-wrote a `display: { x: …, y: …, width: … }` block into the entity's
-YAML on `onNodeDragStop`.
+wrote the new `x/y` into your active `.diagram.yaml`'s `entities[]`
+list on `onNodeDragStop`. (When no diagram is active, positions fall
+back to a `display:` block on the entity YAML itself.)
 
-Open the `stg_customers.yml` in the Explorer and scroll to the
-bottom — you'll see the `display:` map. This is additive and doesn't
-interfere with any dbt tooling.
-
-## Step 6 — Try undo / redo
+## Step 7 — Try undo / redo
 
 Every mutating action (column edit, relationship add, position change)
 pushes to a per-file history stack capped at 50 entries.
@@ -123,14 +138,14 @@ pushes to a per-file history stack capped at 50 entries.
 The Chrome header's Undo and Redo buttons drive the same store —
 they're live now, no longer decorative.
 
-## Step 7 — Validate + aggregate lint
+## Step 8 — Validate + aggregate lint
 
 Click the **Validation** tab in the bottom panel. It aggregates every
 lint warning and error across the whole tree, grouped by file. For
 jaffle-shop you'll see a handful of "column missing description"
 warnings — useful guide for a real import.
 
-## Step 8 — Save the project to a real folder (optional)
+## Step 9 — Save the project to a real folder (optional)
 
 The jaffle-shop demo lives in-memory. If you want to write it to disk
 for real git tracking:

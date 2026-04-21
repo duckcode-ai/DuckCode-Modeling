@@ -82,13 +82,54 @@ Open any model. The right-panel inspector now has:
   are preserved under `meta.datalex.dbt.*` in the DataLex YAML. You
   can round-trip this back to dbt with `datalex generate dbt`.
 
-### 5. Make an edit; see the diff
+### 5. Build your first diagram
+
+The import gave you the raw file tree. To see the ER diagram — and to
+compose several models onto one canvas — create a `.diagram.yaml`:
+
+1. In the Explorer toolbar, click **New Diagram** (the Layers icon
+   next to "New file" and "New folder"). A new file appears under
+   `datalex/diagrams/untitled.diagram.yaml`. Rename it — e.g.,
+   `customer_360.diagram.yaml`.
+2. The canvas opens empty. Drag `models/staging/schema.yml` (or any
+   individual `.model.yaml`) from the Explorer onto the canvas.
+3. Each dbt model in the dropped file appears as an entity. Foreign
+   keys from `tests: - relationships:` render as dashed edges
+   automatically — no manual wiring.
+4. Drop additional files to union more entities onto the same canvas.
+   Drops are deduped by `(file, entity)`, so dropping the same file
+   twice is idempotent.
+5. Drag entities to reposition. **Save All** persists positions into
+   the diagram YAML (not into your model files), so the same model
+   can live at different coordinates in different diagrams.
+
+The diagram file looks like this on disk:
+
+```yaml
+kind: diagram
+name: customer_360
+title: Customer 360
+entities:
+  - file: models/staging/schema.yml
+    entity: stg_customers
+    x: 60
+    y: 60
+  - file: models/marts/dim_customers.yml
+    entity: dim_customers
+    x: 360
+    y: 60
+```
+
+Entity definitions stay in their original `.yml` files — the diagram
+only stores references and positions.
+
+### 6. Make an edit; see the diff
 
 Rename a column description in the inspector. The **Diff** panel
 (bottom) shows the patch. This is exactly the diff that'll land in
 your git commit if you save.
 
-### 6. Save to disk
+### 7. Save to disk
 
 Two options:
 
@@ -123,7 +164,7 @@ datalex serve
 
 ### 3. Save the imported tree
 
-In-memory by default, just like Option A step 6. If you want a
+In-memory by default, just like Option A step 7. If you want a
 permanent location, File menu → New Project → pick a folder →
 **Save All**.
 

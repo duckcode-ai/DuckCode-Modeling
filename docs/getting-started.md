@@ -79,7 +79,7 @@ datalex serve --project-dir .
 The browser opens with your folder already registered as the active
 project — no "Import" click needed to see the tree.
 
-**Next, populate the diagram** by running the dbt importer once:
+**Next, import your dbt models once:**
 
 1. Top bar → **Import dbt repo**
 2. Pick the **Local folder** tab
@@ -89,7 +89,26 @@ project — no "Import" click needed to see the tree.
 
 The importer shells out to `dm dbt import` in the background. For
 projects with 200+ models, expect a few seconds. When it's done, the
-canvas shows every model as an entity with inferred relationships.
+Explorer shows every model file at its real dbt path.
+
+**Then build your first ER diagram (v0.3+):**
+
+1. In the Explorer, click the **New Diagram** icon (Layers icon next
+   to "New file" / "New folder"). A new file appears at
+   `datalex/diagrams/untitled.diagram.yaml` — rename it to something
+   meaningful like `customer_360.diagram.yaml`.
+2. Drag any `schema.yml` or `.model.yaml` from the Explorer onto the
+   canvas. Each referenced model renders as an entity. Foreign keys
+   from dbt `tests: - relationships: {to: "ref('…')"}` become dashed
+   edges automatically.
+3. Drag nodes to reposition. **Save All** writes positions into the
+   `.diagram.yaml` file — so `git commit` captures your layout, and
+   moving a node in one diagram never leaks into another diagram of
+   the same model.
+
+Diagram files are safe to commit alongside your dbt models. They live
+under `datalex/diagrams/` by convention; add it to `.gitignore` if you
+prefer to keep them local.
 
 ### Editing rules
 

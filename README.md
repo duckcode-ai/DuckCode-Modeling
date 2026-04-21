@@ -30,29 +30,40 @@ with contracts, lineage, ERDs, and clean round-trip back to dbt.
   <img src="Assets/Overview.png" alt="DataLex Visual Studio — file tree, YAML editor, and React Flow ERD on the same entity" width="100%" />
 </p>
 
-## Quickstart (recommended)
+## Quickstart — two commands
 
 ```bash
 pip install 'datalex-cli[serve]'       # CLI + bundled Node — one command, no prereqs
 datalex serve                          # opens http://localhost:3030
 ```
 
-That's it. `[serve]` pulls a portable Node so you don't need to install
-Node separately — and yes, that's intentional. If you already have Node
-20+ on your PATH, plain `pip install datalex-cli` works too.
+That's it. No Node install, no Docker, no database. `[serve]` pulls a
+portable Node runtime so Python alone is enough. If you already have
+Node 20+ on PATH, plain `pip install datalex-cli` works too.
 
-**Working with your own dbt project?**
+**Point it at your dbt repo:**
 
 ```bash
 cd ~/my-dbt-project                    # folder containing dbt_project.yml
 datalex serve --project-dir .
 ```
 
-DataLex auto-registers the folder as a project on first launch, so the
-browser opens directly into your real tree — no "set up a workspace"
-click-through. Every UI edit writes back to the original `.yml` files
-on disk. See **[docs/getting-started.md](docs/getting-started.md)** for
-the full path matrix (demo → local dbt → git URL → live warehouse).
+The folder auto-registers as your active project; the browser opens
+straight into your real file tree. Every UI edit writes back to the
+original `.yml` files — `git status` shows real diffs.
+
+**Build your first ER diagram (v0.3+):**
+
+1. Click **Import dbt repo → Local folder** → pick your project root
+2. Click **New Diagram** in the Explorer — creates
+   `datalex/diagrams/untitled.diagram.yaml`
+3. Drag any `schema.yml` or `.model.yaml` from the Explorer onto the
+   canvas — entities render with auto-inferred FK edges
+4. Drag to reposition → **Save All** → positions persist in the
+   diagram file; `git commit` picks them up
+
+See **[docs/getting-started.md](docs/getting-started.md)** for the full
+path matrix (demo → local dbt → git URL → live warehouse).
 
 **Want your warehouse drivers too?**
 
@@ -146,31 +157,29 @@ per-dialect over time).
 
 ## Install
 
-From [PyPI](https://pypi.org/project/datalex-cli/):
+**For users** — from [PyPI](https://pypi.org/project/datalex-cli/):
 
 ```bash
-pip install datalex-cli               # puts `datalex` on PATH
-pip install 'datalex-cli[duckdb]'     # add warehouse drivers you need
+pip install 'datalex-cli[serve]'                 # CLI + UI (recommended)
+pip install 'datalex-cli[serve,postgres]'        # add a warehouse driver
+pip install 'datalex-cli[serve,all]'             # every driver + UI
+pip install datalex-cli                          # CLI-only, no UI
 ```
 
-From source (for contributors or editable installs):
+Available extras: `serve`, `duckdb`, `postgres`, `mysql`, `snowflake`,
+`bigquery`, `databricks`, `sqlserver`, `redshift`, `all`.
+
+**Prereqs:** Python 3.9+ and Git. That's it — `[serve]` bundles Node.
+
+**For contributors** — from source:
 
 ```bash
 git clone https://github.com/duckcode-ai/DataLex.git
 cd DataLex
-python3 -m venv .venv
-source .venv/bin/activate
-pip install -e '.[duckdb]'
-
-# optional — only needed for the Visual Studio
-npm --prefix packages/api-server install
-npm --prefix packages/web-app install
+python3 -m venv .venv && source .venv/bin/activate
+pip install -e '.[serve,duckdb]'
+datalex serve                                    # auto-builds the UI on first run
 ```
-
-Available extras: `duckdb`, `postgres`, `mysql`, `snowflake`,
-`bigquery`, `databricks`, `sqlserver`, `redshift`, or `all`.
-
-Prereqs: Python 3.9+, Git. Node.js 18+ if you want the UI.
 
 ## Project layout
 
@@ -190,19 +199,21 @@ DataLex/
   tests/                   # unittest suite (core engine + datalex)
 ```
 
-## Visual Studio (optional)
+## Visual Studio
 
-If you want the UI on top of your DataLex project, run the two dev servers:
+`datalex serve` ships the full UI — no extra setup. If you're hacking
+on the web app itself and want hot-reload, run the two dev servers from
+a source checkout:
 
 ```bash
-# Terminal 1
+# Terminal 1 — api (port 3030)
 npm --prefix packages/api-server run dev
-# Terminal 2
+# Terminal 2 — web (port 5173)
 npm --prefix packages/web-app run dev
 ```
 
-Then open `http://localhost:5173`. The UI reads and writes the same YAML
-files the CLI does — no database, no hosted service.
+The UI reads and writes the same YAML files the CLI does — no database,
+no hosted service.
 
 ## CI / GitOps
 

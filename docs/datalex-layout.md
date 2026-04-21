@@ -51,6 +51,7 @@ default_dialect: postgres
 # glossary:  glossary/**/*.yaml
 # snippets:  .datalex/snippets/**/*.yaml
 # policies:  policies/**/*.yaml
+# diagrams:  datalex/diagrams/**/*.yaml
 imports:
   - package: acme/warehouse-core@1.4.0
     git: https://github.com/acme/warehouse-core.git
@@ -223,6 +224,40 @@ Entities opt in via `columns: - use: audit_columns`. Preview the expanded
 output with `datalex datalex expand <root>`.
 
 Schema: [`datalex_core/_schemas/datalex/snippet.schema.json`](../packages/core_engine/src/datalex_core/_schemas/datalex/snippet.schema.json).
+
+## `kind: diagram` — ER diagram composition (v0.3+)
+
+A diagram file composes an ER view from N referenced entity/model
+files. Entity definitions stay in their source `.model.yaml` or dbt
+`schema.yml` — the diagram only stores references and canvas
+positions, so moving a node in one diagram never touches another.
+
+```yaml
+kind: diagram
+name: customer_360
+title: Customer 360
+description: Customer + orders overview.
+entities:
+  - file: models/staging/schema.yml     # path relative to project root
+    entity: stg_customers               # entity name within that file
+    x: 60
+    y: 60
+  - file: models/marts/dim_customers.yml
+    entity: dim_customers
+    x: 360
+    y: 60
+    width: 280
+edges_overrides: []                     # optional: hide/relabel inferred edges
+viz:
+  layoutMode: elk
+  groupBySubjectArea: false
+```
+
+Created by clicking **New Diagram** in the Explorer, or by writing the
+file by hand. Default location: `datalex/diagrams/<slug>.diagram.yaml`
+(discoverable via the `diagrams:` glob in `datalex.yaml`).
+
+Schema: [`datalex_core/_schemas/datalex/diagram.schema.json`](../packages/core_engine/src/datalex_core/_schemas/datalex/diagram.schema.json).
 
 ## How the loader works
 
