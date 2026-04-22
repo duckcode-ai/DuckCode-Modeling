@@ -31,13 +31,37 @@ function statusTone(status) {
 
 export default function CommitDialog() {
   const { closeModal, addToast } = useUiStore();
-  const { activeProjectId } = useWorkspaceStore();
+  const { activeProjectId, projectConfig, updateProjectConfig } = useWorkspaceStore();
   const [status, setStatus] = useState(null);
   const [message, setMessage] = useState("");
   const [selected, setSelected] = useState(new Set());
   const [loading, setLoading] = useState(false);
   const [working, setWorking] = useState(false);
   const [error, setError] = useState("");
+  const autoCommitEnabled = !!projectConfig?.autoCommit?.enabled;
+  const [togglingAuto, setTogglingAuto] = useState(false);
+
+  const toggleAutoCommit = async () => {
+    setTogglingAuto(true);
+    try {
+      await updateProjectConfig({
+        autoCommit: {
+          enabled: !autoCommitEnabled,
+          messageTemplate: projectConfig?.autoCommit?.messageTemplate || "DataLex: autosave {path}",
+        },
+      });
+      addToast?.({
+        type: "success",
+        message: !autoCommitEnabled
+          ? "Auto-commit enabled — autosaves now produce commits (2s debounce)."
+          : "Auto-commit disabled.",
+      });
+    } catch (err) {
+      addToast?.({ type: "error", message: err?.message || "Failed to update project config." });
+    } finally {
+      setTogglingAuto(false);
+    }
+  };
 
   const load = async () => {
     if (!activeProjectId) return;
@@ -154,6 +178,38 @@ export default function CommitDialog() {
         <div className="dlx-modal-alert info">
           <Check size={12} style={{ marginTop: 1, flexShrink: 0 }} />
           <span>Working tree is clean — no changes to commit.</span>
+        </div>
+      )}
+
+      {/* Auto-commit toggle — lives in the commit dialog so users who already
+          think about commits can discover it. Default off; the debounce
+          coalesces bursty autosaves into one commit per project. */}
+      {activeProjectId && (
+        <div
+          style={{
+            display: "flex", alignItems: "center", gap: 10,
+            padding: "8px 10px",
+            background: "var(--bg-2)",
+            border: "1px solid var(--border-default)",
+            borderRadius: 6,
+            marginBottom: 10,
+            fontSize: 12,
+            color: "var(--text-primary)",
+          }}
+        >
+          <input
+            id="autocommit-toggle"
+            type="checkbox"
+            checked={autoCommitEnabled}
+            onChange={toggleAutoCommit}
+            disabled={togglingAuto}
+          />
+          <label htmlFor="autocommit-toggle" style={{ flex: 1, cursor: "pointer" }}>
+            <div style={{ fontWeight: 500 }}>Auto-commit on save</div>
+            <div style={{ fontSize: 11, color: "var(--text-tertiary)", marginTop: 2 }}>
+              Coalesces bursty autosaves into a single commit (2s debounce). Commit failures are surfaced as toasts — the save itself still succeeds.
+            </div>
+          </label>
         </div>
       )}
 

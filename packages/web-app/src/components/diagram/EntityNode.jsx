@@ -76,6 +76,23 @@ function findIndexForField(indexes, fieldName) {
   return indexes.find((idx) => Array.isArray(idx?.fields) && idx.fields.includes(fieldName)) || null;
 }
 
+/* Resolve a foreign_key into a display string like "entity.field".
+ *
+ * Canonical DataLex shape is `{entity, field}` (also `{entity, column}` for
+ * legacy dbt-importer output). We also accept legacy SQLDBM-style
+ * `{references, table}` and bare string "entity.field" forms on read so
+ * hand-authored YAML keeps rendering. Writers emit the canonical shape
+ * only — see yamlPatch.renameEntity, bulkRefactor, schemaAdapter. */
+export function resolveForeignKeyTarget(fk) {
+  if (fk == null) return "";
+  if (typeof fk === "string") return fk.trim();
+  if (typeof fk !== "object") return "";
+  const entity = String(fk.entity || fk.table || fk.references || "").trim();
+  const field = String(fk.field || fk.column || "").trim();
+  if (entity && field) return `${entity}.${field}`;
+  return entity || field || "";
+}
+
 function FieldBadges({ field, entityName, classifications, indexedFields, indexes }) {
   const classKey = `${entityName}.${field.name}`;
   const classification = classifications?.[classKey];
@@ -98,9 +115,7 @@ function FieldBadges({ field, entityName, classifications, indexedFields, indexe
     );
   }
   if (field.foreign_key) {
-    const fkTarget = typeof field.foreign_key === "string"
-      ? field.foreign_key
-      : (field.foreign_key?.references || field.foreign_key?.table || "");
+    const fkTarget = resolveForeignKeyTarget(field.foreign_key);
     badges.push(
       <span
         key="fk"
@@ -562,6 +577,20 @@ export default function EntityNode({ data }) {
                 <span className="flex items-center gap-0.5 text-[10px] text-text-muted">
                   <ArrowRightLeft size={9} />
                   {relCount}
+                </span>
+              )}
+              {Array.isArray(data.warnings) && data.warnings.length > 0 && (
+                <span
+                  className="flex items-center gap-0.5 px-1.5 py-0 rounded text-[10px] font-semibold border"
+                  style={{
+                    color: "#b45309",
+                    background: "rgba(245,158,11,0.12)",
+                    borderColor: "#f59e0b",
+                  }}
+                  title={data.warnings.join("\n")}
+                >
+                  <AlertTriangle size={9} />
+                  {data.warnings.length} warning{data.warnings.length === 1 ? "" : "s"}
                 </span>
               )}
             </div>

@@ -35,6 +35,8 @@ import {
   addIndex,
   removeIndex,
 } from "../../lib/yamlRoundTrip";
+import { planBulkEntityRename, applyBulkEntityRename } from "../../lib/bulkRefactor";
+import { saveFileContent } from "../../lib/api";
 
 function NameModal({ title, value, onChange, onClose, onSubmit, confirmLabel = "Save" }) {
   return (
@@ -196,25 +198,84 @@ export default function EntityPanel() {
     setRenameEntityOpen(true);
   };
 
-  const submitRenameEntity = () => {
+  const submitRenameEntity = async () => {
     const trimmed = String(renameEntityValue || "").trim();
     if (!trimmed) {
       addToast?.({ type: "error", message: "Entity name cannot be empty." });
       return;
     }
-    const result = renameEntity(activeFileContent, selectedEntityId, trimmed);
-    if (result.error) {
-      addToast?.({ type: "error", message: result.error });
+    if (trimmed === selectedEntityId) {
+      setRenameEntityOpen(false);
       return;
     }
-    if (result.yaml === activeFileContent) {
-      addToast?.({ type: "info", message: "No changes applied (name may already exist)." });
+
+    const s = useWorkspaceStore.getState();
+    // Prime the content cache so the planner can scan every YAML file.
+    try {
+      const paths = (s.projectFiles || [])
+        .map((f) => (f?.fullPath || f?.path || "").replace(/^[/\\]+/, ""))
+        .filter((p) => p && /\.(ya?ml)$/i.test(p));
+      await s.ensureFilesLoaded?.(paths);
+    } catch (_err) { /* soft-fail — planner skips uncached files */ }
+
+    const after = useWorkspaceStore.getState();
+    const plan = await planBulkEntityRename({
+      projectFiles: after.projectFiles,
+      fileContentCache: after.fileContentCache,
+      oldName: selectedEntityId,
+      newName: trimmed,
+    });
+
+    if (plan.errors && plan.errors.length > 0) {
+      addToast?.({ type: "error", message: plan.errors[0].message });
       return;
     }
-    updateContent(result.yaml);
-    // Keep selection on the renamed entity
+    if (!plan.affected || plan.affected.length === 0) {
+      // Fallback to the single-file path in case the planner couldn't find
+      // the declaring file (e.g. scratch buffer not yet on disk).
+      const result = renameEntity(activeFileContent, selectedEntityId, trimmed);
+      if (result.error) { addToast?.({ type: "error", message: result.error }); return; }
+      if (result.yaml === activeFileContent) {
+        addToast?.({ type: "info", message: "No changes applied (name may already exist)." });
+        return;
+      }
+      updateContent(result.yaml);
+      useDiagramStore.getState().selectEntity(trimmed);
+      addToast?.({ type: "success", message: `Renamed entity to ${trimmed}.` });
+      setRenameEntityOpen(false);
+      return;
+    }
+
+    const { written, errors } = await applyBulkEntityRename(plan, { saveFile: saveFileContent });
+    if (errors && errors.length > 0) {
+      const msg = errors.map((e) => `${e.path}: ${e.message}`).join("; ");
+      addToast?.({ type: "error", message: `Rename failed — ${msg}. Changes rolled back.` });
+      return;
+    }
+
+    // Reflect disk state in the workspace store so canvas + open editors
+    // repaint without a reload. Mirrors BulkRenameColumnDialog.
+    const activeKey = (after.activeFile?.fullPath || after.activeFile?.path || "").replace(/^[/\\]+/, "");
+    const nextCache = { ...(after.fileContentCache || {}) };
+    let activeUpdated = null;
+    for (const entry of plan.affected) {
+      nextCache[entry.path] = entry.newContent;
+      if (activeKey && activeKey === entry.path) activeUpdated = entry.newContent;
+    }
+    useWorkspaceStore.setState({ fileContentCache: nextCache });
+    if (activeUpdated != null) {
+      useWorkspaceStore.setState({
+        activeFileContent: activeUpdated,
+        originalContent: activeUpdated,
+        isDirty: false,
+      });
+    }
+    useWorkspaceStore.getState().bumpModelGraphVersion?.();
     useDiagramStore.getState().selectEntity(trimmed);
-    addToast?.({ type: "success", message: `Renamed entity to ${trimmed}.` });
+    addToast?.({
+      type: "success",
+      message: `Renamed ${selectedEntityId} → ${trimmed} across ${written.length} file${written.length === 1 ? "" : "s"}.`,
+    });
     setRenameEntityOpen(false);
   };
 

@@ -90,6 +90,11 @@ export default function ColumnsView({ table, col, setSelectedCol, entityName, on
     if (next != null) {
       s.updateContent(next);
       if (onDirty) onDirty();
+      // Inspector edits arrive via field blur — the user has already
+      // "committed" the change by tabbing away, so collapse the 800ms
+      // debounce window and persist immediately. Code-view typing still
+      // goes through the debounced path.
+      s.flushAutosave?.().catch(() => {});
     }
   }, [col?.name, entityName, onDirty]);
 

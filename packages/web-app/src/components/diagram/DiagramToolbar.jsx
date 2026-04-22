@@ -348,6 +348,12 @@ export default function DiagramToolbar() {
         >
           <Download size={10} /> SVG
         </ToolbarButton>
+        <ToolbarButton
+          onClick={() => openModal("applyDdl")}
+          title="Apply DDL to warehouse (dry-run available)"
+        >
+          <GitBranch size={10} /> Apply
+        </ToolbarButton>
 
         {/* Fullscreen */}
         <button onClick={toggleDiagramFullscreen}

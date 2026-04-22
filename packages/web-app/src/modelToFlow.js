@@ -119,6 +119,17 @@ function assertModelShape(doc) {
 
 export function modelToFlow(doc) {
   const warnings = [];
+  // Per-entity warning bag — populated during relationship validation
+  // and FK resolution. Attached to each node's data so EntityNode can
+  // render an amber chip with a tooltip listing the broken refs. We
+  // also bubble the same strings into the top-level `warnings` array
+  // (consumed by the Import Results panel) so nothing is lost.
+  const warningsByEntity = new Map();
+  function addEntityWarning(entityName, message) {
+    if (!entityName || !message) return;
+    if (!warningsByEntity.has(entityName)) warningsByEntity.set(entityName, []);
+    warningsByEntity.get(entityName).push(message);
+  }
 
   const entities = doc.entities;
   const enums = Array.isArray(doc.enums) ? doc.enums : [];
@@ -201,6 +212,38 @@ export function modelToFlow(doc) {
     }
   }
 
+  // After every entity/field has been registered, walk field-level
+  // foreign_key declarations and warn when the target is unresolved.
+  // The FK can be a string ("customers.id") or an object
+  // ({entity, field} / {table, column} / {references}). We accept any
+  // of those shapes and flag targets that point to entities/fields we
+  // never saw.
+  function normalizeFkTarget(fk) {
+    if (!fk) return null;
+    if (typeof fk === "string") {
+      const s = fk.trim();
+      if (!s || !s.includes(".")) return null;
+      return s;
+    }
+    if (typeof fk !== "object") return null;
+    const ent = String(fk.entity || fk.table || fk.references || "").trim();
+    const col = String(fk.field || fk.column || "").trim();
+    if (ent && col) return `${ent}.${col}`;
+    return null;
+  }
+  for (const entity of normalizedEntities) {
+    for (const field of entity.fields) {
+      const target = normalizeFkTarget(field.foreign_key);
+      if (!target) continue;
+      const [targetEntity, targetField] = target.split(".");
+      if (!entityByName.has(targetEntity)) {
+        addEntityWarning(entity.name, `FK ${entity.name}.${field.name} → ${target} (missing entity)`);
+      } else if (!fieldRefs.has(target)) {
+        addEntityWarning(entity.name, `FK ${entity.name}.${field.name} → ${target} (missing field)`);
+      }
+    }
+  }
+
   const nodes = normalizedEntities.map((entity, index) => {
     const entityIndexes = indexesByEntity.get(entity.name) || [];
     return {
@@ -243,6 +286,7 @@ export function modelToFlow(doc) {
         cluster_by: entity.cluster_by,
         distribution: entity.distribution,
         storage: entity.storage,
+        warnings: warningsByEntity.get(entity.name) || [],
       }
     };
   });
@@ -274,20 +318,34 @@ export function modelToFlow(doc) {
     const relName = toDisplayText(rel?.name, "") || `${sourceRef}-${targetRef}`;
 
     if (!sourceRef || !targetRef || !sourceRef.includes(".") || !targetRef.includes(".")) {
-      warnings.push(`Relationship '${relName}' has invalid field references.`);
+      const msg = `Relationship '${relName}' has invalid field references.`;
+      warnings.push(msg);
+      // Attribute to both endpoints' entity prefix if parseable; best-effort.
+      [sourceRef, targetRef].forEach((r) => {
+        const ent = String(r || "").split(".")[0];
+        if (ent) addEntityWarning(ent, msg);
+      });
       continue;
     }
+
+    const sourceEntityName = sourceRef.split(".")[0];
+    const targetEntityName = targetRef.split(".")[0];
 
     if (!fieldRefs.has(sourceRef) || !fieldRefs.has(targetRef)) {
-      warnings.push(`Relationship '${relName}' references missing fields.`);
+      const msg = `Relationship '${relName}' references missing fields: ${sourceRef} → ${targetRef}`;
+      warnings.push(msg);
+      addEntityWarning(sourceEntityName, msg);
+      addEntityWarning(targetEntityName, msg);
       continue;
     }
 
-    const sourceEntity = sourceRef.split(".")[0];
-    const targetEntity = targetRef.split(".")[0];
+    const sourceEntity = sourceEntityName;
+    const targetEntity = targetEntityName;
 
     if (!entityByName.has(sourceEntity) || !entityByName.has(targetEntity)) {
-      warnings.push(`Relationship '${relName}' references missing entities.`);
+      const msg = `Relationship '${relName}' references missing entity: ${!entityByName.has(sourceEntity) ? sourceEntity : targetEntity}`;
+      warnings.push(msg);
+      addEntityWarning(sourceEntity, msg);
       continue;
     }
 
@@ -362,6 +420,14 @@ export function modelToFlow(doc) {
       ? true
       : (explicitNonIdentifying ? false : autoIdentifying);
 
+    // Unresolved relationships come from the dbt importer when it sees a
+    // `relationships:` test referencing a model it hasn't indexed yet —
+    // we now emit them instead of dropping them so the user can see
+    // "this was declared in dbt but the graph is incomplete". Render as
+    // dashed grey with a muted label.
+    const isUnresolved =
+      rel?.status === "unresolved" || rel?.unresolved === true;
+
     // Optionality: explicit relationship flags win; otherwise infer from field
     // nullability (nullable FK => optional on that end). Relationships default
     // to mandatory-mandatory when nothing is specified.
@@ -399,19 +465,28 @@ export function modelToFlow(doc) {
         sourceOptional,
         targetOptional,
         identifying: isIdentifying,
+        unresolved: isUnresolved,
         description: toDisplayText(rel?.description, "")
       },
       markerStart,
       markerEnd,
       style: {
-        stroke: edgeColor,
-        strokeWidth: (isSelf || pkToFk || fkToPk) ? 2.4 : 2,
-        // Self-links keep their signature dash; otherwise: solid for
-        // identifying, dashed for non-identifying (matches the legend).
-        strokeDasharray: isSelf ? "6 4" : (isIdentifying ? undefined : "5 3"),
+        stroke: isUnresolved ? "#94a3b8" : edgeColor,
+        strokeWidth: isUnresolved ? 1.5 : ((isSelf || pkToFk || fkToPk) ? 2.4 : 2),
+        // Self-links keep their signature dash; unresolved is always
+        // dashed-grey; otherwise solid for identifying, dashed for
+        // non-identifying (matches the legend).
+        strokeDasharray: isUnresolved
+          ? "5 4"
+          : (isSelf ? "6 4" : (isIdentifying ? undefined : "5 3")),
+        opacity: isUnresolved ? 0.7 : 1,
       },
-      labelStyle: { fill: "#475569", fontSize: 10, fontWeight: 600 },
-      animated: cardinality === "many_to_many" || isSelf
+      labelStyle: {
+        fill: isUnresolved ? "#94a3b8" : "#475569",
+        fontSize: 10,
+        fontWeight: 600,
+      },
+      animated: isUnresolved ? false : (cardinality === "many_to_many" || isSelf)
     });
   }
 

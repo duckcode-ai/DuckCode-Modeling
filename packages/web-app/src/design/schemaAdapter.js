@@ -21,6 +21,31 @@ function kindOf(entity) {
   return null;
 }
 
+/* Normalize any supported FK shape into `{target: "entity.field", onDelete?}`
+ * so Canvas.jsx gets a stable `c.fk` string regardless of whether the YAML
+ * uses the canonical `{entity, field}`, the legacy `{entity, column}`,
+ * SQLDBM-style `{references, table}`, or a bare string. Returns null when
+ * no FK is present or the shape is too ambiguous to render. */
+function normalizeForeignKey(foreignKey, legacyFkString) {
+  if (foreignKey && typeof foreignKey === "object") {
+    const entity = String(foreignKey.entity || foreignKey.table || foreignKey.references || "").trim();
+    const field = String(foreignKey.field || foreignKey.column || "").trim();
+    if (entity && field) {
+      return {
+        target: `${entity}.${field}`.toLowerCase(),
+        onDelete: foreignKey.on_delete ? String(foreignKey.on_delete).toUpperCase() : null,
+      };
+    }
+  }
+  if (typeof foreignKey === "string" && foreignKey.trim()) {
+    return { target: foreignKey.trim().toLowerCase(), onDelete: null };
+  }
+  if (typeof legacyFkString === "string" && legacyFkString.trim()) {
+    return { target: legacyFkString.trim(), onDelete: null };
+  }
+  return null;
+}
+
 function columnsFromFields(fields) {
   if (!Array.isArray(fields)) return [];
   return fields.map((f) => {
@@ -39,11 +64,10 @@ function columnsFromFields(fields) {
     if (f.default != null) col.default = String(f.default);
     if (f.generated) col.generated = true;
     if (f.check != null) col.check = String(f.check);
-    if (f.foreign_key && f.foreign_key.entity && f.foreign_key.field) {
-      col.fk = `${f.foreign_key.entity}.${f.foreign_key.field}`.toLowerCase();
-      if (f.foreign_key.on_delete) col.onDelete = String(f.foreign_key.on_delete).toUpperCase();
-    } else if (typeof f.fk === "string") {
-      col.fk = f.fk;
+    const fkRef = normalizeForeignKey(f.foreign_key, f.fk);
+    if (fkRef) {
+      col.fk = fkRef.target;
+      if (fkRef.onDelete) col.onDelete = fkRef.onDelete;
     }
     return col;
   });

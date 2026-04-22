@@ -137,9 +137,16 @@ export function generateEntityDDL(entity, options = {}) {
   lines.push(colLines.join(",\n"));
   lines.push(");");
 
-  /* Foreign key alters from field-level FKs */
+  /* Foreign key alters from field-level FKs.
+   * Unresolved relationships (flagged by the dbt importer when it sees a
+   * `relationships:` test whose target entity hasn't been modeled yet)
+   * are visual-only — we deliberately skip them here so the generated
+   * DDL never contains a dangling reference. The dashed edge in the
+   * diagram signals the gap; the user has to either model the missing
+   * entity or delete the rel before DDL will include it. */
   const relMap = new Map();
   for (const r of options.relationships || []) {
+    if (r?.status === "unresolved" || r?.unresolved === true) continue;
     const from = String(r?.from || "").toLowerCase();
     if (!from.startsWith(`${tableName.toLowerCase()}.`)) continue;
     const col = from.split(".").slice(1).join(".");

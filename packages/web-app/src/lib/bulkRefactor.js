@@ -193,6 +193,160 @@ function rewriteColumnRefs(doc, entity, oldField, newField) {
   return refs;
 }
 
+/* ---------------------------------------------------------------------
+   Entity-name rewriter
+   ---------------------------------------------------------------------
+   Mirrors rewriteColumnRefs but for an entity rename. We walk every
+   place an entity name can appear:
+     A. entities[i].name                                 (declaration)
+     B. field-level FK / references {entity, ...}
+     C. relationships[i].{from,to} "entity.field"        (string form)
+     D. relationships[i].{from,to} {entity, field}       (object form)
+     E. indexes[i].entity
+     F. metrics[i].entity
+     G. governance maps keyed by "entity.field"
+     H. diagram entities[i].entity                       (diagram YAML)
+     I. entity-level scalars that name another entity    (subtype_of,
+        derived_from, mapped_from, parent_entity, dimension_refs[],
+        link_refs[], subtypes[], templates[])
+   Returns the same {kind, detail}[] shape so plan previews are uniform.
+*/
+export function rewriteEntityRefs(doc, oldName, newName) {
+  const refs = [];
+  if (!doc || typeof doc !== "object" || !oldName || !newName || oldName === newName) return refs;
+  const record = (kind, detail) => refs.push({ kind, detail });
+  const oldLc = String(oldName).toLowerCase();
+
+  // A — entity declaration itself (when this doc owns it)
+  const entities = Array.isArray(doc.entities) ? doc.entities : [];
+  entities.forEach((e) => {
+    if (!e || typeof e !== "object") return;
+    if (String(e.name || "").toLowerCase() === oldLc) {
+      e.name = newName;
+      record("entity", `entities[].name: ${oldName} → ${newName}`);
+    }
+
+    // B — FK / references objects
+    (e.fields || []).forEach((f) => {
+      if (!f || typeof f !== "object") return;
+      for (const key of ["foreign_key", "references"]) {
+        const ref = f[key];
+        if (!ref || typeof ref !== "object") continue;
+        // {entity}, {table}, {references} all name the target entity.
+        for (const slot of ["entity", "table", "references"]) {
+          if (typeof ref[slot] === "string" && ref[slot].toLowerCase() === oldLc) {
+            ref[slot] = newName;
+            record("fk", `${e.name}.${f.name}.${key}.${slot}`);
+          }
+        }
+      }
+      // Bare-string FK: "customers.id" → "customer.id"
+      for (const key of ["fk", "foreign_key"]) {
+        const v = f[key];
+        if (typeof v === "string" && v.toLowerCase().startsWith(`${oldLc}.`)) {
+          f[key] = `${newName}.${v.slice(oldName.length + 1)}`;
+          record("fk-string", `${e.name}.${f.name}.${key}`);
+        }
+      }
+    });
+
+    // I — entity-level scalars referencing another entity
+    for (const k of ["subtype_of", "derived_from", "mapped_from", "parent_entity"]) {
+      if (typeof e[k] === "string" && e[k].toLowerCase() === oldLc) {
+        e[k] = newName;
+        record("entity-ref", `${e.name}.${k}`);
+      }
+    }
+    for (const k of ["subtypes", "dimension_refs", "link_refs", "templates"]) {
+      if (!Array.isArray(e[k])) continue;
+      let changed = false;
+      e[k] = e[k].map((v) => {
+        if (typeof v === "string" && v.toLowerCase() === oldLc) {
+          changed = true;
+          return newName;
+        }
+        return v;
+      });
+      if (changed) record("entity-ref-array", `${e.name}.${k}`);
+    }
+  });
+
+  // C + D — relationships
+  const relationships = Array.isArray(doc.relationships) ? doc.relationships : [];
+  relationships.forEach((r) => {
+    if (!r || typeof r !== "object") return;
+    const relLabel = r.name || "(unnamed)";
+    for (const side of ["from", "to"]) {
+      // String form "entity.field"
+      if (typeof r[side] === "string") {
+        const v = r[side];
+        if (v.toLowerCase().startsWith(`${oldLc}.`)) {
+          r[side] = `${newName}.${v.slice(oldName.length + 1)}`;
+          record("relationship", `${relLabel}.${side} (string)`);
+        }
+      }
+      // Object form {entity, field}
+      const obj = r[side];
+      if (obj && typeof obj === "object" && !Array.isArray(obj)) {
+        if (typeof obj.entity === "string" && obj.entity.toLowerCase() === oldLc) {
+          obj.entity = newName;
+          record("relationship", `${relLabel}.${side}.entity`);
+        }
+      }
+    }
+  });
+
+  // E — indexes
+  const indexes = Array.isArray(doc.indexes) ? doc.indexes : [];
+  indexes.forEach((idx, i) => {
+    if (idx && typeof idx === "object" && typeof idx.entity === "string" && idx.entity.toLowerCase() === oldLc) {
+      idx.entity = newName;
+      record("index", idx.name || `#${i}`);
+    }
+  });
+
+  // F — metrics
+  const metrics = Array.isArray(doc.metrics) ? doc.metrics : [];
+  metrics.forEach((m, i) => {
+    if (m && typeof m === "object" && typeof m.entity === "string" && m.entity.toLowerCase() === oldLc) {
+      m.entity = newName;
+      record("metric", m.name || `#${i}`);
+    }
+  });
+
+  // G — governance maps
+  const gov = doc.governance;
+  if (gov && typeof gov === "object") {
+    for (const mapKey of ["classification", "stewards"]) {
+      const m = gov[mapKey];
+      if (!m || typeof m !== "object" || Array.isArray(m)) continue;
+      for (const k of Object.keys(m)) {
+        if (k.toLowerCase().startsWith(`${oldLc}.`)) {
+          const newK = `${newName}.${k.slice(oldName.length + 1)}`;
+          m[newK] = m[k];
+          delete m[k];
+          record("governance", `${mapKey}.${k}`);
+        }
+      }
+    }
+  }
+
+  // H — diagram entities[].entity (cross-file diagram composition)
+  //     We detect diagram shape by presence of a top-level `kind: diagram`
+  //     or by `entities[].file` entries (diagrams only).
+  const isDiagram = doc.kind === "diagram" || (entities.some((e) => e && typeof e === "object" && typeof e.file === "string"));
+  if (isDiagram) {
+    entities.forEach((entry, i) => {
+      if (entry && typeof entry === "object" && typeof entry.entity === "string" && entry.entity.toLowerCase() === oldLc) {
+        entry.entity = newName;
+        record("diagram-entity", `entities[${i}].entity`);
+      }
+    });
+  }
+
+  return refs;
+}
+
 /* Normalise projectFiles + fileContentCache into an array we can scan.
    The caller hands us the two maps; we don't touch the store directly so
    this module stays easy to unit-test. */
@@ -377,4 +531,80 @@ export function summariseRefs(plan) {
   const parts = [];
   for (const [kind, n] of counts.entries()) parts.push(`${n} ${kind}`);
   return `${total} ref${total === 1 ? "" : "s"} across ${plan.affected.length} file${plan.affected.length === 1 ? "" : "s"} · ${parts.join(", ")}`;
+}
+
+/**
+ * Plan a cross-file entity rename using `rewriteEntityRefs`. Shape matches
+ * `planBulkColumnRename`: projectFiles + fileContentCache → {affected[], errors[]}.
+ * Does not persist — pass the returned plan to `applyBulkEntityRename`.
+ */
+export async function planBulkEntityRename(opts) {
+  const { projectFiles, fileContentCache, loadFile, oldName, newName } = opts || {};
+  const oldN = String(oldName || "").trim();
+  const newN = String(newName || "").trim();
+
+  const summary = { oldName: oldN, newName: newN, affected: [], errors: [], declaringFile: null };
+
+  if (!oldN || !newN) {
+    summary.errors.push({ path: "", message: "oldName and newName are required." });
+    return summary;
+  }
+  if (oldN === newN) {
+    summary.errors.push({ path: "", message: "New entity name is identical to the old one." });
+    return summary;
+  }
+
+  const candidates = collectCandidateFiles(projectFiles, fileContentCache);
+  const oldLc = oldN.toLowerCase();
+  const newLc = newN.toLowerCase();
+
+  for (const candidate of candidates) {
+    let content = candidate.content;
+    if (typeof content !== "string" && typeof loadFile === "function") {
+      try { content = await loadFile(candidate.path); } catch (_err) { content = undefined; }
+    }
+    if (typeof content !== "string") continue;
+
+    const doc = loadDoc(content);
+    if (!doc) continue;
+
+    const entities = Array.isArray(doc.entities) ? doc.entities : [];
+    const declares = entities.some((e) => e && typeof e === "object" && String(e.name || "").toLowerCase() === oldLc);
+    if (declares) summary.declaringFile = candidate.path;
+
+    // Collision: another entity in this doc already uses the new name.
+    const clash = entities.some((e) => e && typeof e === "object"
+      && String(e.name || "").toLowerCase() === newLc
+      && String(e.name || "").toLowerCase() !== oldLc);
+    if (clash) {
+      summary.errors.push({
+        path: candidate.path,
+        message: `File "${candidate.path}" already declares an entity named "${newN}".`,
+      });
+    }
+
+    const refs = rewriteEntityRefs(doc, oldN, newN);
+    if (refs.length === 0) continue;
+
+    const newContent = dump(doc);
+    if (newContent === content) continue;
+
+    summary.affected.push({
+      path: candidate.path,
+      fullPath: candidate.fullPath,
+      oldContent: content,
+      newContent,
+      refs,
+    });
+  }
+
+  return summary;
+}
+
+/**
+ * Apply a plan produced by `planBulkEntityRename`. Same rollback semantics
+ * as `applyBulkColumnRename`: serial writes, rewrite-on-failure.
+ */
+export async function applyBulkEntityRename(plan, { saveFile }) {
+  return applyBulkColumnRename(plan, { saveFile });
 }

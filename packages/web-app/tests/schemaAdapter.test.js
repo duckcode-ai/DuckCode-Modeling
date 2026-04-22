@@ -68,6 +68,41 @@ test("adaptDataLexModelYaml returns null for non-model kinds", () => {
   assert.equal(adaptDataLexModelYaml(yamlText), null);
 });
 
+test("adaptDataLexYaml normalizes legacy foreign_key shapes into c.fk", () => {
+  const yamlText = `
+entities:
+  - name: orders
+    fields:
+      - name: id
+        type: uuid
+        primary_key: true
+      - name: customer_id
+        type: uuid
+        foreign_key:
+          entity: customers
+          field: id
+      - name: legacy_col_ref
+        type: uuid
+        foreign_key:
+          entity: customers
+          column: id
+      - name: legacy_sqldbm
+        type: uuid
+        foreign_key:
+          table: customers
+          column: id
+      - name: as_string
+        type: uuid
+        foreign_key: "customers.id"
+`;
+  const adapted = adaptDataLexYaml(yamlText);
+  const cols = adapted.tables[0].columns;
+  assert.equal(cols[1].fk, "customers.id", "canonical {entity, field}");
+  assert.equal(cols[2].fk, "customers.id", "legacy {entity, column}");
+  assert.equal(cols[3].fk, "customers.id", "SQLDBM {table, column}");
+  assert.equal(cols[4].fk, "customers.id", "bare string");
+});
+
 test("adaptDataLexYaml handles the canonical entities:[] shape", () => {
   const yamlText = `
 entities:

@@ -49,6 +49,7 @@ const SettingsDialog      = React.lazy(() => import("../components/dialogs/Setti
 const ConnectionsManager  = React.lazy(() => import("../components/dialogs/ConnectionsManager"));
 const CommitDialog        = React.lazy(() => import("../components/dialogs/CommitDialog"));
 const ExportDdlDialog     = React.lazy(() => import("../components/dialogs/ExportDdlDialog"));
+const ApplyDdlDialog      = React.lazy(() => import("../components/dialogs/ApplyDdlDialog"));
 const PanelDialog         = React.lazy(() => import("../components/dialogs/PanelDialog"));
 const GitBranchDialog     = React.lazy(() => import("../components/dialogs/GitBranchDialog"));
 const ImportDbtRepoDialog = React.lazy(() => import("../components/dialogs/ImportDbtRepoDialog"));
@@ -294,6 +295,23 @@ export default function Shell() {
         return;
       }
       if (meta && e.shiftKey && (e.key === "t" || e.key === "T")) { e.preventDefault(); cycleTheme(); return; }
+      // Cmd/Ctrl+Shift+E → Export diagram to PNG. The canvas toolbar has
+      // the same action, but this shortcut makes it reachable without a
+      // mouse trip to the overflow row. We query the React Flow root the
+      // same way the toolbar does — falls back silently if no diagram is
+      // mounted (e.g. the user is on the code-view tab).
+      if (meta && e.shiftKey && (e.key === "e" || e.key === "E")) {
+        const el = document.querySelector(".react-flow");
+        if (!el) return;
+        e.preventDefault();
+        import("html-to-image").then(({ toPng }) => {
+          toPng(el, { backgroundColor: "#ffffff", pixelRatio: 2 }).then((dataUrl) => {
+            const a = document.createElement("a");
+            a.href = dataUrl; a.download = "datalex-diagram.png"; a.click();
+          });
+        }).catch(() => addToast({ type: "error", message: "Export failed — html-to-image not loaded." }));
+        return;
+      }
       if (meta && e.key === "Tab") {
         const { openProjects: op } = useWorkspaceStore.getState();
         if (op.length > 1) { e.preventDefault(); cycleProject(e.shiftKey ? -1 : 1); return; }
@@ -407,13 +425,18 @@ export default function Shell() {
     if (paths.length > 0) ensureFilesLoaded(paths);
   }, [isDiagramFile, activeFileContent, ensureFilesLoaded]);
 
+  // Key on modelGraphVersion as well so cross-file edits (e.g. saving a
+  // neighbor model while a diagram is open) rebuild the adapted schema.
+  // Without this, `filesForDiagram` content could go stale: the array
+  // identity is the same but the underlying YAML on disk changed.
+  const modelGraphVersion = useWorkspaceStore((s) => s.modelGraphVersion);
   const adapted = React.useMemo(() => {
     if (isDiagramFile) return adaptDiagramYaml(activeFileContent, filesForDiagram);
     // Try canonical DataLex (entities:) first, then the dbt-importer shape
     // (kind: model / kind: source with top-level columns:). Without the
     // second pass, opening an imported stg_*.yml directly renders nothing.
     return adaptDataLexYaml(activeFileContent) || adaptDataLexModelYaml(activeFileContent);
-  }, [activeFileContent, isDiagramFile, filesForDiagram]);
+  }, [activeFileContent, isDiagramFile, filesForDiagram, modelGraphVersion]);
   const isDemo = useWorkspaceStore((s) => s.offlineMode && !s.activeProjectId);
   const emptySchema = React.useMemo(
     () => ({ name: "Project", engine: "DataLex", schema: "public", tables: [], relationships: [], subjectAreas: [] }),
@@ -1028,6 +1051,7 @@ export default function Shell() {
           { id: "import",     section: "Actions", label: "Import schema…",         meta: "",    icon: <span style={{ fontSize: 12 }}>⇩</span>,  run: () => openModal("importDialog") },
           { id: "import-dbt", section: "Actions", label: "Import dbt repo…",       meta: "",    icon: <span style={{ fontSize: 12 }}>⤓</span>,  run: () => openModal("importDbtRepo") },
           { id: "demo-jaffle",section: "Actions", label: "Load jaffle-shop demo",  meta: "",    icon: <span style={{ fontSize: 12 }}>✨</span>, run: () => openModal("importDbtRepo") },
+          { id: "apply-ddl",  section: "Actions", label: "Apply to warehouse…",    meta: "",    icon: <span style={{ fontSize: 12 }}>☁</span>,  run: () => openModal("applyDdl") },
           // v0.5.0 — stakeholder-share + snapshot flows. Share opens the
           // HTML bundle dialog prefilled from the currently-adapted schema;
           // snapshots routes through the new git-tag API.
@@ -1051,6 +1075,7 @@ export default function Shell() {
         {activeModal === "connectionsManager" && <ConnectionsManager />}
         {activeModal === "commit"             && <CommitDialog />}
         {activeModal === "exportDdl"          && <ExportDdlDialog />}
+        {activeModal === "applyDdl"           && <ApplyDdlDialog />}
         {activeModal === "importDialog"       && <PanelDialog kind="import" />}
         {activeModal === "importDbtRepo"      && <ImportDbtRepoDialog />}
         {activeModal === "newRelationship"    && <NewRelationshipDialog />}

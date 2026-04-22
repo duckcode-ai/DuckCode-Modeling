@@ -17,6 +17,7 @@ import AnnotationNode from "./AnnotationNode";
 import SchemaOverviewNode from "./SchemaOverviewNode";
 import SubjectAreaGroup from "./SubjectAreaGroup";
 import EnumNode from "./EnumNode";
+import NodeErrorBoundary from "../shared/NodeErrorBoundary";
 import CanvasContextMenu from "./CanvasContextMenu";
 import DiagramToolbar from "./DiagramToolbar";
 import CrowsFootMarkers from "./CrowsFootMarkers";
@@ -31,7 +32,30 @@ import { removeEntity, removeRelationship, addEntityWithOptions } from "../../li
 
 const SCHEMA_COLORS_HEX = SCHEMA_COLORS.map((c) => c.hex);
 
-const nodeTypes = { entityNode: EntityNode, annotation: AnnotationNode, group: SubjectAreaGroup, schemaOverview: SchemaOverviewNode, enumNode: EnumNode };
+// React Flow instantiates each node from `nodeTypes[type]`. Wrap the node
+// components in an error boundary so a malformed entity (missing fields,
+// bad fk shape) renders as a red "malformed" chip instead of throwing
+// and blanking the whole canvas.
+function withNodeErrorBoundary(NodeComponent, label) {
+  const Wrapped = (props) => {
+    const resolvedLabel = props?.data?.label || props?.data?.name || props?.id || label;
+    return (
+      <NodeErrorBoundary label={resolvedLabel}>
+        <NodeComponent {...props} />
+      </NodeErrorBoundary>
+    );
+  };
+  Wrapped.displayName = `WithErrorBoundary(${NodeComponent.displayName || NodeComponent.name || label})`;
+  return Wrapped;
+}
+
+const nodeTypes = {
+  entityNode: withNodeErrorBoundary(EntityNode, "entity"),
+  annotation: withNodeErrorBoundary(AnnotationNode, "annotation"),
+  group: withNodeErrorBoundary(SubjectAreaGroup, "subject area"),
+  schemaOverview: withNodeErrorBoundary(SchemaOverviewNode, "schema"),
+  enumNode: withNodeErrorBoundary(EnumNode, "enum"),
+};
 
 const LARGE_MODEL_THRESHOLD = 100;
 const COMPACT_MODE_THRESHOLD = 200;

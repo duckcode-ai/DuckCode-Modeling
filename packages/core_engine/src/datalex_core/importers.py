@@ -1007,15 +1007,20 @@ def import_dbt_schema_yml(
             }
             _upsert_field(metric_entity, field)
 
-    # Materialize relationship tests into DataLex relationships where resolvable.
+    # Materialize relationship tests into DataLex relationships. Previously
+    # candidates whose parent/child entity hadn't been seen yet were dropped
+    # silently, which produced "missing edges" on imported diagrams with no
+    # clue to the user that dbt *did* declare the relationship. Instead we
+    # emit them with `status: "unresolved"` so the renderer can draw a
+    # dashed edge and the Import Results panel can count them.
     deduped: Dict[Tuple[str, str, str, str], Dict[str, str]] = {}
     for cand in relationship_candidates:
         parent = entities_by_name.get(cand["parent_entity"])
         child = entities_by_name.get(cand["child_entity"])
-        if not parent or not child:
-            continue
-        _ensure_field(parent, cand["parent_field"])
-        _ensure_field(child, cand["child_field"])
+        resolved = bool(parent and child)
+        if resolved:
+            _ensure_field(parent, cand["parent_field"])
+            _ensure_field(child, cand["child_field"])
 
         rel = {
             "name": f"{cand['parent_entity'].lower()}_{cand['child_entity'].lower()}_{cand['child_field']}_fk",
@@ -1023,6 +1028,12 @@ def import_dbt_schema_yml(
             "to": f"{cand['child_entity']}.{cand['child_field']}",
             "cardinality": "one_to_many",
         }
+        if not resolved:
+            missing = []
+            if not parent: missing.append(cand["parent_entity"])
+            if not child: missing.append(cand["child_entity"])
+            rel["status"] = "unresolved"
+            rel["unresolved_reason"] = f"missing entity: {', '.join(missing)}"
         key = (rel["name"], rel["from"], rel["to"], rel["cardinality"])
         deduped[key] = rel
 

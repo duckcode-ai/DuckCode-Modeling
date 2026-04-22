@@ -943,6 +943,46 @@ app.get("/api/projects/:id/files", async (req, res) => {
   }
 });
 
+// PATCH project config — merges `req.body.patch` into `.datalex/project.json`.
+// Used for toggling auto-commit, setting default dialect, etc., without
+// requiring the user to hand-edit YAML. Creates the file if missing.
+app.patch("/api/projects/:id/config", requireAdmin, async (req, res, next) => {
+  try {
+    const projectPath = await resolveProjectPath(req.params.id);
+    if (!projectPath) return apiFail(res, 404, "NOT_FOUND", "Project not found");
+    const patch = req.body?.patch;
+    if (!patch || typeof patch !== "object" || Array.isArray(patch)) {
+      return apiFail(res, 400, "VALIDATION", "Body must include a { patch } object.");
+    }
+    const absProjectPath = resolve(projectPath);
+    const configPath = join(absProjectPath, DATALEX_PROJECT_CONFIG);
+    let existing = {};
+    if (existsSync(configPath)) {
+      try {
+        const raw = await readFile(configPath, "utf-8");
+        const parsed = JSON.parse(raw);
+        if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) existing = parsed;
+      } catch (_err) { existing = {}; }
+    }
+    // Shallow merge with a one-level deep merge for nested objects (so that
+    // `{ autoCommit: { enabled: true } }` doesn't wipe a sibling field like
+    // `autoCommit.messageTemplate`).
+    const merged = { ...existing };
+    for (const [k, v] of Object.entries(patch)) {
+      if (v && typeof v === "object" && !Array.isArray(v) && existing[k] && typeof existing[k] === "object" && !Array.isArray(existing[k])) {
+        merged[k] = { ...existing[k], ...v };
+      } else {
+        merged[k] = v;
+      }
+    }
+    await mkdir(dirname(configPath), { recursive: true });
+    await writeFile(configPath, JSON.stringify(merged, null, 2) + "\n", "utf-8");
+    res.json({ ok: true, projectConfig: merged });
+  } catch (err) {
+    next(err);
+  }
+});
+
 // Git: repository status for a project
 app.get("/api/git/status", async (req, res) => {
   try {
@@ -1800,12 +1840,69 @@ app.get("/api/files", async (req, res) => {
   }
 });
 
+// Lightweight structural validation for YAML files on save. We don't run
+// the full JSON-schema validator here (too slow for per-keystroke autosave
+// once Phase 1 lands, and the dbt-importer `{kind: model, columns}` shape
+// legitimately differs from the canonical `{model, entities}` schema).
+// Goal is narrow: catch parse failures and obviously-wrong-type top-level
+// content before garbage hits disk. Non-YAML files skip entirely.
+function validateYamlOnSave(filePath, content) {
+  if (!/\.ya?ml$/i.test(filePath)) return { ok: true };
+  if (content == null || String(content).trim() === "") return { ok: true };
+  let doc;
+  try {
+    doc = yaml.load(content);
+  } catch (err) {
+    return {
+      ok: false,
+      code: "YAML_PARSE_ERROR",
+      message: `YAML parse error: ${err.reason || err.message || String(err)}`,
+      details: { line: err.mark?.line, column: err.mark?.column },
+    };
+  }
+  // Empty doc (only whitespace/comments) is acceptable — users type into
+  // new files.
+  if (doc == null) return { ok: true };
+  // Must be an object (a YAML list at the top level can't hold DataLex
+  // entities/diagrams/models).
+  if (typeof doc !== "object" || Array.isArray(doc)) {
+    return {
+      ok: false,
+      code: "SCHEMA_TOP_LEVEL",
+      message: "DataLex YAML must be an object at the top level.",
+    };
+  }
+  // For files the UI treats as models/diagrams, require at least one of
+  // the recognized shapes so users can't silently save a blob with no
+  // renderable content.
+  const isModelLike = /\.model\.ya?ml$/i.test(filePath) || /\.diagram\.ya?ml$/i.test(filePath);
+  if (isModelLike) {
+    const hasCanonical = typeof doc.model === "object" && Array.isArray(doc.entities);
+    const hasImporter = typeof doc.kind === "string" && typeof doc.name === "string";
+    const hasEnum = typeof doc.kind === "string" && doc.kind === "enum";
+    if (!hasCanonical && !hasImporter && !hasEnum) {
+      return {
+        ok: false,
+        code: "SCHEMA_SHAPE",
+        message: "File must declare either `model:` + `entities:` or `kind: model|source|diagram|enum` with `name:`.",
+      };
+    }
+  }
+  return { ok: true };
+}
+
 // Write/update a file
 app.put("/api/files", requireAdmin, async (req, res) => {
   try {
     const { path: filePath, content } = req.body;
     if (!filePath || typeof content !== "string") {
       return res.status(400).json({ error: "path and content are required" });
+    }
+    const validation = validateYamlOnSave(filePath, content);
+    if (!validation.ok) {
+      return res.status(422).json({
+        error: { code: validation.code, message: validation.message, details: validation.details || null },
+      });
     }
     // Ensure directory exists
     const dir = filePath.substring(0, filePath.lastIndexOf("/"));
@@ -2174,6 +2271,125 @@ async function copyDirRecursive(src, dst) {
     }
   }
 }
+
+/* Atomic rename cascade.
+ *
+ * Body shape:
+ *   { fromPath?, toPath?, kind?: "file"|"folder", rewrites: [{ path, newContent }] }
+ *
+ * Performs:
+ *   1. Snapshot original content of every rewrite target.
+ *   2. Apply every rewrite in series. On any write failure we stop and
+ *      rewind every successful rewrite back to its snapshot.
+ *   3. If fromPath/toPath are provided, rename the file/folder only after
+ *      every rewrite landed. If the rename itself fails we still rewind
+ *      the rewrites.
+ *
+ * Response:
+ *   { ok: true, written: string[], renamed: boolean }  on success
+ *   { ok: false, error, touched, untouched }           on partial failure
+ */
+app.post("/api/projects/:id/rename-cascade", requireAdmin, async (req, res, next) => {
+  try {
+    const { structure, error } = await resolveProjectAndModelPath(req.params.id);
+    if (error) return apiFail(res, error.status, error.code, error.msg);
+
+    const { fromPath, toPath, kind, rewrites } = req.body || {};
+    const moveRequested = typeof fromPath === "string" && typeof toPath === "string" && fromPath && toPath;
+    const list = Array.isArray(rewrites) ? rewrites : [];
+
+    // Resolve the move targets (if any) before we touch anything.
+    let from = null;
+    let to = null;
+    if (moveRequested) {
+      from = resolveInsideModelPath(structure.modelPath, fromPath);
+      if (!from.ok) return apiFail(res, 400, from.code, `fromPath: ${from.msg}`);
+      to = resolveInsideModelPath(structure.modelPath, toPath);
+      if (!to.ok) return apiFail(res, 400, to.code, `toPath: ${to.msg}`);
+      if (!existsSync(from.full)) return apiFail(res, 404, "NOT_FOUND", "Source not found");
+      if (existsSync(to.full)) return apiFail(res, 409, "CONFLICT", "Destination already exists");
+    }
+
+    // Snapshot every rewrite target so we can roll back on failure.
+    const plan = [];
+    for (const entry of list) {
+      const subpath = entry?.path;
+      const newContent = entry?.newContent;
+      if (typeof subpath !== "string" || typeof newContent !== "string") {
+        return apiFail(res, 400, "VALIDATION", "rewrites[].path and newContent are required strings");
+      }
+      const resolved = resolveInsideModelPath(structure.modelPath, subpath);
+      if (!resolved.ok) return apiFail(res, 400, resolved.code, `rewrites[].path: ${resolved.msg}`);
+      let original = null;
+      if (existsSync(resolved.full)) {
+        try { original = await readFile(resolved.full, "utf-8"); }
+        catch (err) { return apiFail(res, 500, "IO_ERROR", `Cannot read ${resolved.rel}: ${err?.message || err}`); }
+      }
+      plan.push({ rel: resolved.rel, full: resolved.full, newContent, original });
+    }
+
+    // Apply rewrites serially. On any error, rewind.
+    const written = [];
+    for (const step of plan) {
+      try {
+        await mkdir(dirname(step.full), { recursive: true });
+        await writeFile(step.full, step.newContent, "utf-8");
+        written.push(step.rel);
+      } catch (err) {
+        // Rewind every successful write back to its snapshot.
+        const untouched = [];
+        for (const s of plan) {
+          if (!written.includes(s.rel)) { untouched.push(s.rel); continue; }
+          try {
+            if (s.original == null) await unlinkFile(s.full).catch(() => {});
+            else await writeFile(s.full, s.original, "utf-8");
+          } catch (_rollbackErr) { /* best-effort */ }
+        }
+        return apiFail(res, 500, "REWRITE_FAILED", `${step.rel}: ${err?.message || err}`, {
+          touched: written, untouched,
+        });
+      }
+    }
+
+    // All rewrites succeeded — now perform the move (if any).
+    let renamed = false;
+    if (moveRequested) {
+      try {
+        const srcStat = await stat(from.full);
+        const isDir = srcStat.isDirectory();
+        if (kind === "file" && isDir) return apiFail(res, 400, "VALIDATION", "Source is a directory, kind=file");
+        if (kind === "folder" && !isDir) return apiFail(res, 400, "VALIDATION", "Source is a file, kind=folder");
+        await mkdir(dirname(to.full), { recursive: true });
+        try {
+          await rename(from.full, to.full);
+        } catch (err) {
+          if (err?.code === "EXDEV") {
+            if (isDir) { await copyDirRecursive(from.full, to.full); rmSync(from.full, { recursive: true, force: true }); }
+            else { await copyFile(from.full, to.full); await unlinkFile(from.full); }
+          } else {
+            throw err;
+          }
+        }
+        renamed = true;
+      } catch (err) {
+        // Rewind rewrites after a failed move.
+        for (const s of plan) {
+          try {
+            if (s.original == null) await unlinkFile(s.full).catch(() => {});
+            else await writeFile(s.full, s.original, "utf-8");
+          } catch (_rollbackErr) { /* best-effort */ }
+        }
+        return apiFail(res, 500, "RENAME_FAILED", `${from.rel} → ${to.rel}: ${err?.message || err}`, {
+          touched: written, untouched: [],
+        });
+      }
+    }
+
+    res.json({ ok: true, written, renamed, fromPath: from?.rel, toPath: to?.rel });
+  } catch (err) {
+    next(err);
+  }
+});
 
 // Delete a single file
 app.delete("/api/projects/:id/files", requireAdmin, async (req, res, next) => {

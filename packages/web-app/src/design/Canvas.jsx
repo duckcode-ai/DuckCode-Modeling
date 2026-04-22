@@ -3,6 +3,7 @@ import React from "react";
 import Icon from "./icons";
 import { NOTATION, FK_COLOR_MAP } from "./notation";
 import useUiStore from "../stores/uiStore";
+import NodeErrorBoundary from "../components/shared/NodeErrorBoundary";
 
 // Visual lexicon for the git-diff overlay (v0.4.2). Kept as a module
 // constant so Legend / tests / future tooltip work can import the same
@@ -613,13 +614,19 @@ export default function Canvas({ tables, setTables, relationships, areas, select
                          selected={selected} onSelect={onSelect}
                          hovered={hovered} setHovered={setHovered} />
           {tables.map((t) => (
-            <TableCard key={t.id} table={t}
-                       selected={selected?.type === "table" && selected.id === t.id}
-                       onSelect={onSelect}
-                       onMove={onMoveTable}
-                       onMoveEnd={onMoveEnd}
-                       onStartConnect={handleStartConnect}
-                       diffStatus={diffEntities[t.name] || diffEntities[t.id] || null} />
+            <NodeErrorBoundary
+              key={t.id}
+              label={t?.name || t?.id || "entity"}
+              style={{ position: "absolute", left: t?.x ?? 40, top: t?.y ?? 40 }}
+            >
+              <TableCard table={t}
+                         selected={selected?.type === "table" && selected.id === t.id}
+                         onSelect={onSelect}
+                         onMove={onMoveTable}
+                         onMoveEnd={onMoveEnd}
+                         onStartConnect={handleStartConnect}
+                         diffStatus={diffEntities[t.name] || diffEntities[t.id] || null} />
+            </NodeErrorBoundary>
           ))}
           {connectDrag && (
             <svg

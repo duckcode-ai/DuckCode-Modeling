@@ -15,6 +15,9 @@ import {
   createProjectFolder,
   renameProjectFile,
   renameProjectFolder,
+  renameCascadeAtomic,
+  commitGit,
+  patchProjectConfig,
   deleteProjectFile,
   deleteProjectFolder,
   saveAllProjectFiles,
@@ -24,6 +27,10 @@ import { removeEntity } from "../lib/yamlRoundTrip";
 import { SAMPLE_MODEL } from "../sampleModel";
 import { normalizeImportedModelFileName } from "../lib/importModelName";
 import useHistoryStore, { fileKeyOf } from "./historyStore";
+// Path matching helpers live in lib/renamePaths so they can be unit
+// tested without the full zustand + API surface. See that file for
+// normalization rules.
+import { matchesRenameSource, rewriteRenameTarget } from "../lib/renamePaths";
 
 // Read a project file and return the names of entities defined inside it.
 // Returns [] for non-model files, unreadable files, or parse errors — the
@@ -128,19 +135,7 @@ async function cascadeRemoveEntityReferences(projectId, deletedSubpath, entityNa
 // root (same shape as Explorer node.path values). `matchScope`:
 //   - "file"   → rewrites refs where `ref === fromPath`
 //   - "folder" → rewrites refs where `ref === fromPath` OR `ref` starts with `fromPath + "/"`
-function matchesRenameSource(ref, fromPath, matchScope) {
-  if (!ref) return false;
-  const normRef = String(ref).replace(/^\/+/, "");
-  if (normRef === fromPath) return true;
-  if (matchScope === "folder" && normRef.startsWith(fromPath + "/")) return true;
-  return false;
-}
-
-function rewriteRenameTarget(ref, fromPath, toPath) {
-  const normRef = String(ref).replace(/^\/+/, "");
-  if (normRef === fromPath) return toPath;
-  return toPath + normRef.slice(fromPath.length);
-}
+// (helpers imported at top of file from lib/renamePaths)
 
 async function computeRenameImpact(projectId, fromPath, toPath, matchScope) {
   const report = { diagramRefs: [], importRefs: [], filesToRewrite: [] };
@@ -230,12 +225,11 @@ function formatRenameImpactPrompt(fromPath, toPath, report) {
   return lines.join("\n");
 }
 
-// Apply a pre-computed rename impact: rewrite every affected file's
-// YAML `file:` / `imports[].path:` values. Best-effort per file — one
-// failure doesn't block the rest. Returns { filesUpdated, failures }
-// so callers can surface partial-success state.
-async function applyRenameCascade(projectId, report, fromPath, toPath, matchScope) {
-  const filesUpdated = [];
+// Build the rewrites list (without writing) for a pre-computed rename
+// impact. Each entry is `{ path, fullPath, newContent }` so callers can
+// either POST them to /rename-cascade (atomic) or write them one-at-a-time.
+async function buildRenameCascadeRewrites(report, fromPath, toPath, matchScope) {
+  const rewrites = [];
   const failures = [];
   for (const target of report.filesToRewrite) {
     try {
@@ -261,15 +255,15 @@ async function applyRenameCascade(projectId, report, fromPath, toPath, matchScop
       }
       if (mutated) {
         const next = yaml.dump(doc, { lineWidth: 120, noRefs: true, sortKeys: false });
-        await saveFileContent(target.fullPath, next);
-        filesUpdated.push(target.path);
+        rewrites.push({ path: target.path, fullPath: target.fullPath, newContent: next });
       }
     } catch (err) {
       failures.push({ path: target.path, error: err?.message || String(err) });
     }
   }
-  return { filesUpdated, failures };
+  return { rewrites, failures };
 }
+
 
 // --- Phase 3.4 delete impact helpers ------------------------------------
 // Compute how many diagrams / relationships reference the entities defined
@@ -482,6 +476,103 @@ function deriveModelNameFromPath(pathOrName) {
     .replace(/\//g, "_")
     .toLowerCase();
   return cleaned || "imported_model";
+}
+
+// ---------------------------------------------------------------------------
+// Autosave machinery
+// ---------------------------------------------------------------------------
+// Every `updateContent` call schedules a debounced save keyed by the active
+// file's stable identity (fullPath in project mode, id offline). A key-scoped
+// timer lets the user hop between tabs without losing pending writes — each
+// tab's edit queue is independent.
+//
+// The module-scope `saveInFlight` set prevents a manual Ctrl+S from racing a
+// scheduled autosave for the same file: whoever starts first wins, and any
+// still-pending timer will coalesce into that save.
+const AUTOSAVE_DEBOUNCE_MS = 800;
+const autosaveTimers = new Map(); // key -> timeout id
+const saveInFlight = new Set();    // keys currently being persisted
+
+// Auto-commit debounce: coalesce bursty autosaves into a single commit per
+// project. Keyed by project id so edits in one project don't trigger a
+// commit in another. Cancelled on project switch so half-scheduled commits
+// don't fire against the wrong working tree.
+const AUTOCOMMIT_DEBOUNCE_MS = 2000;
+const autocommitTimers = new Map(); // projectId -> timeout id
+
+function cancelAutocommit(projectId) {
+  if (!projectId) return;
+  const t = autocommitTimers.get(projectId);
+  if (t) {
+    clearTimeout(t);
+    autocommitTimers.delete(projectId);
+  }
+}
+
+function renderCommitMessage(template, { file }) {
+  const fallback = "DataLex: autosave";
+  const base = typeof template === "string" && template.trim() ? template : "DataLex: autosave {path}";
+  const path = file?.path || file?.fullPath || "";
+  const name = file?.name || (path ? path.split("/").pop() : "");
+  const msg = base.replace(/\{path\}/g, path).replace(/\{name\}/g, name).trim();
+  return msg || fallback;
+}
+
+function autosaveKeyOf(file, offlineMode) {
+  if (!file) return null;
+  return offlineMode ? (file.id ? `id:${file.id}` : null) : (file.fullPath ? `fp:${file.fullPath}` : null);
+}
+
+function cancelAutosave(key) {
+  if (!key) return;
+  const t = autosaveTimers.get(key);
+  if (t) {
+    clearTimeout(t);
+    autosaveTimers.delete(key);
+  }
+}
+
+// Cheap structural signature used to decide whether a text edit changed
+// the *shape* of the model (entities, fields, relationships, imports)
+// vs. a pure description/comment tweak. Keyed by field presence only —
+// exact values don't matter, only whether a name/type/fk appears. Same
+// signature → skip the graph-version bump (avoids React Flow rerender
+// churn while the user types a description).
+function modelShapeSignature(content) {
+  if (typeof content !== "string" || !content) return "";
+  let doc;
+  try { doc = yaml.load(content); } catch (_err) { return "__parse_error__"; }
+  if (!doc || typeof doc !== "object") return "__not_object__";
+  const parts = [];
+  const entities = Array.isArray(doc.entities) ? doc.entities : [];
+  for (const e of entities) {
+    if (!e || typeof e !== "object") { parts.push("E?"); continue; }
+    parts.push(`E:${e.name || ""}`);
+    const fields = Array.isArray(e.fields) ? e.fields : Array.isArray(e.columns) ? e.columns : [];
+    for (const f of fields) {
+      if (!f || typeof f !== "object") { parts.push("f?"); continue; }
+      parts.push(`f:${f.name || ""}:${f.type || f.data_type || ""}:${f.primary_key ? "P" : ""}${f.unique ? "U" : ""}${f.required ? "R" : ""}${f.foreign_key ? "K" : ""}`);
+    }
+  }
+  // dbt-importer shape: single top-level `{kind: model, columns: [...]}`
+  if (!entities.length && doc.kind && Array.isArray(doc.columns)) {
+    parts.push(`M:${doc.name || ""}`);
+    for (const c of doc.columns) {
+      if (!c || typeof c !== "object") { parts.push("c?"); continue; }
+      parts.push(`c:${c.name || ""}:${c.type || c.data_type || ""}`);
+    }
+  }
+  const rels = Array.isArray(doc.relationships) ? doc.relationships : [];
+  for (const r of rels) {
+    if (!r || typeof r !== "object") { parts.push("r?"); continue; }
+    parts.push(`r:${r.from || ""}->${r.to || ""}`);
+  }
+  const imports = Array.isArray(doc.imports) ? doc.imports : [];
+  for (const imp of imports) {
+    if (!imp) { parts.push("i?"); continue; }
+    parts.push(`i:${imp?.path || imp?.file || ""}`);
+  }
+  return parts.join("|");
 }
 
 const useWorkspaceStore = create((set, get) => ({
@@ -1044,6 +1135,10 @@ const useWorkspaceStore = create((set, get) => ({
     const { activeProjectId, openProjects } = get();
     if (activeProjectId === projectId) return;
 
+    // Cancel any pending auto-commit for the outgoing project — switching
+    // projects invalidates its working-tree assumption.
+    if (activeProjectId) cancelAutocommit(activeProjectId);
+
     // Snapshot outgoing project so switching back restores state.
     get()._snapshotActiveProject();
 
@@ -1203,6 +1298,13 @@ const useWorkspaceStore = create((set, get) => ({
   },
 
   switchTab: async (fileInfo) => {
+    // Before we repoint activeFile to a different tab, flush any pending
+    // autosave on the outgoing file so its edits land on disk. Without
+    // this, the 800ms debounce timer would still reference the previous
+    // activeFile when it fires and the `autosaveKeyOf(current) !== key`
+    // guard would cancel the save entirely.
+    try { await get().flushAutosave(); } catch (_err) { /* save error already in store */ }
+
     if (get().offlineMode) {
       const doc = get().localDocuments.find((d) => d.id === fileInfo.id);
       if (doc) {
@@ -1244,6 +1346,20 @@ const useWorkspaceStore = create((set, get) => ({
   },
 
   closeTab: (fileInfo) => {
+    // Flush the outgoing tab's pending autosave (same reason as switchTab).
+    // We kick it off without awaiting because closeTab is synchronous in
+    // its existing contract — callers don't await it. The write still
+    // lands; the active file only changes after this turn.
+    const { activeFile, offlineMode } = get();
+    const key = offlineMode ? "id" : "fullPath";
+    if (activeFile && activeFile[key] === fileInfo[key]) {
+      get().flushAutosave(fileInfo).catch(() => {});
+    } else {
+      // Cancel any pending timer for a non-active closing tab so it
+      // doesn't fire against a file that's about to be closed.
+      cancelAutosave(autosaveKeyOf(fileInfo, offlineMode));
+    }
+
     set((s) => {
       const key = s.offlineMode ? "id" : "fullPath";
       const tabs = s.openTabs.filter((t) => t[key] !== fileInfo[key]);
@@ -1313,6 +1429,66 @@ const useWorkspaceStore = create((set, get) => ({
       set({ localDocuments: updated });
       get().saveOfflineDocs();
     }
+
+    // If the structural shape changed (new/removed entity, field, FK,
+    // relationship, import), bump modelGraphVersion so the read-only
+    // diagram adapter rebuilds. Pure description/comment edits land on
+    // the same signature and don't trigger a rebuild.
+    if (activeFile && typeof content === "string") {
+      const prevSig = modelShapeSignature(prev);
+      const nextSig = modelShapeSignature(content);
+      if (prevSig !== nextSig) {
+        set((s) => ({ modelGraphVersion: (s.modelGraphVersion || 0) + 1 }));
+      }
+    }
+
+    // Debounced autosave: schedule a save for this file after an idle
+    // window. Every subsequent `updateContent` for the same key resets
+    // the timer so bursts of edits collapse into one write. We skip the
+    // schedule entirely when content matches disk (nothing to save) and
+    // when the caller opts out explicitly (e.g. offline mode already
+    // persists via saveOfflineDocs, or tests mutating raw state).
+    if (!options.skipAutosave && activeFile && !offlineMode && content !== originalContent) {
+      const key = autosaveKeyOf(activeFile, false);
+      if (key) {
+        cancelAutosave(key);
+        const timer = setTimeout(() => {
+          autosaveTimers.delete(key);
+          const state = get();
+          const current = state.activeFile;
+          // Only fire if we're still looking at the same file and it
+          // still has unsaved changes. Otherwise the user switched tabs
+          // (handled by switchTab flush) or a manual save already landed.
+          if (!current || autosaveKeyOf(current, state.offlineMode) !== key) return;
+          if (!state.isDirty) return;
+          get().saveCurrentFile().catch(() => {
+            // saveCurrentFile already writes `error` into store state;
+            // swallow here so an unhandled rejection doesn't leak.
+          });
+        }, AUTOSAVE_DEBOUNCE_MS);
+        autosaveTimers.set(key, timer);
+      }
+    }
+  },
+
+  // Force any pending autosave for `file` (defaults to the active file)
+  // to fire now. Used by inspector inputs on blur, by tab switch / close,
+  // and by Ctrl+S so manual saves coalesce with scheduled ones.
+  flushAutosave: async (file) => {
+    const { activeFile, offlineMode, isDirty } = get();
+    const target = file || activeFile;
+    if (!target) return;
+    const key = autosaveKeyOf(target, offlineMode);
+    if (!key) return;
+    const hadTimer = autosaveTimers.has(key);
+    cancelAutosave(key);
+    // Only flush-to-disk if there's actually pending dirty state for the
+    // active file — flushAutosave for an inactive tab just cancels its
+    // timer (we don't have that file's content in hand to write).
+    if (!hadTimer) return;
+    if (activeFile && autosaveKeyOf(activeFile, offlineMode) === key && isDirty) {
+      await get().saveCurrentFile();
+    }
   },
 
   // Bump the model-graph revision so subscribers (e.g. ModelGraphPanel)
@@ -1321,6 +1497,27 @@ const useWorkspaceStore = create((set, get) => ({
   // we mutate model shape and want the read-only graph to catch up.
   bumpModelGraphVersion: () => {
     set((s) => ({ modelGraphVersion: (s.modelGraphVersion || 0) + 1 }));
+  },
+
+  // Persist a partial update to the active project's config (merges with a
+  // one-level deep merge server-side). Used by the auto-commit toggle and
+  // any other "sticky project preference" surface.
+  updateProjectConfig: async (patch) => {
+    const { activeProjectId } = get();
+    if (!activeProjectId || !patch || typeof patch !== "object") return null;
+    const res = await patchProjectConfig(activeProjectId, patch);
+    const nextConfig = res?.projectConfig ?? null;
+    set((s) => {
+      const cache = { ...(s.projectCache || {}) };
+      const entry = cache[activeProjectId];
+      if (entry) cache[activeProjectId] = { ...entry, projectConfig: nextConfig };
+      return { projectConfig: nextConfig, projectCache: cache };
+    });
+    // Cancel any pending auto-commit if the user just disabled the toggle.
+    if (patch.autoCommit && patch.autoCommit.enabled === false) {
+      cancelAutocommit(activeProjectId);
+    }
+    return nextConfig;
   },
 
   undo: () => {
@@ -1347,11 +1544,24 @@ const useWorkspaceStore = create((set, get) => ({
     const { activeFile, activeFileContent, offlineMode, projectPath, projectConfig } = get();
     if (!activeFile) return;
 
+    // Cancel any pending autosave for this file — we're saving now, so
+    // the queued timer would at best be a no-op and at worst race with
+    // a subsequent edit the user is about to make.
+    const saveKey = autosaveKeyOf(activeFile, offlineMode);
+    if (saveKey) cancelAutosave(saveKey);
+
     if (offlineMode) {
       set({ originalContent: activeFileContent, isDirty: false });
       get().saveOfflineDocs();
       return;
     }
+
+    // Guard against concurrent saves of the same file: if one is already
+    // in flight, skip the second call. The pending write will either
+    // include the later edit (if updateContent fired before the network
+    // request) or the next autosave tick will catch it.
+    if (saveKey && saveInFlight.has(saveKey)) return;
+    if (saveKey) saveInFlight.add(saveKey);
 
     set({ loading: true, error: null, lastAutoGeneratedDdl: null, lastAutoGenerateError: null });
     try {
@@ -1400,8 +1610,36 @@ const useWorkspaceStore = create((set, get) => ({
           modelGraphVersion: (s.modelGraphVersion || 0) + 1,
         };
       });
+
+      // Auto-commit (opt-in, debounced). We schedule the commit rather
+      // than firing immediately so a burst of autosaves collapses into a
+      // single commit. `projectConfig.autoCommit.messageTemplate` may use
+      // `{path}` / `{name}` placeholders.
+      const autoCfg = projectConfig?.autoCommit;
+      const { activeProjectId } = get();
+      if (autoCfg?.enabled && activeProjectId) {
+        cancelAutocommit(activeProjectId);
+        const message = renderCommitMessage(autoCfg.messageTemplate, { file: activeFile });
+        const timer = setTimeout(async () => {
+          autocommitTimers.delete(activeProjectId);
+          // Re-check the flag at fire time — the user may have toggled it
+          // off while the debounce was pending.
+          const cur = get();
+          if (cur.activeProjectId !== activeProjectId) return;
+          if (!cur.projectConfig?.autoCommit?.enabled) return;
+          try {
+            await commitGit(activeProjectId, { message, paths: [] });
+            set({ lastAutoCommit: { projectId: activeProjectId, message, at: Date.now() } });
+          } catch (err) {
+            set({ lastAutoCommitError: err?.message || String(err) });
+          }
+        }, AUTOCOMMIT_DEBOUNCE_MS);
+        autocommitTimers.set(activeProjectId, timer);
+      }
     } catch (err) {
       set({ error: err.message, loading: false });
+    } finally {
+      if (saveKey) saveInFlight.delete(saveKey);
     }
   },
 
@@ -1728,7 +1966,29 @@ const useWorkspaceStore = create((set, get) => ({
     // old path's references to know what to rewrite.
     const impact = await computeRenameImpact(activeProjectId, fromPath, toPath, "file");
     try {
-      const result = await renameProjectFile(activeProjectId, fromPath, toPath);
+      // Pre-build rewrites so we can submit them atomically with the move.
+      // Older servers without /rename-cascade (or clients that prefer the
+      // per-file path) fall back to PATCH + per-file saves.
+      const { rewrites, failures: buildFailures } = impact.filesToRewrite.length
+        ? await buildRenameCascadeRewrites(impact, fromPath, toPath, "file")
+        : { rewrites: [], failures: [] };
+
+      let result;
+      let cascadeFailures = buildFailures;
+      let filesUpdated = [];
+      if (rewrites.length > 0) {
+        const atomic = await renameCascadeAtomic(activeProjectId, {
+          fromPath, toPath, kind: "file",
+          rewrites: rewrites.map((r) => ({ path: r.path, newContent: r.newContent })),
+        });
+        filesUpdated = atomic.written || [];
+        // PATCH /files returns {file.fullPath}; the atomic endpoint returns
+        // {toPath}. Stub a matching shape so the reopen logic below finds
+        // the moved file by relative path.
+        result = { file: { path: atomic.toPath || toPath } };
+      } else {
+        result = await renameProjectFile(activeProjectId, fromPath, toPath);
+      }
       // Drop any tab pointing at the old path.
       set((s) => ({
         openTabs: s.openTabs.filter((t) => t.path !== fromPath),
@@ -1738,11 +1998,7 @@ const useWorkspaceStore = create((set, get) => ({
         isDirty: wasActive ? false : s.isDirty,
       }));
       const data = await fetchProjectFiles(activeProjectId);
-      // Rewrite diagram / imports refs that pointed at the old path, now
-      // that the rename itself succeeded. Best-effort per file.
-      const cascade = impact.filesToRewrite.length
-        ? await applyRenameCascade(activeProjectId, impact, fromPath, toPath, "file")
-        : { filesUpdated: [], failures: [] };
+      const cascade = { filesUpdated, failures: cascadeFailures };
       set((s) => ({
         projectFiles: data.files || [],
         modelGraphVersion: (s.modelGraphVersion || 0) + 1,
@@ -1753,8 +2009,11 @@ const useWorkspaceStore = create((set, get) => ({
           failures: cascade.failures,
         },
       }));
-      if (wasActive && result?.file?.fullPath) {
-        const moved = (data.files || []).find((f) => f.fullPath === result.file.fullPath);
+      if (wasActive) {
+        const moved = (data.files || []).find((f) =>
+          (result?.file?.fullPath && f.fullPath === result.file.fullPath) ||
+          (result?.file?.path && f.path === result.file.path)
+        );
         if (moved) await get().openFile(moved);
       }
       set({ loading: false });
@@ -1784,7 +2043,18 @@ const useWorkspaceStore = create((set, get) => ({
     // paths don't exist so refs that still target them would be dangling.
     const impact = await computeRenameImpact(activeProjectId, fromNorm, toNorm, "folder");
     try {
-      await renameProjectFolder(activeProjectId, fromNorm, toNorm);
+      const { rewrites, failures: buildFailures } = impact.filesToRewrite.length
+        ? await buildRenameCascadeRewrites(impact, fromNorm, toNorm, "folder")
+        : { rewrites: [], failures: [] };
+      let atomicResult = null;
+      if (rewrites.length > 0) {
+        atomicResult = await renameCascadeAtomic(activeProjectId, {
+          fromPath: fromNorm, toPath: toNorm, kind: "folder",
+          rewrites: rewrites.map((r) => ({ path: r.path, newContent: r.newContent })),
+        });
+      } else {
+        await renameProjectFolder(activeProjectId, fromNorm, toNorm);
+      }
       const data = await fetchProjectFiles(activeProjectId);
       const prefix = fromNorm + "/";
       const rewritePath = (p) => (p === fromNorm || p?.startsWith?.(prefix)) ? toNorm + p.slice(fromNorm.length) : p;
@@ -1810,9 +2080,10 @@ const useWorkspaceStore = create((set, get) => ({
           loading: false,
         };
       });
-      const cascade = impact.filesToRewrite.length
-        ? await applyRenameCascade(activeProjectId, impact, fromNorm, toNorm, "folder")
-        : { filesUpdated: [], failures: [] };
+      const cascade = {
+        filesUpdated: atomicResult?.written || [],
+        failures: buildFailures || [],
+      };
       set((s) => ({
         modelGraphVersion: (s.modelGraphVersion || 0) + 1,
         lastRenameCascade: {

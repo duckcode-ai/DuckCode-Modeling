@@ -192,6 +192,23 @@ export async function renameProjectFolder(projectId, fromPath, toPath) {
   });
 }
 
+/* Atomic rename + cascade. Server snapshots rewrites, writes them all, then
+ * performs the move. Any failure rewinds the rewrites and skips/undoes the
+ * move, so the workspace is left in the pre-call state on partial failure. */
+export async function renameCascadeAtomic(projectId, { fromPath, toPath, kind, rewrites }) {
+  return request(`/projects/${projectId}/rename-cascade`, {
+    method: "POST",
+    body: JSON.stringify({ fromPath, toPath, kind, rewrites }),
+  });
+}
+
+export async function patchProjectConfig(projectId, patch) {
+  return request(`/projects/${projectId}/config`, {
+    method: "PATCH",
+    body: JSON.stringify({ patch }),
+  });
+}
+
 export async function deleteProjectFile(projectId, path) {
   return request(`/projects/${projectId}/files`, {
     method: "DELETE",
@@ -229,6 +246,16 @@ export async function generateForwardSql(modelPath, dialect = "snowflake") {
     }),
   });
   return data;
+}
+
+/* Dry-run or apply DDL via the core engine's connector runtime. Gated by
+ * DM_ENABLE_DIRECT_APPLY on the server — a 403 there surfaces as the
+ * "disabled in GitOps mode" copy in the dialog. */
+export async function applyForwardSql(body) {
+  return request("/forward/apply", {
+    method: "POST",
+    body: JSON.stringify(body || {}),
+  });
 }
 
 export async function transformActiveModel({ modelContent, modelPath, transform, dialect = "postgres" }) {

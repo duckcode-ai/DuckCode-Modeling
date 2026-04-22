@@ -18,8 +18,7 @@ const SHORTCUT_GROUPS = [
     title: "Diagram",
     shortcuts: [
       { keys: ["⌘", "F"], description: "Search entities in diagram" },
-      { keys: ["⌘", "E"], description: "Export diagram as PNG" },
-      { keys: ["⌘", "Shift", "E"], description: "Export diagram as SVG" },
+      { keys: ["⌘", "Shift", "E"], description: "Export diagram as PNG" },
       { keys: ["F"], description: "Fit diagram to view" },
       { keys: ["C"], description: "Recenter canvas on selected entity" },
       { keys: ["N"], description: "Add annotation note" },
