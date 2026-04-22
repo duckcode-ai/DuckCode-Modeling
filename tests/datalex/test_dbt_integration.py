@@ -171,6 +171,75 @@ class DbtManifestImportTests(unittest.TestCase):
                 mdl_doc["meta"]["datalex"]["dbt"]["unique_id"], "model.acme.stg_orders"
             )
 
+    def test_import_parses_relationship_tests_into_foreign_key(self) -> None:
+        """Phase 0.2 — a dbt `relationships` test on a column must round-trip
+        into DataLex as both a `foreign_key: {entity, field}` shorthand and a
+        preserved `tests:` block. Pre-v1.0.6 imports silently dropped every
+        generic test, so FK edges never rendered after importing a dbt repo.
+        """
+        manifest = self._fake_manifest()
+        # Add a `customers` model and two generic tests on orders.customer_id:
+        #   - relationships(to: ref('customers'), field: id)
+        #   - not_null
+        manifest["nodes"]["model.acme.customers"] = {
+            "resource_type": "model",
+            "name": "customers",
+            "unique_id": "model.acme.customers",
+            "database": "analytics",
+            "schema": "staging",
+            "columns": {"id": {"name": "id", "data_type": "bigint"}},
+        }
+        manifest["nodes"]["model.acme.stg_orders"]["columns"]["customer_id"] = {
+            "name": "customer_id",
+            "data_type": "bigint",
+        }
+        manifest["nodes"]["test.acme.rel_orders_customer"] = {
+            "resource_type": "test",
+            "name": "relationships_stg_orders_customer_id",
+            "unique_id": "test.acme.rel_orders_customer",
+            "attached_node": "model.acme.stg_orders",
+            "column_name": "customer_id",
+            "test_metadata": {
+                "name": "relationships",
+                "kwargs": {"to": "ref('customers')", "field": "id"},
+            },
+            "depends_on": {
+                "nodes": ["model.acme.stg_orders", "model.acme.customers"]
+            },
+        }
+        manifest["nodes"]["test.acme.nn_orders_customer"] = {
+            "resource_type": "test",
+            "name": "not_null_stg_orders_customer_id",
+            "unique_id": "test.acme.nn_orders_customer",
+            "attached_node": "model.acme.stg_orders",
+            "column_name": "customer_id",
+            "test_metadata": {
+                "name": "not_null",
+                "kwargs": {"column_name": "customer_id"},
+            },
+            "depends_on": {"nodes": ["model.acme.stg_orders"]},
+        }
+
+        with tempfile.TemporaryDirectory() as tmp:
+            manifest_path = Path(tmp) / "manifest.json"
+            manifest_path.write_text(json.dumps(manifest))
+            result = import_manifest(str(manifest_path))
+            orders = result.models["stg_orders"]
+            cust_col = next(c for c in orders["columns"] if c["name"] == "customer_id")
+
+            # DataLex-native shorthand derived from the relationships test.
+            self.assertEqual(cust_col["foreign_key"], {"entity": "customers", "field": "id"})
+            # not_null lands as `nullable: false` so the UI / schema layer
+            # doesn't need to re-parse the tests list.
+            self.assertIs(cust_col["nullable"], False)
+            # Raw `tests:` block is preserved verbatim so dbt round-trips
+            # cleanly through emit.py.
+            self.assertIn(
+                {"relationships": {"to": "ref('customers')", "field": "id"}},
+                cust_col["tests"],
+            )
+            self.assertIn("not_null", cust_col["tests"])
+
     def test_reimport_preserves_user_authored_fields(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             manifest = Path(tmp) / "manifest.json"

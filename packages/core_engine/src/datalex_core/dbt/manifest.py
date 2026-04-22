@@ -17,9 +17,10 @@ via their own logic.
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 import yaml
 
@@ -71,6 +72,12 @@ def import_manifest(
     nodes = manifest.get("nodes") or {}
     sources = manifest.get("sources") or {}
 
+    # Index generic tests (relationships / not_null / unique / accepted_values)
+    # once up-front. dbt stores tests as top-level nodes that depend on the
+    # model or source they test; without this index the column builders would
+    # silently drop every FK on import (the bug Phase 0.2 fixes).
+    test_index = _build_test_index(manifest)
+
     # Sources are keyed by source_name in dbt; group per source_name so we emit one file per source.
     sources_grouped: Dict[str, List[Dict[str, Any]]] = {}
     for uid, node in sources.items():
@@ -78,7 +85,7 @@ def import_manifest(
         sources_grouped.setdefault(source_name, []).append(node)
 
     for source_name, tables in sources_grouped.items():
-        doc = _build_source_doc(source_name, tables, existing, catalog)
+        doc = _build_source_doc(source_name, tables, existing, catalog, test_index)
         result.sources[doc["name"]] = doc
         src_path = _common_source_path(tables)
         if src_path:
@@ -87,7 +94,7 @@ def import_manifest(
     for uid, node in nodes.items():
         if node.get("resource_type") != "model":
             continue
-        doc = _build_model_doc(node, existing, catalog)
+        doc = _build_model_doc(node, existing, catalog, test_index)
         result.models[doc["name"]] = doc
         model_path = node.get("original_file_path") or ""
         if model_path:
@@ -221,6 +228,7 @@ def _build_source_doc(
     tables: List[Dict[str, Any]],
     existing: Dict[str, Dict[str, Any]],
     catalog: CatalogIndex,
+    test_index: Optional[Dict[Tuple[str, str], List[Any]]] = None,
 ) -> Dict[str, Any]:
     # Source-level attributes come from the first table (dbt stores them per-node; pick any).
     first = tables[0]
@@ -248,7 +256,7 @@ def _build_source_doc(
 
     table_docs: List[Dict[str, Any]] = []
     for t in tables:
-        table_docs.append(_build_source_table_doc(t, existing_doc, catalog))
+        table_docs.append(_build_source_table_doc(t, existing_doc, catalog, test_index))
     doc["tables"] = table_docs
 
     # meta.datalex.dbt.unique_id list, so re-import can find this doc even if one table is renamed.
@@ -262,6 +270,7 @@ def _build_source_table_doc(
     t: Dict[str, Any],
     existing_source: Optional[Dict[str, Any]],
     catalog: CatalogIndex,
+    test_index: Optional[Dict[Tuple[str, str], List[Any]]] = None,
 ) -> Dict[str, Any]:
     name = _safe_name(t.get("name", ""))
     table_doc: Dict[str, Any] = {"name": name}
@@ -292,7 +301,7 @@ def _build_source_table_doc(
     tbl_uid = t.get("unique_id") or ""
     for c in t.get("columns", {}).values() if isinstance(t.get("columns"), dict) else (t.get("columns") or []):
         cols_out.append(
-            _build_source_column_doc(c, prior_cols.get(c.get("name"), {}), catalog, tbl_uid)
+            _build_source_column_doc(c, prior_cols.get(c.get("name"), {}), catalog, tbl_uid, test_index)
         )
     if cols_out:
         table_doc["columns"] = cols_out
@@ -311,6 +320,7 @@ def _build_source_column_doc(
     prior: Dict[str, Any],
     catalog: CatalogIndex,
     table_unique_id: str,
+    test_index: Optional[Dict[Tuple[str, str], List[Any]]] = None,
 ) -> Dict[str, Any]:
     doc: Dict[str, Any] = {"name": c.get("name")}
     # Type precedence:
@@ -337,6 +347,8 @@ def _build_source_column_doc(
     if c.get("description") and "description" not in doc:
         doc["description"] = c["description"]
 
+    _apply_column_tests(doc, prior, test_index, table_unique_id, c.get("name") or "")
+
     return doc
 
 
@@ -344,6 +356,7 @@ def _build_model_doc(
     node: Dict[str, Any],
     existing: Dict[str, Dict[str, Any]],
     catalog: CatalogIndex,
+    test_index: Optional[Dict[Tuple[str, str], List[Any]]] = None,
 ) -> Dict[str, Any]:
     name = _safe_name(node.get("name", ""))
     uid = node.get("unique_id")
@@ -388,7 +401,7 @@ def _build_model_doc(
     column_iter = columns_raw.values() if isinstance(columns_raw, dict) else columns_raw
     for c in column_iter:
         cols_out.append(
-            _build_model_column_doc(c, prior_cols.get(c.get("name"), {}), catalog, uid or "")
+            _build_model_column_doc(c, prior_cols.get(c.get("name"), {}), catalog, uid or "", test_index)
         )
     if cols_out:
         doc["columns"] = cols_out
@@ -404,6 +417,7 @@ def _build_model_column_doc(
     prior: Dict[str, Any],
     catalog: CatalogIndex,
     model_unique_id: str,
+    test_index: Optional[Dict[Tuple[str, str], List[Any]]] = None,
 ) -> Dict[str, Any]:
     doc: Dict[str, Any] = {"name": c.get("name")}
     # Type precedence:
@@ -428,6 +442,9 @@ def _build_model_column_doc(
             doc[k] = prior[k]
     if c.get("description") and "description" not in doc:
         doc["description"] = c["description"]
+
+    _apply_column_tests(doc, prior, test_index, model_unique_id, c.get("name") or "")
+
     return doc
 
 
@@ -470,8 +487,6 @@ def _merge_preserving_user_fields(
 
 def _safe_name(name: str) -> str:
     """DataLex names must match ^[a-z][a-z0-9_]*$ — coerce dbt names that drift."""
-    import re
-
     if not name:
         return "unnamed"
     s = name.strip().lower()
@@ -479,6 +494,181 @@ def _safe_name(name: str) -> str:
     if not re.match(r"^[a-z]", s):
         s = "n_" + s
     return s
+
+
+# ------------------------ generic-test extraction ------------------------
+#
+# dbt stores generic tests (`not_null`, `unique`, `relationships`, custom, ...)
+# as top-level nodes under `manifest.nodes` with `resource_type == "test"`.
+# They point at the tested model/source via `attached_node` (modern dbt) or
+# `depends_on.nodes` (older dbt), and at the column via `column_name`.
+#
+# Before v1.0.6 the importer silently dropped every generic test. The biggest
+# casualty was `relationships` tests — the primary way dbt users declare FKs
+# — so imported projects rendered without any edges on the diagram even when
+# schema.yml had full FK coverage. These helpers reconstruct that information
+# and hand it to `_apply_column_tests` below.
+
+
+def _test_parent_unique_id(node: Dict[str, Any]) -> Optional[str]:
+    """Return the unique_id of the model/source a generic test is attached to.
+
+    Strategy:
+      1. Modern dbt (1.5+) exposes `attached_node` directly — trust it.
+      2. Older dbt records every ref/source the test touches under
+         `depends_on.nodes`. For most tests there's exactly one parent; for
+         `relationships` tests two show up (parent model + `to:` target), so
+         we exclude the ref'd target and pick what's left.
+      3. Final fallback: the first dep, so we degrade gracefully rather than
+         dropping the test entirely.
+    """
+    attached = node.get("attached_node")
+    if attached:
+        return attached
+    deps = [
+        n
+        for n in ((node.get("depends_on") or {}).get("nodes") or [])
+        if n.startswith("model.") or n.startswith("source.")
+    ]
+    if not deps:
+        return None
+    if len(deps) == 1:
+        return deps[0]
+    meta = node.get("test_metadata") or {}
+    kwargs = meta.get("kwargs") or {}
+    to_raw = str(kwargs.get("to") or "")
+    m = re.search(r"ref\(\s*['\"]([^'\"]+)['\"]", to_raw)
+    if m:
+        target_name = m.group(1)
+        non_target = [d for d in deps if d.rsplit(".", 1)[-1] != target_name]
+        if len(non_target) == 1:
+            return non_target[0]
+    return deps[0]
+
+
+def _build_test_index(
+    manifest: Dict[str, Any],
+) -> Dict[Tuple[str, str], List[Any]]:
+    """Index column-level generic tests by (parent_unique_id, column_name).
+
+    Each list entry is already in the dbt-native schema.yml shape — bare
+    strings (`"not_null"`, `"unique"`) or single-key dicts (`{"relationships":
+    {...}}`, `{"accepted_values": {...}}`) — so the emitter can pass them
+    through verbatim on save for a lossless round-trip.
+    """
+    idx: Dict[Tuple[str, str], List[Any]] = {}
+    nodes = manifest.get("nodes") or {}
+    for _uid, node in nodes.items():
+        if node.get("resource_type") != "test":
+            continue
+        meta = node.get("test_metadata") or {}
+        name = meta.get("name")
+        if not name:
+            continue
+        col = node.get("column_name")
+        if not col:
+            # Model-level tests have no column_name — skip for now; they'd
+            # round-trip into a different (model-level) `tests:` block.
+            continue
+        parent = _test_parent_unique_id(node)
+        if not parent:
+            continue
+        kwargs = meta.get("kwargs") or {}
+        if name == "not_null":
+            entry: Any = "not_null"
+        elif name == "unique":
+            entry = "unique"
+        elif name == "relationships":
+            entry = {
+                "relationships": {
+                    "to": kwargs.get("to") or "",
+                    "field": kwargs.get("field") or "id",
+                }
+            }
+        elif name == "accepted_values":
+            entry = {"accepted_values": {"values": kwargs.get("values") or []}}
+        else:
+            # Custom / namespaced tests — carry through by name so emit.py
+            # preserves the declaration.
+            entry = {name: {k: v for k, v in kwargs.items() if k != "column_name"}}
+        idx.setdefault((parent, col), []).append(entry)
+    return idx
+
+
+def _resolve_relationships_target(to_raw: Any) -> Optional[str]:
+    """Resolve a `relationships.to:` jinja expression to a DataLex entity name.
+
+    Handles `ref('x')` and `source('s','t')` — the two shapes dbt emits.
+    Returns None for anything else so the caller can fall back to emitting the
+    raw `tests:` list without a derived `foreign_key:` shorthand.
+    """
+    s = str(to_raw or "")
+    if not s:
+        return None
+    m = re.search(r"ref\(\s*['\"]([^'\"]+)['\"]", s)
+    if m:
+        return _safe_name(m.group(1))
+    m = re.search(r"source\(\s*['\"][^'\"]+['\"]\s*,\s*['\"]([^'\"]+)['\"]", s)
+    if m:
+        return _safe_name(m.group(1))
+    return None
+
+
+def _apply_column_tests(
+    doc: Dict[str, Any],
+    prior: Dict[str, Any],
+    test_index: Optional[Dict[Tuple[str, str], List[Any]]],
+    parent_uid: str,
+    column_name: str,
+) -> None:
+    """Merge tests from the manifest test index onto an emitted column doc.
+
+    We do three things:
+      1. Union the new tests into the column's existing `tests:` list (prior
+         user-authored tests win on exact equality).
+      2. Derive DataLex-native shorthands (`nullable: false`, `unique: true`,
+         `foreign_key: {entity, field}`) so the frontend schemaAdapter and the
+         validation layer don't need to re-parse the `tests:` list at read
+         time.
+      3. Leave the raw `tests:` list in place — `dbt/emit.py` passes it through
+         verbatim, so a subsequent dbt save round-trips losslessly.
+
+    Designed to be idempotent: calling it on a column that was already imported
+    (with `prior` carrying the previous DataLex doc) merges new tests but
+    doesn't clobber user-authored shorthands.
+    """
+    if not test_index:
+        return
+    new_tests = test_index.get((parent_uid, column_name)) or []
+    if not new_tests:
+        return
+
+    existing_tests: List[Any] = list(doc.get("tests") or [])
+    for t in new_tests:
+        if t not in existing_tests:
+            existing_tests.append(t)
+    if existing_tests:
+        doc["tests"] = existing_tests
+
+    # Union with prior-authored shorthands — never overwrite user intent.
+    for t in new_tests:
+        if t == "not_null":
+            if doc.get("nullable") is None and prior.get("nullable") is None:
+                doc["nullable"] = False
+        elif t == "unique":
+            if not doc.get("unique") and not prior.get("unique"):
+                doc["unique"] = True
+        elif isinstance(t, dict) and "relationships" in t:
+            if doc.get("foreign_key") or prior.get("foreign_key"):
+                continue
+            rel = t.get("relationships") or {}
+            target = _resolve_relationships_target(rel.get("to"))
+            if not target:
+                continue
+            doc["foreign_key"] = {
+                "entity": target,
+                "field": rel.get("field") or "id",
+            }
 
 
 def _write_yaml(path: Path, doc: Dict[str, Any]) -> None:

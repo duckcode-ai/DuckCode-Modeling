@@ -49,13 +49,32 @@ function columnsFromFields(fields) {
   });
 }
 
+// Semantics: `one_to_many` means "one row on the from-side maps to many rows
+// on the to-side" — so the crow's-foot must render on the to-side, not the
+// from-side. v1.0.5 and earlier had `one_to_many` / `many_to_one` branches
+// swapped (the to-side showed a single-bar glyph instead of a crow's-foot)
+// and the default clause silently returned a plausible-looking
+// many-to-one shape instead of surfacing the unknown value. Both are fixed
+// here; the default now returns `null` so downstream renderers can show a
+// neutral edge for "unspecified cardinality" rather than lying.
 function cardinalityToEnds(cardinality) {
-  switch (String(cardinality || "").toLowerCase()) {
+  const key = String(cardinality || "").toLowerCase();
+  switch (key) {
     case "one_to_one":  return { from: { min: "1", max: "1" }, to: { min: "1", max: "1" } };
-    case "one_to_many": return { from: { min: "1", max: "N" }, to: { min: "1", max: "1" } };
-    case "many_to_one": return { from: { min: "1", max: "1" }, to: { min: "1", max: "N" } };
+    case "one_to_many": return { from: { min: "1", max: "1" }, to: { min: "1", max: "N" } };
+    case "many_to_one": return { from: { min: "1", max: "N" }, to: { min: "1", max: "1" } };
     case "many_to_many":return { from: { min: "1", max: "N" }, to: { min: "1", max: "N" } };
-    default:            return { from: { min: "1", max: "N" }, to: { min: "1", max: "1" } };
+    default: {
+      if (key) {
+        if (!cardinalityToEnds._warned) cardinalityToEnds._warned = new Set();
+        if (!cardinalityToEnds._warned.has(key)) {
+          cardinalityToEnds._warned.add(key);
+          // eslint-disable-next-line no-console
+          console.warn("[schemaAdapter] unknown cardinality:", cardinality);
+        }
+      }
+      return null;
+    }
   }
 }
 
@@ -132,11 +151,14 @@ export function adaptDataLexYaml(yamlText) {
     const to = parseEndpoint(r.to);
     if (!tableIdSet.has(from.table) || !tableIdSet.has(to.table)) return;
     const ends = cardinalityToEnds(r.cardinality);
+    // When cardinality is unknown / unspecified, leave min/max undefined so
+    // Canvas.drawEnd renders a neutral edge (no crow's-foot, no "one" bar)
+    // instead of defaulting to a misleading many-to-one glyph.
     relationships.push({
       id: `r${i + 1}`,
       name: String(r.name || `${from.table}_${to.table}`),
-      from: { table: from.table, col: from.col, side: "right", ...ends.from },
-      to:   { table: to.table,   col: to.col,   side: "left",  ...ends.to },
+      from: { table: from.table, col: from.col, side: "right", ...(ends?.from || {}) },
+      to:   { table: to.table,   col: to.col,   side: "left",  ...(ends?.to   || {}) },
       identifying: !!r.identifying,
       dashed: !!r.optional || !!r.dashed,
       onDelete: r.on_delete ? String(r.on_delete).toUpperCase() : undefined,

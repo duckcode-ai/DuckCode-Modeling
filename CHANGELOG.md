@@ -7,6 +7,75 @@ from `v0.1.0` onward.
 
 ## [Unreleased]
 
+## [1.0.6] — 2026-04-21
+
+Hotfix release — two correctness bugs users are hitting right now on the
+path to open-source launch:
+
+1. Cardinality arrow icons rendered the wrong direction on the legacy
+   SVG canvas — selecting **one-to-many** produced a crow's-foot on the
+   *one* side instead of the *many* side, and saving round-tripped the
+   inverted value so the dropdown flipped to "many-to-one" on reload.
+   Every ER diagram rendered by DataLex since v0.x was semantically
+   misleading.
+2. Importing a dbt repo silently dropped every column-level generic
+   test — `relationships`, `not_null`, `unique`, `accepted_values` —
+   because `manifest.py` only copied user-authored `tests:` from a prior
+   DataLex doc and never parsed the dbt manifest's own test nodes. Users
+   who ran `dm dbt import` on a repo with FK tests ended up with zero
+   edges on the diagram even when `schema.yml` had full FK coverage.
+
+Both are surgical fixes with new regression tests; the roadmap plan for
+the full open-source launch (Phases 1–5: api-server test harness,
+structured error envelopes, folder-aware file operations, diagram UX on
+imported YAMLs, perf/a11y/docs/CI) follows in v1.1.
+
+### Fixed
+
+- **Cardinality semantics for `one_to_many` / `many_to_one` on the
+  legacy canvas.** `cardinalityToEnds` in
+  `packages/web-app/src/design/schemaAdapter.js` had the `one_to_many`
+  and `many_to_one` switch branches literally swapped — so the crow's-
+  foot glyph in `design/Canvas.jsx:drawEnd` ended up on the wrong side
+  of the edge, and `design/inspector/RelationsView.jsx` re-derived the
+  dropdown value from the already-inverted min/max and displayed the
+  opposite cardinality after a reload. The fix swaps the branches back
+  to textbook ERD semantics (`one_to_many` → from-side = 1, to-side =
+  N), and also replaces the silent default-clause fallback (which used
+  to pick a plausible-looking shape for any unknown string) with a
+  `null` return + one-time `console.warn`. Downstream, `drawEnd` now
+  renders a neutral edge (no crow's-foot, no "one" bar) when
+  cardinality is unspecified, so an unknown value reads as
+  "unspecified" instead of lying.
+  - `packages/web-app/src/design/schemaAdapter.js` — corrected switch
+    bodies + `null` default + warn helper.
+  - `packages/web-app/src/design/Canvas.jsx:drawEnd` — early-return for
+    unspecified cardinality.
+  - Existing DataLex YAML files store `cardinality: one_to_many` as a
+    string (not pre-computed ends) so no file migration is needed —
+    the rendered glyph flips to the correct side on next reload.
+- **dbt `relationships` / `not_null` / `unique` tests are now parsed
+  on import.** `packages/core_engine/src/datalex_core/dbt/manifest.py`
+  builds a test index from the manifest's top-level test nodes (keyed
+  by `attached_node` + `column_name`, with a `depends_on` fallback for
+  pre-1.5 dbt), and threads it through every column builder. Each
+  matched column gets:
+  - A `tests:` list in dbt-native shape (`"not_null"`,
+    `{"relationships": {"to": "ref('customers')", "field": "id"}}`) so
+    `dbt/emit.py` passes them through verbatim on save — round-trip
+    becomes lossless.
+  - DataLex-native shorthands (`foreign_key: {entity, field}`,
+    `nullable: false`, `unique: true`) so the frontend schemaAdapter
+    and the schema validation layer don't need to re-parse the
+    `tests:` list at read time — FK edges render on the diagram
+    immediately after import.
+  - Prior user-authored shorthands are preserved: we never overwrite
+    `foreign_key` / `nullable` / `unique` if the column already had
+    them on a previous import.
+  - Added integration test
+    `test_import_parses_relationship_tests_into_foreign_key` covering
+    the relationships + not_null path end-to-end.
+
 ## [1.0.5] — 2026-04-21
 
 Patch release — closes the four gaps reported against v1.0.4. The fixes

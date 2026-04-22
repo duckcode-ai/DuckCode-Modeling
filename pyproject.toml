@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "datalex-cli"
-version = "1.0.5"
+version = "1.0.6"
 description = "Git-native data modeling for dbt users"
 readme = "README.md"
 requires-python = ">=3.9"

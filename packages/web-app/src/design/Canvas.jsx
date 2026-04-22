@@ -145,6 +145,14 @@ function TableCard({ table, selected, onSelect, onMove, onMoveEnd, onStartConnec
 
 /* Crow's-foot glyph drawer (IE notation) */
 function drawEnd(x, y, side, spec, idPrefix, active, dimmed) {
+  // Unspecified cardinality — render nothing. Upstream (`cardinalityToEnds`)
+  // returns null for unknown strings so we land here with `max` undefined;
+  // historically we silently defaulted to a crow's-foot, which lied to the
+  // user. The main edge line is still drawn by the caller, so returning no
+  // glyph is equivalent to a neutral "this edge has no cardinality" marker.
+  if (!spec || (spec.max !== "N" && spec.max !== "1")) {
+    return null;
+  }
   const outward = {
     right:  { ux:  1, uy:  0 },
     left:   { ux: -1, uy:  0 },
