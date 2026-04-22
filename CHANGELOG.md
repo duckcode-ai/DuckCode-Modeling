@@ -7,6 +7,64 @@ from `v0.1.0` onward.
 
 ## [Unreleased]
 
+## [1.1.0] — 2026-04-22
+
+Minor release — the first post-`v1.0.6` workflow drop. This rolls up
+the stabilization work already merged on `main` plus the follow-up dbt
+import / jaffle-shop / local-E2E changes from this branch.
+
+### Added
+
+- **Autosave + optional auto-commit for project-backed dbt repos.**
+  DataLex now debounces file saves in the workspace and can
+  automatically create a git commit after a burst of edits when
+  `autoCommit.enabled` is turned on in the project config.
+- **Import Results panel + unresolved import warnings.** dbt imports now
+  surface the sync report directly in the UI before opening the
+  workspace, including manifest-only imports, unknown column types, and
+  partially resolved relationships.
+- **Atomic rename cascade across the project graph.** Renaming an entity
+  now rewrites FK shorthands, relationship endpoints, indexes, and
+  affected paths through one rollback-safe API instead of leaving the
+  user to chase references manually.
+- **Apply-to-warehouse dialog and promoted export actions.** The command
+  palette can now open a DDL preview/apply flow, and PNG/SVG export is
+  easier to reach from the diagram toolbar.
+- **Local-dev Playwright E2E coverage against a real jaffle-shop
+  checkout.** The new `packages/web-app/e2e/` suite exercises the
+  import API and the smoke path of the real browser flow without adding
+  that cost to CI.
+
+### Changed
+
+- **The canonical "try it" path now uses the real
+  `dbt-labs/jaffle-shop` repo.** The bundled jaffle-shop fixture and the
+  one-click demo affordance are gone; the import dialog now defaults to
+  **Git URL**, points users at the public upstream repo, and keeps local
+  folder import as the edit-in-place path.
+- **Importing from Git or a local folder now lands on the report first,
+  then opens the project on demand.** This makes missing warehouse
+  metadata, collisions, and unresolved relationships visible before the
+  user starts editing.
+- **FK shape and diagram warnings are more consistent.** The frontend
+  now canonicalizes `foreign_key` metadata to `{entity, field}`, marks
+  unresolved relationships in the graph, and avoids a single malformed
+  node blanking the whole canvas.
+- **Contributor and onboarding docs now match the real shipped flow.**
+  `README.md`, `docs/getting-started.md`,
+  `docs/tutorials/jaffle-shop-walkthrough.md`, and `CONTRIBUTING.md`
+  now describe cloning/importing a real dbt repo plus the local-only E2E
+  workflow instead of the removed bundled demo path.
+
+### Fixed
+
+- **Cross-file edits repaint reliably after autosave.** Shape edits now
+  bump the model-graph version so diagram state stays in sync after a
+  debounced save or blur-triggered write.
+- **Bad YAML writes fail as validation errors instead of poisoning the
+  workspace state.** `PUT /api/files` now rejects parse/shape failures
+  with a 422, which keeps broken bytes from silently persisting.
+
 ## [1.0.6] — 2026-04-21
 
 Hotfix release — two correctness bugs users are hitting right now on the
@@ -974,6 +1032,28 @@ Labs** (company).
   root; a `pip install`ed package run outside the repo needs
   `--schemas-root` or the repo on disk.
 
-[Unreleased]: https://github.com/duckcode-ai/DataLex/compare/v0.1.1...HEAD
+[Unreleased]: https://github.com/duckcode-ai/DataLex/compare/v1.1.0...HEAD
+[1.1.0]: https://github.com/duckcode-ai/DataLex/compare/v1.0.6...v1.1.0
+[1.0.6]: https://github.com/duckcode-ai/DataLex/compare/v1.0.5...v1.0.6
+[1.0.5]: https://github.com/duckcode-ai/DataLex/compare/v1.0.4...v1.0.5
+[1.0.4]: https://github.com/duckcode-ai/DataLex/compare/v1.0.3...v1.0.4
+[1.0.3]: https://github.com/duckcode-ai/DataLex/compare/v1.0.2...v1.0.3
+[1.0.2]: https://github.com/duckcode-ai/DataLex/compare/v1.0.1...v1.0.2
+[1.0.1]: https://github.com/duckcode-ai/DataLex/compare/v1.0.0...v1.0.1
+[1.0.0]: https://github.com/duckcode-ai/DataLex/compare/v0.5.1...v1.0.0
+[0.5.1]: https://github.com/duckcode-ai/DataLex/compare/v0.5.0...v0.5.1
+[0.5.0]: https://github.com/duckcode-ai/DataLex/compare/v0.4.2...v0.5.0
+[0.4.2]: https://github.com/duckcode-ai/DataLex/compare/v0.4.1...v0.4.2
+[0.4.1]: https://github.com/duckcode-ai/DataLex/compare/v0.4.0...v0.4.1
+[0.4.0]: https://github.com/duckcode-ai/DataLex/compare/v0.3.4...v0.4.0
+[0.3.4]: https://github.com/duckcode-ai/DataLex/compare/v0.3.3...v0.3.4
+[0.3.3]: https://github.com/duckcode-ai/DataLex/compare/v0.3.2...v0.3.3
+[0.3.2]: https://github.com/duckcode-ai/DataLex/compare/v0.3.1...v0.3.2
+[0.3.1]: https://github.com/duckcode-ai/DataLex/compare/v0.3.0...v0.3.1
+[0.3.0]: https://github.com/duckcode-ai/DataLex/compare/v0.2.3...v0.3.0
+[0.2.3]: https://github.com/duckcode-ai/DataLex/compare/v0.2.2...v0.2.3
+[0.2.2]: https://github.com/duckcode-ai/DataLex/compare/v0.2.1...v0.2.2
+[0.2.1]: https://github.com/duckcode-ai/DataLex/compare/v0.2.0...v0.2.1
+[0.2.0]: https://github.com/duckcode-ai/DataLex/compare/v0.1.1...v0.2.0
 [0.1.1]: https://github.com/duckcode-ai/DataLex/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/duckcode-ai/DataLex/releases/tag/v0.1.0
