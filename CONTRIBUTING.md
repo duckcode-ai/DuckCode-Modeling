@@ -88,11 +88,15 @@ npm --prefix packages/web-app test
 Runs everything in `packages/web-app/tests/*.test.js` via Node's
 built-in test runner.
 
-### Web app — Playwright end-to-end
+### Web app — Playwright end-to-end (local-dev only)
 
 ```bash
 # One-time: install browsers
 npx --prefix packages/web-app playwright install chromium
+
+# Clone + parse the jaffle-shop fixture once (needs dbt-duckdb)
+cd packages/web-app/test-results/jaffle-shop   # created by global-setup
+pip install dbt-duckdb && dbt deps && dbt parse --profiles-dir .
 
 # Run the suite (starts api + vite via Playwright webServer)
 npm --prefix packages/web-app run test:e2e
@@ -101,13 +105,14 @@ npm --prefix packages/web-app run test:e2e
 The E2E suite clones `https://github.com/dbt-labs/jaffle-shop` into
 `packages/web-app/test-results/jaffle-shop/` on first run and reuses
 the checkout afterwards. It drives the real user journey: import →
-diagram → rename cascade → autosave → auto-commit → dry-run apply.
+diagram → (with `E2E_FULL=1`) rename cascade → autosave → auto-commit
+→ dry-run apply.
 
-Offline? `OFFLINE=1 npm --prefix packages/web-app run test:e2e`
-short-circuits global-setup so the rest of the tooling still compiles.
-The critical-path spec is skipped in that mode.
-
-See `packages/web-app/e2e/README.md` for the full story.
+**CI does not run this suite.** It requires dbt-core + a parsed
+manifest on disk, which is too heavy and too flaky for every PR. The
+backend contracts are already covered by api-server unit tests; the
+Playwright suite is a local-dev regression tool for UI changes.
+See [packages/web-app/e2e/README.md](packages/web-app/e2e/README.md).
 
 ## Branch and PR flow
 
@@ -122,11 +127,12 @@ See `packages/web-app/e2e/README.md` for the full story.
 CI runs on every PR:
 
 - `api-server-tests.yml` — `packages/api-server/` unit tests
-- `e2e-tests.yml` — web-app unit tests, then Playwright E2E on a fresh
-  jaffle-shop clone
 - `model-quality.yml` — core_engine unit tests + policy checks
 - `datalex.yml` — `datalex validate` / `diff` / `dbt emit` on touched
   DataLex projects
+
+Playwright E2E is **not** in CI — run it locally before opening a PR
+that changes import, canvas, or save-path behavior.
 
 ## Commit style
 
