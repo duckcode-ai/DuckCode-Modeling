@@ -7,6 +7,20 @@ from `v0.1.0` onward.
 
 ## [Unreleased]
 
+## [1.1.1] — 2026-04-22
+
+Patch release — restores a standard CLI affordance that was missing from
+the `1.1.0` parser.
+
+### Fixed
+
+- **`datalex --version` now works.** The top-level argparse parser now
+  registers a `--version` flag and prints the installed `datalex-cli`
+  package version instead of erroring out because a subcommand was
+  required. When package metadata is unavailable in a source checkout,
+  the CLI falls back to the repo `pyproject.toml` version so local-dev
+  runs still behave sensibly.
+
 ## [1.1.0] — 2026-04-22
 
 Minor release — the first post-`v1.0.6` workflow drop. This rolls up
@@ -1032,7 +1046,8 @@ Labs** (company).
   root; a `pip install`ed package run outside the repo needs
   `--schemas-root` or the repo on disk.
 
-[Unreleased]: https://github.com/duckcode-ai/DataLex/compare/v1.1.0...HEAD
+[Unreleased]: https://github.com/duckcode-ai/DataLex/compare/v1.1.1...HEAD
+[1.1.1]: https://github.com/duckcode-ai/DataLex/compare/v1.1.0...v1.1.1
 [1.1.0]: https://github.com/duckcode-ai/DataLex/compare/v1.0.6...v1.1.0
 [1.0.6]: https://github.com/duckcode-ai/DataLex/compare/v1.0.5...v1.0.6
 [1.0.5]: https://github.com/duckcode-ai/DataLex/compare/v1.0.4...v1.0.5

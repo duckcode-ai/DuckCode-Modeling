@@ -2,6 +2,7 @@ import argparse
 import glob
 import json
 import hashlib
+import importlib.metadata
 import re
 import os
 import sys
@@ -79,6 +80,22 @@ entities:
         type: string
         nullable: false
 """
+
+
+def _cli_version() -> str:
+    pyproject = Path(__file__).resolve().parents[4] / "pyproject.toml"
+    try:
+        text = pyproject.read_text(encoding="utf-8")
+    except OSError:
+        text = ""
+    if text:
+        m = re.search(r'(?m)^version = "([^"]+)"$', text)
+        if m:
+            return m.group(1)
+    try:
+        return importlib.metadata.version("datalex-cli")
+    except importlib.metadata.PackageNotFoundError:
+        return "unknown"
 
 MULTI_MODEL_SHARED = """model:
   name: shared_dimensions
@@ -2900,6 +2917,11 @@ def cmd_watch(args: argparse.Namespace) -> int:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="datalex", description="DataLex CLI")
+    parser.add_argument(
+        "--version",
+        action="version",
+        version=f"%(prog)s {_cli_version()}",
+    )
     sub = parser.add_subparsers(dest="command", required=True)
 
     # `datalex serve` — start the bundled api-server + web-app on a

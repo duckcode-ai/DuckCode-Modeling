@@ -15,6 +15,8 @@ import os
 import sys
 import tempfile
 import unittest
+from contextlib import redirect_stdout
+from io import StringIO
 from pathlib import Path
 from typing import Any, Dict, List
 
@@ -411,6 +413,15 @@ class TestCompletion(unittest.TestCase):
 
 class TestCLIParser(unittest.TestCase):
     """Tests for CLI parser entries for new commands."""
+
+    def test_version_flag(self):
+        from datalex_cli.main import build_parser, _cli_version
+        parser = build_parser()
+        buf = StringIO()
+        with self.assertRaises(SystemExit) as ctx, redirect_stdout(buf):
+            parser.parse_args(["--version"])
+        self.assertEqual(ctx.exception.code, 0)
+        self.assertEqual(buf.getvalue().strip(), f"datalex {_cli_version()}")
 
     def test_doctor_parser(self):
         from datalex_cli.main import build_parser
