@@ -163,7 +163,7 @@ function TableCard({ table, selected, onSelect, onMove, onMoveEnd, onStartConnec
       onMouseDown={onMouseDown}
     >
       <div className="tc-header">
-        {conceptual ? <I.Boxes /> : table.kind === "ENUM" ? <I.Enum /> : table.junction ? <I.Junction /> : <I.Table />}
+        {conceptual ? <I.Layers /> : table.kind === "ENUM" ? <I.Enum /> : table.junction ? <I.Junction /> : <I.Table />}
         <span className="tc-name">{table.name}</span>
         <span className="tc-schema">{conceptual ? "conceptual" : logical ? "logical" : table.schema}</span>
         <div className="tc-badges">
