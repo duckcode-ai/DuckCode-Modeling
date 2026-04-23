@@ -33,6 +33,16 @@ const ON_DELETE = [
   { id: "SET DEFAULT", label: "SET DEFAULT" },
 ];
 
+const CONCEPTUAL_RELATIONSHIP_TYPES = [
+  { id: "", label: "General association" },
+  { id: "ownership", label: "Ownership" },
+  { id: "hierarchy", label: "Hierarchy" },
+  { id: "dependency", label: "Dependency" },
+  { id: "lifecycle", label: "Lifecycle" },
+  { id: "reference", label: "Reference" },
+  { id: "event", label: "Event / flow" },
+];
+
 function defaultRelName(fromEntity, toEntity) {
   const sanitize = (s) => String(s || "").replace(/[^A-Za-z0-9]+/g, "_").replace(/^_+|_+$/g, "");
   return `${sanitize(fromEntity)}_to_${sanitize(toEntity)}`.toLowerCase() || "new_relationship";
@@ -76,6 +86,9 @@ export default function NewRelationshipDialog() {
   const [onDelete, setOnDelete] = useState(String(modalPayload?.onDelete || ""));
   const [description, setDescription] = useState(String(modalPayload?.description || editingRelationship?.description || ""));
   const [verb, setVerb] = useState(String(modalPayload?.verb || editingRelationship?.verb || ""));
+  const [relationshipType, setRelationshipType] = useState(String(modalPayload?.relationshipType || editingRelationship?.relationshipType || ""));
+  const [rationale, setRationale] = useState(String(modalPayload?.rationale || editingRelationship?.rationale || ""));
+  const [sourceOfTruth, setSourceOfTruth] = useState(String(modalPayload?.sourceOfTruth || editingRelationship?.sourceOfTruth || ""));
   const [error, setError] = useState("");
 
   const handleSwapEndpoints = React.useCallback(() => {
@@ -175,6 +188,9 @@ export default function NewRelationshipDialog() {
         on_delete: conceptualLevel ? undefined : (onDelete || undefined),
         description: description.trim() || undefined,
         verb: verb.trim() || undefined,
+        relationship_type: relationshipType.trim() || undefined,
+        rationale: rationale.trim() || undefined,
+        source_of_truth: sourceOfTruth.trim() || undefined,
         _match: {
           from: endpointPatchValue(
             editingRelationship?._fromEntityName || editingRelationship?.from?.table || "",
@@ -244,6 +260,9 @@ export default function NewRelationshipDialog() {
         label: "",
         description: description.trim() || undefined,
         verb: verb.trim() || undefined,
+        relationship_type: relationshipType.trim() || undefined,
+        rationale: rationale.trim() || undefined,
+        source_of_truth: sourceOfTruth.trim() || undefined,
       });
       if (!next) {
         setError("Could not write to diagram YAML — check the file is a valid .diagram.yaml.");
@@ -287,13 +306,16 @@ export default function NewRelationshipDialog() {
     // the just-written relationship via the narrow patchRelationship
     // helper rather than expanding addRelationship's signature.
     let yamlOut = next;
-    if (identifying || optional || onDelete || description.trim() || verb.trim() || conceptualLevel) {
+    if (identifying || optional || onDelete || description.trim() || verb.trim() || relationshipType.trim() || rationale.trim() || sourceOfTruth.trim() || conceptualLevel) {
       const patched = patchRelationship(yamlOut, targetName, {
         identifying: conceptualLevel ? undefined : (identifying ? true : undefined),
         optional: conceptualLevel ? undefined : (optional ? true : undefined),
         on_delete: conceptualLevel ? undefined : (onDelete || undefined),
         description: description.trim() || undefined,
         verb: verb.trim() || undefined,
+        relationship_type: relationshipType.trim() || undefined,
+        rationale: rationale.trim() || undefined,
+        source_of_truth: sourceOfTruth.trim() || undefined,
       });
       if (patched) yamlOut = patched;
     }
@@ -541,6 +563,47 @@ export default function NewRelationshipDialog() {
           </div>
         )}
 
+        {conceptualLevel && (
+          <>
+            <div className="dlx-modal-section">
+              <label className="dlx-modal-field-label" htmlFor="rel-type">Relationship type</label>
+              <select
+                id="rel-type"
+                className="panel-input"
+                value={relationshipType}
+                onChange={(e) => setRelationshipType(e.target.value)}
+              >
+                {CONCEPTUAL_RELATIONSHIP_TYPES.map((option) => (
+                  <option key={option.id || "general"} value={option.id}>{option.label}</option>
+                ))}
+              </select>
+            </div>
+
+            <div className="dlx-modal-section">
+              <label className="dlx-modal-field-label" htmlFor="rel-rationale">Business rationale</label>
+              <textarea
+                id="rel-rationale"
+                className="panel-input"
+                value={rationale}
+                onChange={(e) => setRationale(e.target.value)}
+                placeholder="Why does this relationship matter to the business?"
+                rows={3}
+              />
+            </div>
+
+            <div className="dlx-modal-section">
+              <label className="dlx-modal-field-label" htmlFor="rel-source-of-truth">Source of truth</label>
+              <input
+                id="rel-source-of-truth"
+                className="panel-input"
+                value={sourceOfTruth}
+                onChange={(e) => setSourceOfTruth(e.target.value)}
+                placeholder="Policy admin system, billing platform, CRM..."
+              />
+            </div>
+          </>
+        )}
+
         <div className="dlx-modal-section">
           <label className="dlx-modal-field-label">Preview</label>
           <div
@@ -568,6 +631,8 @@ export default function NewRelationshipDialog() {
               {!conceptualLevel && optional && <span className="status-pill tone-neutral">Optional</span>}
               {!conceptualLevel && onDelete && <span className="status-pill tone-neutral">ON DELETE {onDelete}</span>}
               {conceptualLevel && verb && <span className="status-pill tone-accent">{verb}</span>}
+              {conceptualLevel && relationshipType && <span className="status-pill tone-info">{relationshipType.replace(/_/g, " ")}</span>}
+              {conceptualLevel && sourceOfTruth && <span className="status-pill tone-neutral">{sourceOfTruth}</span>}
             </div>
           </div>
         </div>

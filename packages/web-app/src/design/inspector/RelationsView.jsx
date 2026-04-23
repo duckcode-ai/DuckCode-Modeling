@@ -157,7 +157,10 @@ function RelationshipInspector({ rel, tables }) {
         {(rel.description || rel.verb || conceptual) && (
           <div style={{ marginTop: 10, fontSize: 11, color: "var(--text-secondary)" }}>
             {rel.verb && <div><strong>Verb:</strong> {rel.verb}</div>}
+            {rel.relationshipType && <div style={{ marginTop: rel.verb ? 4 : 0 }}><strong>Type:</strong> {rel.relationshipType.replace(/_/g, " ")}</div>}
             {rel.description && <div style={{ marginTop: rel.verb ? 4 : 0 }}>{rel.description}</div>}
+            {rel.rationale && <div style={{ marginTop: 4 }}><strong>Why:</strong> {rel.rationale}</div>}
+            {rel.sourceOfTruth && <div style={{ marginTop: 4 }}><strong>Source of truth:</strong> {rel.sourceOfTruth}</div>}
             {conceptual && !rel.description && !rel.verb && (
               <div>Conceptual relationship between business concepts.</div>
             )}

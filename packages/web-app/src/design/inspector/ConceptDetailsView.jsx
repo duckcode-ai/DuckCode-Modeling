@@ -1,9 +1,10 @@
 import React from "react";
-import { BookOpen, FileText, Layers3, Tags, UserRound } from "lucide-react";
-import { KeyValueGrid, PanelEmpty, PanelSection, StatusPill } from "../../components/panels/PanelFrame";
+import { BookOpen, FileText, Layers3, Tags, UserRound, GitBranch } from "lucide-react";
+import { KeyValueGrid, PanelCard, PanelEmpty, PanelSection, StatusPill } from "../../components/panels/PanelFrame";
 import useWorkspaceStore from "../../stores/workspaceStore";
 import useUiStore from "../../stores/uiStore";
 import { setEntityScalarProperty, updateEntityMeta, updateEntityTags } from "../../lib/yamlRoundTrip";
+import { findConceptImplementations } from "../../lib/conceptualModeling";
 
 function csvFromList(value) {
   return Array.isArray(value) ? value.join(", ") : "";
@@ -19,6 +20,10 @@ function parseCsv(value) {
 export default function ConceptDetailsView({ table, schema, relationships = [] }) {
   const addToast = useUiStore((s) => s.addToast);
   const activeFile = useWorkspaceStore((s) => s.activeFile);
+  const projectFiles = useWorkspaceStore((s) => s.projectFiles);
+  const fileContentCache = useWorkspaceStore((s) => s.fileContentCache);
+  const ensureFilesLoaded = useWorkspaceStore((s) => s.ensureFilesLoaded);
+  const openFile = useWorkspaceStore((s) => s.openFile);
   const sourceFile = table?._sourceFile || "";
   const isDiagramFile = /\.diagram\.ya?ml$/i.test(activeFile?.name || "");
   const conceptName = table?.name || "";
@@ -26,6 +31,25 @@ export default function ConceptDetailsView({ table, schema, relationships = [] }
   const related = Array.isArray(relationships)
     ? relationships.filter((rel) => rel?._fromEntityName === conceptName || rel?._toEntityName === conceptName)
     : [];
+
+  React.useEffect(() => {
+    if (!conceptName) return;
+    const candidatePaths = (projectFiles || [])
+      .filter((file) => {
+        const path = String(file?.path || file?.fullPath || "");
+        return /\.model\.ya?ml$/i.test(path) && !/\/conceptual\//i.test(path);
+      })
+      .map((file) => file.fullPath || file.path)
+      .filter(Boolean);
+    if (candidatePaths.length === 0) return;
+    ensureFilesLoaded?.(candidatePaths).catch(() => {});
+  }, [conceptName, ensureFilesLoaded, projectFiles]);
+
+  const implementations = React.useMemo(() => findConceptImplementations({
+    projectFiles,
+    fileContentCache,
+    conceptName,
+  }), [conceptName, fileContentCache, projectFiles]);
 
   const applyEntityMutation = React.useCallback(async (mutate) => {
     const s = useWorkspaceStore.getState();
@@ -158,6 +182,50 @@ export default function ConceptDetailsView({ table, schema, relationships = [] }
             onBlur={(e) => applyTags(e.target.value)}
           />
         </div>
+      </PanelSection>
+
+      <PanelSection
+        title="Traceability"
+        icon={<GitBranch size={11} />}
+        count={implementations.length}
+        description="Shows logical and physical implementations that were promoted from this concept."
+      >
+        {implementations.length === 0 ? (
+          <PanelEmpty
+            icon={GitBranch}
+            title="No implementations yet"
+            description="Promote this concept to logical or physical to create downstream models with lineage."
+          />
+        ) : (
+          <div style={{ display: "grid", gap: 8 }}>
+            {implementations.map((item) => (
+              <PanelCard
+                key={`${item.filePath}:${item.entityName}`}
+                dense
+                tone={item.layer === "logical" ? "info" : "accent"}
+                title={item.entityName}
+                eyebrow={item.layer}
+                subtitle={item.filePath}
+                actions={<StatusPill tone={item.layer === "logical" ? "info" : "accent"}>{item.layer}</StatusPill>}
+              >
+                <div style={{ display: "grid", gap: 6 }}>
+                  <div style={{ fontSize: 11, color: "var(--text-secondary)" }}>
+                    {item.derivedFrom ? `derived_from: ${item.derivedFrom}` : `mapped_from: ${item.mappedFrom}`}
+                  </div>
+                  <div>
+                    <button
+                      type="button"
+                      className="panel-btn"
+                      onClick={() => openFile?.({ fullPath: item.fullPath, path: item.filePath, name: item.filePath.split("/").pop() })}
+                    >
+                      Open model
+                    </button>
+                  </div>
+                </div>
+              </PanelCard>
+            ))}
+          </div>
+        )}
       </PanelSection>
     </>
   );

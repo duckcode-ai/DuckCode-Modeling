@@ -164,6 +164,30 @@ test("patchRelationship updates diagram relationship object endpoints and cardin
   assert.equal(doc.relationships[0].cardinality, "one_to_one");
 });
 
+test("patchRelationship preserves conceptual relationship semantics", () => {
+  const src = yaml.dump({
+    kind: "diagram",
+    relationships: [
+      {
+        name: "customer_holds_policy",
+        from: { entity: "Customer" },
+        to: { entity: "Policy" },
+        cardinality: "one_to_many",
+        verb: "holds",
+      },
+    ],
+  });
+  const out = patchRelationship(src, "customer_holds_policy", {
+    relationship_type: "ownership",
+    rationale: "Customer owns the active policy relationship.",
+    source_of_truth: "policy_admin",
+  });
+  const doc = parse(out);
+  assert.equal(doc.relationships[0].relationship_type, "ownership");
+  assert.equal(doc.relationships[0].rationale, "Customer owns the active policy relationship.");
+  assert.equal(doc.relationships[0].source_of_truth, "policy_admin");
+});
+
 test("patchRelationship cardinality change round-trips into diagram crow-foot endpoints", () => {
   const src = yaml.dump({
     kind: "diagram",

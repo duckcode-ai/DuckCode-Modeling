@@ -170,7 +170,7 @@ const SCHEMA_KEYWORDS = {
   model: ["name:", "kind:", "spec_version:", "version:", "domain:", "owners:", "state:", "layer:", "description:", "imports:"],
   entity: ["name:", "type:", "description:", "derived_from:", "mapped_from:", "fields:", "grain:", "candidate_keys:", "business_keys:", "hash_key:", "tags:", "template:", "templates:", "schema:", "database:", "physical_name:", "subject_area:", "owner:", "sla:", "natural_key:", "surrogate_key:", "scd_type:", "conformed:", "subtype_of:", "subtypes:", "dimension_refs:", "link_refs:", "parent_entity:", "hash_diff_fields:", "load_timestamp_field:", "record_source_field:", "partition_by:", "cluster_by:", "distribution:", "storage:"],
   field: ["name:", "type:", "domain:", "enum:", "mapped_from:", "nullable:", "primary_key:", "unique:", "foreign_key:", "identity:", "sequence:", "default:", "check:", "computed:", "computed_expression:", "sensitivity:", "description:", "deprecated:", "deprecated_message:", "examples:"],
-  relationship: ["name:", "from:", "to:", "cardinality:", "on_update:", "description:"],
+  relationship: ["name:", "from:", "to:", "cardinality:", "on_update:", "description:", "verb:", "relationship_type:", "rationale:", "source_of_truth:"],
   index: ["name:", "entity:", "fields:", "unique:"],
   metric: ["name:", "entity:", "description:", "expression:", "aggregation:", "grain:", "dimensions:", "time_dimension:", "owner:", "tags:", "deprecated:", "deprecated_message:"],
   rule: ["name:", "target:", "expression:", "severity:"],

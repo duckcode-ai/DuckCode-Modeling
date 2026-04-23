@@ -182,6 +182,7 @@ export function adaptDataLexYaml(yamlText) {
       id,
       name: String(e.name || id),
       schema: String(doc.model?.name || "public"),
+      domain: String(e.domain || doc.model?.domain || "").trim() || undefined,
       cat,
       subject: subjectArea || cat,
       subject_area: subjectArea || undefined,
@@ -227,6 +228,9 @@ export function adaptDataLexYaml(yamlText) {
       _conceptualLevel: !from.col && !to.col,
       description: r.description ? String(r.description) : "",
       verb: r.verb ? String(r.verb) : "",
+      relationshipType: r.relationship_type ? String(r.relationship_type) : "",
+      rationale: r.rationale ? String(r.rationale) : "",
+      sourceOfTruth: r.source_of_truth ? String(r.source_of_truth) : "",
     });
   });
 
@@ -769,6 +773,7 @@ function dataLexModelDocToEntity(doc) {
   if (doc?.display && typeof doc.display === "object") entity.display = doc.display;
   if (Array.isArray(doc?.tags)) entity.tags = doc.tags;
   if (Array.isArray(doc?.terms)) entity.terms = doc.terms;
+  if (doc?.domain) entity.domain = doc.domain;
   // Surface both spellings so a per-file `kind: model` picks up its
   // domain the same way an `entities:` block does. The downstream
   // schemaAdapter path already prefers `subject_area` over `subject`.
@@ -845,6 +850,9 @@ export function adaptDataLexModelYaml(yamlText) {
       _conceptualLevel: !from.col && !to.col,
       description: rel?.description ? String(rel.description) : "",
       verb: rel?.verb ? String(rel.verb) : "",
+      relationshipType: rel?.relationship_type ? String(rel.relationship_type) : "",
+      rationale: rel?.rationale ? String(rel.rationale) : "",
+      sourceOfTruth: rel?.source_of_truth ? String(rel.source_of_truth) : "",
     };
     const key = `${from.table}.${from.col || "*"}->${to.table}.${to.col || "*"}`;
     const existingIndex = relIndexByKey.get(key);
@@ -893,6 +901,7 @@ export function schemaToPanelModel(schema) {
       description: String(table.description || ""),
       tags: Array.isArray(table.tags) ? table.tags : [],
       terms: Array.isArray(table.terms) ? table.terms : [],
+      domain: table.domain,
       owner: table.owner,
       subject_area: table.subject_area,
       schema: table.schema,
@@ -925,6 +934,9 @@ export function schemaToPanelModel(schema) {
       optional: !!rel.dashed,
       description: rel.description,
       verb: rel.verb,
+      relationship_type: rel.relationshipType,
+      rationale: rel.rationale,
+      source_of_truth: rel.sourceOfTruth,
     })),
     indexes: [],
   };
@@ -1067,6 +1079,9 @@ export function adaptDiagramYaml(yamlText, projectFiles) {
         _fromEntityName: fromEntity,
         _toEntityName: toEntity,
         _conceptualLevel: !r?.from?.col && !r?.to?.col,
+        relationshipType: r?.relationshipType ? String(r.relationshipType) : "",
+        rationale: r?.rationale ? String(r.rationale) : "",
+        sourceOfTruth: r?.sourceOfTruth ? String(r.sourceOfTruth) : "",
       }, origin === "field_fk" ? 0 : 1);
     });
   });
@@ -1111,6 +1126,9 @@ export function adaptDiagramYaml(yamlText, projectFiles) {
       _conceptualLevel: !fromCol && !toCol,
       description: r?.description ? String(r.description) : "",
       verb: r?.verb ? String(r.verb) : "",
+      relationshipType: r?.relationship_type ? String(r.relationship_type) : "",
+      rationale: r?.rationale ? String(r.rationale) : "",
+      sourceOfTruth: r?.source_of_truth ? String(r.source_of_truth) : "",
     }, 2);
   });
 

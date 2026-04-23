@@ -33,6 +33,11 @@ export function buildRelationshipEditorPayload(rel, tables = []) {
     identifying: !!rel.identifying,
     optional: !!rel.dashed,
     onDelete: rel.onDelete || "",
+    description: rel.description || "",
+    verb: rel.verb || "",
+    relationshipType: rel.relationshipType || "",
+    rationale: rel.rationale || "",
+    sourceOfTruth: rel.sourceOfTruth || "",
   };
 }
 

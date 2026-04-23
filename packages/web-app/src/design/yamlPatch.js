@@ -137,6 +137,9 @@ function canonicalizeDiagramRelationship(entry) {
   if (entry.optional) out.optional = true;
   if (entry.label != null && String(entry.label).trim()) out.label = String(entry.label);
   if (entry.description != null && String(entry.description).trim()) out.description = String(entry.description);
+  if (entry.relationship_type != null && String(entry.relationship_type).trim()) out.relationship_type = String(entry.relationship_type).trim();
+  if (entry.rationale != null && String(entry.rationale).trim()) out.rationale = String(entry.rationale).trim();
+  if (entry.source_of_truth != null && String(entry.source_of_truth).trim()) out.source_of_truth = String(entry.source_of_truth).trim();
   if (entry.on_delete != null && String(entry.on_delete).trim()) out.on_delete = String(entry.on_delete).trim().toUpperCase();
   if (entry.on_update != null && String(entry.on_update).trim()) out.on_update = String(entry.on_update).trim().toUpperCase();
   return out;
@@ -743,7 +746,7 @@ export function deleteDiagramEntity(yamlText, file, entityName, referencedYamlTe
  * relate, "Add Relationship" dialog) without mutating any of the
  * referenced model files. Shape matches `diagram.schema.json`:
  *   {name, from:{entity,field}, to:{entity,field}, cardinality,
- *    identifying?, label?, description?, verb?}
+ *    identifying?, label?, description?, verb?, relationship_type?, rationale?, source_of_truth?}
  *
  * Dedupes by `{from, to}` endpoint pair — the same edge authored twice
  * is a no-op. Returns new YAML text, or null when the doc doesn't
@@ -774,6 +777,9 @@ export function addDiagramRelationship(yamlText, rel) {
   if (rel?.label) entry.label = String(rel.label);
   if (rel?.description) entry.description = String(rel.description);
   if (rel?.verb) entry.verb = String(rel.verb);
+  if (rel?.relationship_type) entry.relationship_type = String(rel.relationship_type);
+  if (rel?.rationale) entry.rationale = String(rel.rationale);
+  if (rel?.source_of_truth) entry.source_of_truth = String(rel.source_of_truth);
   doc.relationships.push(entry);
   return dump(doc);
 }
@@ -951,6 +957,18 @@ export function patchRelationship(yamlText, relName, patch) {
   if (patch.verb !== undefined) {
     if (patch.verb) rel.verb = String(patch.verb);
     else delete rel.verb;
+  }
+  if (patch.relationship_type !== undefined) {
+    if (patch.relationship_type) rel.relationship_type = String(patch.relationship_type);
+    else delete rel.relationship_type;
+  }
+  if (patch.rationale !== undefined) {
+    if (patch.rationale) rel.rationale = String(patch.rationale);
+    else delete rel.rationale;
+  }
+  if (patch.source_of_truth !== undefined) {
+    if (patch.source_of_truth) rel.source_of_truth = String(patch.source_of_truth);
+    else delete rel.source_of_truth;
   }
   if (patch.on_delete !== undefined) {
     const v = String(patch.on_delete || "").trim();

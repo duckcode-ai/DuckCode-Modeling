@@ -5,6 +5,7 @@ import { NOTATION, FK_COLOR_MAP } from "./notation";
 import useUiStore from "../stores/uiStore";
 import NodeErrorBoundary from "../components/shared/NodeErrorBoundary";
 import { openRelationshipEditor } from "./relationshipEditor";
+import { buildConceptualAreas, conceptualRelationshipLabel } from "../lib/conceptualModeling";
 
 // Visual lexicon for the git-diff overlay (v0.4.2). Kept as a module
 // constant so Legend / tests / future tooltip work can import the same
@@ -431,6 +432,8 @@ function Relationships({ tables, relationships, selected, onSelect, hovered, set
         const emphasize = isActive || isHover || touchesSelTable;
         const dimmed = selected && !isActive && !touchesSelTable && !isHover;
         const fkColor = r.onDelete ? FK_COLOR_MAP[r.onDelete] : null;
+        const conceptual = !r?.from?.col && !r?.to?.col;
+        const relLabel = conceptualRelationshipLabel(r);
         const strokeCls = `rel-line ${r.dashed ? "" : "strong"} ${emphasize ? "active" : ""} ${r.identifying ? "identifying" : ""} ${dimmed ? "dimmed" : ""}`;
         return (
           <g key={r.id}
@@ -451,7 +454,14 @@ function Relationships({ tables, relationships, selected, onSelect, hovered, set
               <text x={(a.x + b.x) / 2} y={(a.y + b.y) / 2 - 4}
                     className={`rel-label ${emphasize ? "active" : ""} ${dimmed ? "dimmed" : ""}`}
                     textAnchor="middle">
-                {NOTATION.cardinalityLabel(r.from.min, r.from.max)} : {NOTATION.cardinalityLabel(r.to.min, r.to.max)}
+                {conceptual && relLabel ? (
+                  <>
+                    <tspan x={(a.x + b.x) / 2} dy="0">{relLabel}</tspan>
+                    <tspan x={(a.x + b.x) / 2} dy="12">{NOTATION.cardinalityLabel(r.from.min, r.from.max)} : {NOTATION.cardinalityLabel(r.to.min, r.to.max)}</tspan>
+                  </>
+                ) : (
+                  `${NOTATION.cardinalityLabel(r.from.min, r.from.max)} : ${NOTATION.cardinalityLabel(r.to.min, r.to.max)}`
+                )}
               </text>
             )}
             {fkColor && emphasize && (
@@ -469,7 +479,7 @@ function SubjectAreas({ areas }) {
     <>
       {areas.map((a) => (
         <div key={a.id} className={`subject-area cat-${a.cat}`} style={{ left: a.x, top: a.y, width: a.w, height: a.h }}>
-          <span className={`subject-area-label cat-${a.cat}`}>{a.label}</span>
+          <span className={`subject-area-label cat-${a.cat}`}>{a.label}{typeof a.count === "number" ? ` · ${a.count}` : ""}</span>
         </div>
       ))}
     </>
@@ -586,6 +596,12 @@ export default function Canvas({ tables, setTables, relationships, areas, select
   const [zoom, setZoom] = React.useState(1);
   const [viewportState, setViewportState] = React.useState({ left: 0, top: 0, width: 1, height: 1 });
   const world = React.useMemo(() => getWorldBounds(tables), [tables]);
+  const renderedAreas = React.useMemo(
+    () => String(modelKind || "").toLowerCase() === "conceptual"
+      ? buildConceptualAreas(tables, areas)
+      : (areas || []),
+    [areas, modelKind, tables]
+  );
   const scaledWidth = Math.max(world.width * zoom, viewportState.width || 0);
   const scaledHeight = Math.max(world.height * zoom, viewportState.height || 0);
 
@@ -805,7 +821,7 @@ export default function Canvas({ tables, setTables, relationships, areas, select
               onDropYamlSource({ path: payload.path, x, y });
             } : undefined}
           >
-            <SubjectAreas areas={areas} />
+            <SubjectAreas areas={renderedAreas} />
             <Relationships tables={tables} relationships={relationships}
                            selected={selected} onSelect={onSelect}
                            hovered={hovered} setHovered={setHovered}

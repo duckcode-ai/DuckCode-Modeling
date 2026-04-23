@@ -561,6 +561,9 @@ relationships:
       entity: Policy
     cardinality: one_to_many
     verb: holds
+    relationship_type: ownership
+    rationale: Customer is the accountable party for the policy lifecycle.
+    source_of_truth: policy_admin
     description: Customer may hold many policies.
 `;
   const adapted = adaptDataLexYaml(yamlText);
@@ -571,6 +574,8 @@ relationships:
   assert.equal(adapted.relationships[0].from.table, "customer");
   assert.equal(adapted.relationships[0].from.col, "");
   assert.equal(adapted.relationships[0].verb, "holds");
+  assert.equal(adapted.relationships[0].relationshipType, "ownership");
+  assert.equal(adapted.relationships[0].sourceOfTruth, "policy_admin");
 });
 
 test("schemaToPanelModel preserves conceptual relationships as entity-level refs", () => {
@@ -590,6 +595,9 @@ test("schemaToPanelModel preserves conceptual relationships as entity-level refs
         cardinality: "one_to_many",
         _conceptualLevel: true,
         verb: "holds",
+        relationshipType: "ownership",
+        rationale: "Customer is the accountable party.",
+        sourceOfTruth: "policy_admin",
       },
     ],
     subjectAreas: [],
@@ -598,4 +606,6 @@ test("schemaToPanelModel preserves conceptual relationships as entity-level refs
   assert.deepEqual(model.relationships[0].from, { entity: "Customer" });
   assert.deepEqual(model.relationships[0].to, { entity: "Policy" });
   assert.equal(model.relationships[0].verb, "holds");
+  assert.equal(model.relationships[0].relationship_type, "ownership");
+  assert.equal(model.relationships[0].source_of_truth, "policy_admin");
 });
