@@ -137,10 +137,17 @@ import "../styles/datalex-integration.css";
 const THEME_STORAGE = "datalex.theme";
 const DENSITY_STORAGE = "datalex.density";
 
-const EDIT_BOTTOM_TABS = [
+const LOGICAL_PHYSICAL_EDIT_BOTTOM_TABS = [
   { id: "properties",    label: "Properties",    icon: Columns3 },
   { id: "validation",    label: "Validation",    icon: ShieldCheck },
   { id: "diff",          label: "Diff & Gate",   icon: GitCompare },
+  { id: "history",       label: "History",       icon: Clock },
+];
+
+const CONCEPTUAL_BOTTOM_TABS = [
+  { id: "properties",    label: "Properties",    icon: Columns3 },
+  { id: "dictionary",    label: "Dictionary",    icon: BookOpen },
+  { id: "validation",    label: "Validation",    icon: ShieldCheck },
   { id: "history",       label: "History",       icon: Clock },
 ];
 
@@ -541,6 +548,8 @@ export default function Shell() {
       return doc && Array.isArray(doc.indexes) ? doc.indexes : [];
     } catch (_e) { return []; }
   }, [activeFileContent]);
+  const activeModelKind = String(schema?.modelKind || "physical").toLowerCase();
+  const canRunForwardSql = activeModelKind === "physical";
 
   const panelModel = React.useMemo(() => schemaToPanelModel(schema), [schema]);
 
@@ -717,7 +726,12 @@ export default function Shell() {
     closeProject(pid);
   };
   const handleNewTable = () => {
-    if (activeFile) openModal("newFile");
+    if (activeFile) {
+      openModal("newFile", {
+        layerHint: activeModelKind,
+        domainHint: schema?.domain || "",
+      });
+    }
     else addToast({ type: "error", message: "Open a project first." });
   };
 
@@ -1015,8 +1029,9 @@ export default function Shell() {
     const toEntityName = String(toTable?.name || payload?.toEntity || "").trim();
     const fromColumn = String(payload?.fromColumn || "").trim();
     const toColumn = String(payload?.toColumn || "").trim();
+    const dialogPayload = { ...payload, modelKind: activeModelKind };
     if (!fromEntityName || !toEntityName || !fromColumn || !toColumn) {
-      openModal("newRelationship", payload);
+      openModal("newRelationship", dialogPayload);
       return;
     }
 
@@ -1034,7 +1049,7 @@ export default function Shell() {
         cardinality,
       });
       if (!next) {
-        openModal("newRelationship", payload);
+        openModal("newRelationship", dialogPayload);
         return;
       }
       if (next === s.activeFileContent) {
@@ -1055,13 +1070,13 @@ export default function Shell() {
       cardinality,
     );
     if (result?.error || !result?.yaml || result.yaml === s.activeFileContent) {
-      openModal("newRelationship", payload);
+      openModal("newRelationship", dialogPayload);
       return;
     }
     s.updateContent(result.yaml);
     s.flushAutosave?.().catch(() => {});
     addToast({ type: "success", message: `Linked ${fromEntityName}.${fromColumn} → ${toEntityName}.${toColumn}.` });
-  }, [addToast, isDiagramFile, openModal, tables]);
+  }, [activeModelKind, addToast, isDiagramFile, openModal, tables]);
 
   /* ── Drop a YAML source onto the canvas: append its file reference
          to the active diagram's `entities:` and prefetch content. Only
@@ -1085,8 +1100,11 @@ export default function Shell() {
 
   const isEditable = !!(canEdit && canEdit());
   const activeBottomTabs = React.useMemo(
-    () => (isEditable ? EDIT_BOTTOM_TABS : VIEWER_BOTTOM_TABS),
-    [isEditable]
+    () => {
+      if (activeModelKind === "conceptual") return CONCEPTUAL_BOTTOM_TABS;
+      return isEditable ? LOGICAL_PHYSICAL_EDIT_BOTTOM_TABS : VIEWER_BOTTOM_TABS;
+    },
+    [activeModelKind, isEditable]
   );
 
   React.useEffect(() => {
@@ -1103,7 +1121,11 @@ export default function Shell() {
         theme={theme}
         setTheme={setTheme}
         onNewTable={handleNewTable}
-        onNewFile={() => (activeProjectId ? openModal("newFile") : openModal("addProject"))}
+        onNewFile={() => (
+          activeProjectId
+            ? openModal("newFile", { layerHint: activeModelKind, domainHint: schema?.domain || "" })
+            : openModal("addProject")
+        )}
         onOpenFile={() => openModal("addProject")}
         onSave={async () => {
           if (!activeFile) return addToast({ type: "error", message: "No file to save." });
@@ -1139,10 +1161,11 @@ export default function Shell() {
         onSettings={() => openModal("settings")}
         onConnections={() => openModal("connectionsManager")}
         onCommit={() => openModal("commit")}
-        onRunSql={() => openModal("exportDdl")}
+        onRunSql={() => canRunForwardSql && openModal("exportDdl")}
         onImport={() => openModal("importDialog")}
         onImportDbt={() => openModal("importDbtRepo")}
         onSearch={() => setCommandPaletteOpen(true)}
+        canRunSql={canRunForwardSql}
         isDirty={isDirty}
         canSave={!!activeFile}
         domains={topBarDomains}
@@ -1201,7 +1224,7 @@ export default function Shell() {
           onDeleteEntity={handleDeleteEntity}
           onDeleteRelationship={handleDeleteRelationship}
           onAutoLayout={handleAutoLayout}
-          onExport={() => openModal("exportDdl")}
+          onExport={canRunForwardSql ? () => openModal("exportDdl") : undefined}
           title={schema.name}
           engine={schema.engine}
           legendOpen={legendOpen}
@@ -1244,7 +1267,7 @@ export default function Shell() {
           isDiagramFile={isDiagramFile}
           onSelectRel={handleSelect}
           onDeleteEntity={handleDeleteEntity}
-          onExportDdl={() => openModal("exportDdl")}
+          onExportDdl={canRunForwardSql ? () => openModal("exportDdl") : undefined}
         />
       )}
 
@@ -1299,9 +1322,10 @@ export default function Shell() {
               name: t.name || t.id,
               columns: (t.columns || []).map((c) => ({ name: c.name })),
             })),
+            modelKind: activeModelKind,
           }),
           autoLayout:      () => handleAutoLayout(),
-          exportSql:       () => openModal("exportDdl"),
+          exportSql:       () => canRunForwardSql && openModal("exportDdl"),
           cycleTheme:      () => cycleTheme(),
         }}
         extraCommands={[
@@ -1312,7 +1336,9 @@ export default function Shell() {
           { id: "connect",    section: "Actions", label: "Manage connections…",    meta: "",    icon: <span style={{ fontSize: 12 }}>⛁</span>,  run: () => openModal("connectionsManager") },
           { id: "import",     section: "Actions", label: "Import schema…",         meta: "",    icon: <span style={{ fontSize: 12 }}>⇩</span>,  run: () => openModal("importDialog") },
           { id: "import-dbt", section: "Actions", label: "Import dbt repo…",       meta: "",    icon: <span style={{ fontSize: 12 }}>⤓</span>,  run: () => openModal("importDbtRepo") },
-          { id: "apply-ddl",  section: "Actions", label: "Apply to warehouse…",    meta: "",    icon: <span style={{ fontSize: 12 }}>☁</span>,  run: () => openModal("applyDdl") },
+          ...(canRunForwardSql ? [
+            { id: "apply-ddl",  section: "Actions", label: "Apply to warehouse…", meta: "", icon: <span style={{ fontSize: 12 }}>☁</span>, run: () => openModal("applyDdl") },
+          ] : []),
           // v0.5.0 — stakeholder-share + snapshot flows. Share opens the
           // HTML bundle dialog prefilled from the currently-adapted schema;
           // snapshots routes through the new git-tag API.

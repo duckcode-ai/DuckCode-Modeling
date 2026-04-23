@@ -109,18 +109,32 @@ function cardinalityToEnds(cardinality) {
 
 function parseEndpoint(value) {
   const s = String(value || "");
+  if (!s.includes(".")) return { table: s.toLowerCase(), col: "" };
   const [table, col] = s.split(".");
-  return { table: (table || "").toLowerCase(), col: col || "id" };
+  return { table: (table || "").toLowerCase(), col: col || "" };
 }
 
 function parseRelationshipSide(value) {
   if (typeof value === "string") return parseEndpoint(value);
   if (value && typeof value === "object") {
     const table = String(value.table || value.entity || "").toLowerCase();
-    const col = String(value.col || value.field || value.column || "id");
+    const col = String(value.col || value.field || value.column || "");
     return { table, col };
   }
   return { table: "", col: "id" };
+}
+
+function inferSchemaModelKind(doc) {
+  const declared = String(doc?.model?.kind || "").trim().toLowerCase();
+  if (declared === "conceptual" || declared === "logical" || declared === "physical") return declared;
+  const entityTypes = new Set(
+    (Array.isArray(doc?.entities) ? doc.entities : [])
+      .map((entity) => String(entity?.type || "").trim().toLowerCase())
+      .filter(Boolean)
+  );
+  if (entityTypes.has("concept")) return "conceptual";
+  if (entityTypes.has("logical_entity")) return "logical";
+  return "physical";
 }
 
 /* Tries to convert a DataLex YAML document into the design schema shape. */
@@ -130,6 +144,7 @@ export function adaptDataLexYaml(yamlText) {
   if (!doc || typeof doc !== "object") return null;
   const entities = Array.isArray(doc.entities) ? doc.entities : null;
   if (!entities || entities.length === 0) return null;
+  const modelKind = inferSchemaModelKind(doc);
 
   const GRID_COLS = 3, COL_W = 300, ROW_H = 360;
   const tables = entities.map((e, i) => {
@@ -191,8 +206,8 @@ export function adaptDataLexYaml(yamlText) {
   const explicitRels = Array.isArray(doc.relationships) ? doc.relationships : [];
   const relationships = [];
   explicitRels.forEach((r, i) => {
-    const from = parseEndpoint(r.from);
-    const to = parseEndpoint(r.to);
+    const from = parseRelationshipSide(r.from);
+    const to = parseRelationshipSide(r.to);
     if (!tableIdSet.has(from.table) || !tableIdSet.has(to.table)) return;
     const ends = cardinalityToEnds(r.cardinality);
     // When cardinality is unknown / unspecified, leave min/max undefined so
@@ -208,11 +223,14 @@ export function adaptDataLexYaml(yamlText) {
       dashed: !!r.optional || !!r.dashed,
       onDelete: r.on_delete ? String(r.on_delete).toUpperCase() : undefined,
       onUpdate: r.on_update ? String(r.on_update).toUpperCase() : undefined,
+      _conceptualLevel: !from.col && !to.col,
+      description: r.description ? String(r.description) : "",
+      verb: r.verb ? String(r.verb) : "",
     });
   });
 
   // Also infer relationships from FK columns where not explicitly declared
-  tables.forEach((t) => {
+  if (modelKind !== "conceptual") tables.forEach((t) => {
     t.columns.forEach((c) => {
       if (!c.fk) return;
       const [targetTable, targetCol] = c.fk.split(".");
@@ -274,6 +292,8 @@ export function adaptDataLexYaml(yamlText) {
     name: String(doc.model?.name || "DataLex Model"),
     engine: String(doc.model?.dialect || doc.model?.engine || "DataLex"),
     schema: String(doc.model?.name || "public"),
+    modelKind,
+    domain: String(doc.model?.domain || "").trim(),
     tables,
     relationships,
     subjectAreas,
@@ -741,7 +761,7 @@ function dataLexModelDocToEntity(doc) {
   const fields = cols.map(dataLexColumnToField).filter(Boolean);
   const entity = {
     name,
-    type: "table",
+    type: String(doc?.type || "table"),
     description: doc?.description ? String(doc.description) : "",
     fields,
   };
@@ -780,7 +800,11 @@ export function adaptDataLexModelYaml(yamlText) {
   }
   if (entities.length === 0) return null;
   const syntheticDoc = {
-    model: { name: String(doc.schema || doc.database || doc.name || "dbt_schema") },
+    model: {
+      name: String(doc.schema || doc.database || doc.name || "dbt_schema"),
+      kind: String(doc?.model?.kind || doc?.layer || "").trim() || undefined,
+      domain: String(doc?.model?.domain || doc?.domain || "").trim() || undefined,
+    },
     entities,
   };
   if (Array.isArray(doc.relationships)) syntheticDoc.relationships = doc.relationships;
@@ -798,7 +822,7 @@ export function adaptDataLexModelYaml(yamlText) {
   if (explicitRels.length === 0) return adapted;
   const relIndexByKey = new Map();
   (adapted.relationships || []).forEach((rel, index) => {
-    const key = `${rel?.from?.table || ""}.${rel?.from?.col || ""}->${rel?.to?.table || ""}.${rel?.to?.col || ""}`;
+    const key = `${rel?.from?.table || ""}.${rel?.from?.col || "*"}->${rel?.to?.table || ""}.${rel?.to?.col || "*"}`;
     relIndexByKey.set(key, index);
   });
   explicitRels.forEach((rel, index) => {
@@ -816,8 +840,11 @@ export function adaptDataLexModelYaml(yamlText) {
       dashed: !!rel?.optional || !!rel?.dashed,
       onDelete: rel?.on_delete ? String(rel.on_delete).toUpperCase() : undefined,
       onUpdate: rel?.on_update ? String(rel.on_update).toUpperCase() : undefined,
+      _conceptualLevel: !from.col && !to.col,
+      description: rel?.description ? String(rel.description) : "",
+      verb: rel?.verb ? String(rel.verb) : "",
     };
-    const key = `${from.table}.${from.col}->${to.table}.${to.col}`;
+    const key = `${from.table}.${from.col || "*"}->${to.table}.${to.col || "*"}`;
     const existingIndex = relIndexByKey.get(key);
     if (existingIndex == null) {
       relIndexByKey.set(key, adapted.relationships.length);
@@ -849,7 +876,8 @@ export function schemaToPanelModel(schema) {
   return {
     model: {
       name: String(schema.name || "DataLex Model"),
-      kind: "physical",
+      kind: String(schema.modelKind || "physical"),
+      domain: String(schema.domain || "").trim() || undefined,
     },
     subject_areas: subjectAreas.map((area) => ({
       name: area?.name || area?.label || area?.id || "",
@@ -885,13 +913,15 @@ export function schemaToPanelModel(schema) {
     relationships: relationships.map((rel) => ({
       id: rel.id,
       name: rel.name,
-      from: `${rel.from?.table || ""}.${rel.from?.col || "id"}`,
-      to: `${rel.to?.table || ""}.${rel.to?.col || "id"}`,
+      from: rel.from?.col ? `${rel.from?.table || ""}.${rel.from?.col}` : { entity: rel.from?.table || "" },
+      to: rel.to?.col ? `${rel.to?.table || ""}.${rel.to?.col}` : { entity: rel.to?.table || "" },
       cardinality: rel.kind || rel.cardinality || "",
       on_delete: rel.onDelete,
       on_update: rel.onUpdate,
       identifying: !!rel.identifying,
       optional: !!rel.dashed,
+      description: rel.description,
+      verb: rel.verb,
     })),
     indexes: [],
   };
@@ -934,8 +964,8 @@ export function adaptDiagramYaml(yamlText, projectFiles) {
   const nodeIdsByEntity = new Map();
 
   const upsertRelationship = (relationship, precedence = 0) => {
-    const key = `${relationship?.from?.table || ""}.${relationship?.from?.col || ""}->${relationship?.to?.table || ""}.${relationship?.to?.col || ""}`;
-    if (!relationship?.from?.table || !relationship?.to?.table || !relationship?.from?.col || !relationship?.to?.col) return;
+    const key = `${relationship?.from?.table || ""}.${relationship?.from?.col || "*"}->${relationship?.to?.table || ""}.${relationship?.to?.col || "*"}`;
+    if (!relationship?.from?.table || !relationship?.to?.table) return;
     const existing = relationshipIndexByEndpoint.get(key);
     if (!existing) {
       relationshipIndexByEndpoint.set(key, { index: allRelationships.length, precedence });
@@ -1033,6 +1063,7 @@ export function adaptDiagramYaml(yamlText, projectFiles) {
         _sourceFile: ref.file,
         _fromEntityName: fromEntity,
         _toEntityName: toEntity,
+        _conceptualLevel: !r?.from?.col && !r?.to?.col,
       }, origin === "field_fk" ? 0 : 1);
     });
   });
@@ -1050,7 +1081,7 @@ export function adaptDiagramYaml(yamlText, projectFiles) {
     const fromCol = String(r?.from?.field || r?.from?.col || "").toLowerCase();
     const toEnt = String(r?.to?.entity || r?.to?.table || "").toLowerCase();
     const toCol = String(r?.to?.field || r?.to?.col || "").toLowerCase();
-    if (!fromEnt || !fromCol || !toEnt || !toCol) return;
+    if (!fromEnt || !toEnt) return;
     const fromId = resolveDiagramNodeId(fromEnt);
     const toId = resolveDiagramNodeId(toEnt);
     if (!fromId || !toId) return;
@@ -1074,6 +1105,9 @@ export function adaptDiagramYaml(yamlText, projectFiles) {
       _origin: "diagram_relationship",
       _fromEntityName: fromEnt,
       _toEntityName: toEnt,
+      _conceptualLevel: !fromCol && !toCol,
+      description: r?.description ? String(r.description) : "",
+      verb: r?.verb ? String(r.verb) : "",
     }, 2);
   });
 
@@ -1120,10 +1154,18 @@ export function adaptDiagramYaml(yamlText, projectFiles) {
     area.count = allTables.reduce((n, t) => n + (t.subject_area === area.name ? 1 : 0), 0);
   }
 
+  const modelKinds = new Set(
+    adaptedRefs
+      .map(({ adapted }) => String(adapted?.modelKind || "physical").trim().toLowerCase())
+      .filter(Boolean)
+  );
+  const diagramModelKind = modelKinds.size === 1 ? Array.from(modelKinds)[0] : "physical";
+
   return {
     name: String(diagram.title || diagram.name || "Diagram"),
     engine: "DataLex Diagram",
     schema: "diagram",
+    modelKind: diagramModelKind,
     tables: allTables,
     relationships: filteredRels,
     subjectAreas: diagramSubjectAreas,

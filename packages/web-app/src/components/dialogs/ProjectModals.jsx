@@ -41,6 +41,47 @@ function resolveEffectivePath({ path, name, createSubfolder }) {
   return createSubfolder && !baseEndsWithDerived ? joinPath(path, derived) : path;
 }
 
+function sanitizePathSegment(value, fallback) {
+  const cleaned = String(value || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9._-]+/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^[-.]+|[-.]+$/g, "");
+  return cleaned || fallback;
+}
+
+function layeredModelPath({ layer, domain, dialect, fileName }) {
+  const safeLayer = sanitizePathSegment(layer, "logical");
+  const safeDomain = sanitizePathSegment(domain, "shared");
+  const safeFile = sanitizePathSegment(fileName, "untitled");
+  if (safeLayer === "physical") {
+    const safeDialect = sanitizePathSegment(dialect, "postgres");
+    return `models/physical/${safeDialect}/${safeDomain}/${safeFile}.model.yaml`;
+  }
+  return `models/${safeLayer}/${safeDomain}/${safeFile}.model.yaml`;
+}
+
+function layeredModelTemplate({ layer, domain, fileName, dialect }) {
+  const safeLayer = sanitizePathSegment(layer, "logical");
+  const safeDomain = sanitizePathSegment(domain, "shared");
+  const safeName = sanitizePathSegment(fileName, "untitled");
+  const lines = [
+    "model:",
+    `  name: ${safeName}`,
+    `  kind: ${safeLayer}`,
+    `  domain: ${safeDomain}`,
+    "  version: 1.0.0",
+    "  owners: []",
+    "  state: draft",
+  ];
+  if (safeLayer === "physical") {
+    lines.push(`  dialect: ${sanitizePathSegment(dialect, "postgres")}`);
+  }
+  lines.push("entities: []", "relationships: []", "");
+  return `${lines.join("\n")}`;
+}
+
 /* ─────────────────────────── Add Project ─────────────────────────── */
 function AddProjectModal() {
   const { closeModal } = useUiStore();
@@ -177,14 +218,27 @@ function AddProjectModal() {
 
 /* ─────────────────────────── New File ─────────────────────────── */
 function NewFileModal() {
-  const { closeModal } = useUiStore();
+  const { closeModal, modalPayload } = useUiStore();
   const { createNewFile } = useWorkspaceStore();
-  const [name, setName] = useState("new.model.yaml");
+  const [layer, setLayer] = useState(() => String(modalPayload?.layerHint || "logical").toLowerCase());
+  const [domain, setDomain] = useState(() => String(modalPayload?.domainHint || "shared"));
+  const [dialect, setDialect] = useState(() => String(modalPayload?.dialectHint || "postgres"));
+  const [fileName, setFileName] = useState(() => String(modalPayload?.nameHint || "untitled"));
+
+  useEffect(() => {
+    setLayer(String(modalPayload?.layerHint || "logical").toLowerCase());
+    setDomain(String(modalPayload?.domainHint || "shared"));
+    setDialect(String(modalPayload?.dialectHint || "postgres"));
+    setFileName(String(modalPayload?.nameHint || "untitled"));
+  }, [modalPayload]);
+
+  const targetPath = layeredModelPath({ layer, domain, dialect, fileName });
+  const targetTemplate = layeredModelTemplate({ layer, domain, dialect, fileName });
 
   const handleSubmit = (e) => {
     e.preventDefault();
-    if (!name.trim()) return;
-    createNewFile(name.trim());
+    if (!fileName.trim()) return;
+    createNewFile(targetPath, targetTemplate);
     closeModal();
   };
 
@@ -192,7 +246,7 @@ function NewFileModal() {
     <Modal
       icon={<Plus size={14} />}
       title="New Model File"
-      subtitle="Create an empty .model.yaml in the active project."
+      subtitle="Create a layered DataLex model under DataLex/models/."
       size="sm"
       onClose={closeModal}
       footer={
@@ -204,7 +258,7 @@ function NewFileModal() {
             type="submit"
             form="new-file-form"
             className="panel-btn primary"
-            disabled={!name.trim()}
+            disabled={!fileName.trim()}
           >
             Create
           </button>
@@ -213,19 +267,71 @@ function NewFileModal() {
     >
       <form id="new-file-form" onSubmit={handleSubmit} style={{ display: "contents" }}>
         <div className="dlx-modal-section">
+          <label className="dlx-modal-field-label" htmlFor="new-file-layer">
+            Layer
+          </label>
+          <select
+            id="new-file-layer"
+            className="panel-input"
+            value={layer}
+            onChange={(e) => setLayer(e.target.value)}
+            autoFocus
+          >
+            <option value="conceptual">Conceptual</option>
+            <option value="logical">Logical</option>
+            <option value="physical">Physical</option>
+          </select>
+        </div>
+
+        <div className="dlx-modal-section">
+          <label className="dlx-modal-field-label" htmlFor="new-file-domain">
+            Domain
+          </label>
+          <input
+            id="new-file-domain"
+            className="panel-input"
+            value={domain}
+            onChange={(e) => setDomain(e.target.value)}
+            placeholder="customer"
+          />
+        </div>
+
+        {layer === "physical" && (
+          <div className="dlx-modal-section">
+            <label className="dlx-modal-field-label" htmlFor="new-file-dialect">
+              Dialect
+            </label>
+            <select
+              id="new-file-dialect"
+              className="panel-input"
+              value={dialect}
+              onChange={(e) => setDialect(e.target.value)}
+            >
+              <option value="postgres">PostgreSQL</option>
+              <option value="snowflake">Snowflake</option>
+              <option value="bigquery">BigQuery</option>
+              <option value="sqlserver">SQL Server</option>
+              <option value="redshift">Redshift</option>
+            </select>
+          </div>
+        )}
+
+        <div className="dlx-modal-section">
           <label className="dlx-modal-field-label" htmlFor="new-file-name">
-            File Name
+            Model name
           </label>
           <input
             id="new-file-name"
             className="panel-input"
             style={{ fontFamily: "var(--font-mono, ui-monospace, Menlo, monospace)" }}
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            autoFocus
+            value={fileName}
+            onChange={(e) => setFileName(e.target.value)}
           />
           <p className="dlx-modal-hint">
-            Use the <code>.model.yaml</code> suffix so DataLex opens it in the diagram editor.
+            Target path: <code>{targetPath}</code>
+          </p>
+          <p className="dlx-modal-hint">
+            Conceptual models stay business-facing; physical models add dialect context later.
           </p>
         </div>
       </form>

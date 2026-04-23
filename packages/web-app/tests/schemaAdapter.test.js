@@ -536,3 +536,66 @@ test("schemaToPanelModel preserves table ids for selection-driven panels", () =>
   assert.equal(model.entities[0].name, "fct_orders");
   assert.equal(model.relationships[0].from, "models/marts/fct_orders.yml::fct_orders.customer_id");
 });
+
+test("adaptDataLexYaml preserves conceptual entity-level relationships", () => {
+  const yamlText = `
+model:
+  name: insurance_concepts
+  kind: conceptual
+  domain: insurance
+  owners:
+    - steward@example.com
+  state: draft
+entities:
+  - name: Customer
+    type: concept
+    description: Business party buying a policy.
+  - name: Policy
+    type: concept
+    description: Insurance contract.
+relationships:
+  - name: customer_holds_policy
+    from:
+      entity: Customer
+    to:
+      entity: Policy
+    cardinality: one_to_many
+    verb: holds
+    description: Customer may hold many policies.
+`;
+  const adapted = adaptDataLexYaml(yamlText);
+  assert.equal(adapted.modelKind, "conceptual");
+  assert.equal(adapted.domain, "insurance");
+  assert.equal(adapted.tables[0].type, "concept");
+  assert.equal(adapted.relationships[0]._conceptualLevel, true);
+  assert.equal(adapted.relationships[0].from.table, "customer");
+  assert.equal(adapted.relationships[0].from.col, "");
+  assert.equal(adapted.relationships[0].verb, "holds");
+});
+
+test("schemaToPanelModel preserves conceptual relationships as entity-level refs", () => {
+  const model = schemaToPanelModel({
+    modelKind: "conceptual",
+    domain: "insurance",
+    tables: [
+      { id: "Customer", name: "Customer", type: "concept", schema: "business", columns: [] },
+      { id: "Policy", name: "Policy", type: "concept", schema: "business", columns: [] },
+    ],
+    relationships: [
+      {
+        id: "rel-1",
+        name: "customer_holds_policy",
+        from: { table: "Customer", col: "" },
+        to: { table: "Policy", col: "" },
+        cardinality: "one_to_many",
+        _conceptualLevel: true,
+        verb: "holds",
+      },
+    ],
+    subjectAreas: [],
+  });
+  assert.equal(model.model.kind, "conceptual");
+  assert.deepEqual(model.relationships[0].from, { entity: "Customer" });
+  assert.deepEqual(model.relationships[0].to, { entity: "Policy" });
+  assert.equal(model.relationships[0].verb, "holds");
+});

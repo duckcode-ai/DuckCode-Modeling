@@ -176,3 +176,37 @@ metrics:
   assert.equal(gate.diff.summary.changed_metrics, 1);
   assert.ok(gate.diff.breaking_changes.includes("Metric contract changed: revenue"));
 });
+
+test("runModelChecks applies conceptual validation rules to entity-level models", () => {
+  const yamlText = `model:
+  name: insurance_concepts
+  kind: conceptual
+  domain: insurance
+  owners: []
+  state: draft
+
+entities:
+  - name: Customer
+    type: concept
+  - name: Policy
+    type: concept
+
+relationships:
+  - name: customer_holds_policy
+    from:
+      entity: Customer
+    to:
+      entity: Policy
+    cardinality: one_to_many
+`;
+
+  const check = runModelChecks(yamlText);
+  const codes = check.warnings.map((item) => item.code);
+  const errorCodes = check.errors.map((item) => item.code);
+  assert.ok(codes.includes("CONCEPTUAL_MISSING_DESCRIPTION"));
+  assert.ok(codes.includes("CONCEPTUAL_MISSING_OWNER"));
+  assert.ok(codes.includes("CONCEPTUAL_MISSING_SUBJECT_AREA"));
+  assert.ok(codes.includes("CONCEPTUAL_MISSING_GLOSSARY_LINK"));
+  assert.equal(errorCodes.includes("INVALID_RELATIONSHIP_FROM"), false);
+  assert.equal(errorCodes.includes("INVALID_RELATIONSHIP_TO"), false);
+});

@@ -141,6 +141,34 @@ const ISSUE_GUIDANCE = {
     why: "Ownership is needed so quality issues, access requests, and change decisions have a clear accountable team.",
     nextStep: "Assign an owner such as a team alias or responsible email.",
   },
+  CONCEPTUAL_MISSING_DESCRIPTION: {
+    why: "A conceptual model is meant to communicate business meaning first. Without a description, the concept is just a label.",
+    nextStep: "Add a short business definition that explains what the concept represents and where it applies.",
+  },
+  CONCEPTUAL_MISSING_OWNER: {
+    why: "Conceptual models need a steward so business questions and definition changes have a clear owner.",
+    nextStep: "Assign a business owner or steward for this concept.",
+  },
+  CONCEPTUAL_MISSING_SUBJECT_AREA: {
+    why: "Subject areas are how enterprise teams group concepts into bounded contexts.",
+    nextStep: "Assign the concept to a subject area or bounded context.",
+  },
+  CONCEPTUAL_MISSING_GLOSSARY_LINK: {
+    why: "Without glossary linkage, the conceptual model stays disconnected from the business dictionary.",
+    nextStep: "Link the concept to one or more glossary terms through related_fields or concept references.",
+  },
+  CONCEPTUAL_ORPHAN_CONCEPT: {
+    why: "Concepts with no relationships are often placeholders or disconnected ideas, which weakens the enterprise story.",
+    nextStep: "Relate this concept to adjacent business concepts or remove it from the conceptual model.",
+  },
+  CONCEPTUAL_CROSS_DOMAIN_REL_NO_DESCRIPTION: {
+    why: "Cross-domain relationships are where business boundaries blur, so they need explicit explanation.",
+    nextStep: "Add a description that explains why the two bounded contexts connect and what the relationship means.",
+  },
+  CONCEPTUAL_MISSING_DOMAIN: {
+    why: "The model domain tells consumers which business area owns the conceptual view.",
+    nextStep: "Set model.domain to the bounded context or enterprise domain this conceptual model covers.",
+  },
   LOW_FIELD_DESCRIPTION_COVERAGE: {
     why: "Poor field coverage makes the model hard to trust and slows adoption in analytics and AI workflows.",
     nextStep: "Fill in descriptions for the highest-usage columns first, then raise the coverage across the remaining fields.",

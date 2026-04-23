@@ -48,6 +48,7 @@ export function TopBar({
   onOpenCmd, theme, setTheme, onNewTable, onNewFile, onOpenFile, onSave, onSaveAll,
   onUndo, onRedo, onRunSql, onSettings, onConnections, onCommit,
   onImport, onImportDbt, onSearch,
+  canRunSql = true,
   isDirty = false, canSave = true, canSaveAll = false,
   domains = [], hasUnassigned = false, unassignedCount = 0,
 }) {
@@ -114,7 +115,7 @@ export function TopBar({
           <DiffToggle />
         </div>
         <div className="tool-group">
-          <button className="tool-btn" onClick={onRunSql}><I.Play />Run SQL</button>
+          {canRunSql && <button className="tool-btn" onClick={onRunSql}><I.Play />Run SQL</button>}
           <button className="tool-btn" title="Commit (git)" onClick={onCommit}><I.Branch /></button>
           <button data-tour="settings" className="tool-btn" title="Settings" onClick={onSettings}><I.Settings /></button>
         </div>

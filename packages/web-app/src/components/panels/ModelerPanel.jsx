@@ -5,6 +5,7 @@ import useDiagramStore from "../../stores/diagramStore";
 import useUiStore from "../../stores/uiStore";
 import useAuthStore from "../../stores/authStore";
 import { addEntityWithOptions, addRelationship } from "../../lib/yamlRoundTrip";
+import { transformActiveModel } from "../../lib/api";
 import { PanelFrame, PanelSection, PanelEmpty } from "./PanelFrame";
 
 const VIEW_MODES = [
@@ -46,8 +47,28 @@ function allowedTypes(viewMode) {
   return ["table", "view", "materialized_view", "fact_table", "dimension_table", "bridge_table", "hub", "link", "satellite"];
 }
 
+function sanitizePathSegment(value, fallback) {
+  const cleaned = String(value || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9._-]+/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^[-.]+|[-.]+$/g, "");
+  return cleaned || fallback;
+}
+
+function layeredModelPath({ layer, domain, fileName, dialect }) {
+  const safeLayer = sanitizePathSegment(layer, "logical");
+  const safeDomain = sanitizePathSegment(domain, "shared");
+  const safeName = sanitizePathSegment(fileName, "untitled");
+  if (safeLayer === "physical") {
+    return `models/physical/${sanitizePathSegment(dialect, "postgres")}/${safeDomain}/${safeName}.model.yaml`;
+  }
+  return `models/${safeLayer}/${safeDomain}/${safeName}.model.yaml`;
+}
+
 export default function ModelerPanel() {
-  const { activeFileContent, updateContent } = useWorkspaceStore();
+  const { activeFile, activeFileContent, updateContent, createNewFile } = useWorkspaceStore();
   const {
     model,
     modelingViewMode,
@@ -73,6 +94,7 @@ export default function ModelerPanel() {
   const [toEntity, setToEntity] = useState("");
   const [toField, setToField] = useState("");
   const [cardinality, setCardinality] = useState("one_to_many");
+  const [promoting, setPromoting] = useState(false);
 
   useEffect(() => {
     const nextType = defaultEntityType(modelingViewMode, modelKind);
@@ -90,6 +112,7 @@ export default function ModelerPanel() {
 
   const fromEntityFields = entities.find((entity) => entity.name === fromEntity)?.fields || [];
   const toEntityFields = entities.find((entity) => entity.name === toEntity)?.fields || [];
+  const conceptualMode = modelingViewMode === "conceptual" || modelKind === "conceptual";
 
   useEffect(() => {
     if (!fromEntityFields.some((field) => field.name === fromField)) {
@@ -136,12 +159,18 @@ export default function ModelerPanel() {
   };
 
   const handleCreateRelationship = () => {
-    if (!fromEntity || !fromField || !toEntity || !toField) {
+    if (!fromEntity || !toEntity || (!conceptualMode && (!fromField || !toField))) {
       addToast?.({ type: "error", message: "Choose both relationship endpoints." });
       return;
     }
     const proposedName = relationshipName.trim() || `${fromEntity}_${toEntity}`.replace(/([a-z0-9])([A-Z])/g, "$1_$2").toLowerCase();
-    const result = addRelationship(activeFileContent, proposedName, `${fromEntity}.${fromField}`, `${toEntity}.${toField}`, cardinality);
+    const result = addRelationship(
+      activeFileContent,
+      proposedName,
+      conceptualMode ? { entity: fromEntity } : `${fromEntity}.${fromField}`,
+      conceptualMode ? { entity: toEntity } : `${toEntity}.${toField}`,
+      cardinality,
+    );
     if (result.error) {
       addToast?.({ type: "error", message: result.error });
       return;
@@ -150,6 +179,45 @@ export default function ModelerPanel() {
     requestLayoutRefresh();
     setRelationshipName("");
     addToast?.({ type: "success", message: `Added relationship ${proposedName}.` });
+  };
+
+  const handlePromote = async (targetLayer) => {
+    if (!activeFileContent) {
+      addToast?.({ type: "error", message: "Open a model file first." });
+      return;
+    }
+    const transform =
+      modelKind === "conceptual" && targetLayer === "logical"
+        ? "conceptual-to-logical"
+        : modelKind === "logical" && targetLayer === "physical"
+          ? "logical-to-physical"
+          : modelKind === "conceptual" && targetLayer === "physical"
+            ? "conceptual-to-physical"
+            : "";
+    if (!transform) {
+      addToast?.({ type: "info", message: `No promotion path from ${modelKind} to ${targetLayer}.` });
+      return;
+    }
+    setPromoting(true);
+    try {
+      const response = await transformActiveModel({
+        modelContent: activeFileContent,
+        modelPath: activeFile?.fullPath || "",
+        transform,
+      });
+      const targetPath = layeredModelPath({
+        layer: targetLayer,
+        domain: model?.model?.domain || model?.domain || "shared",
+        dialect: targetLayer === "physical" ? "postgres" : undefined,
+        fileName: `${model?.model?.name || model?.name || "untitled"}_${targetLayer}`,
+      });
+      await createNewFile(targetPath, response?.transformedYaml || "");
+      addToast?.({ type: "success", message: `Created ${targetLayer} model at ${targetPath}.` });
+    } catch (err) {
+      addToast?.({ type: "error", message: err?.message || String(err) });
+    } finally {
+      setPromoting(false);
+    }
   };
 
   return (
@@ -258,15 +326,19 @@ export default function ModelerPanel() {
             <select value={fromEntity} onChange={(e) => setFromEntity(e.target.value)} className="bg-bg-primary border border-border-primary rounded-md px-3 py-2 text-xs text-text-primary outline-none focus:border-accent-blue" disabled={!canEdit}>
               {entities.map((entity) => <option key={entity.name} value={entity.name}>{entity.name}</option>)}
             </select>
-            <select value={fromField} onChange={(e) => setFromField(e.target.value)} className="bg-bg-primary border border-border-primary rounded-md px-3 py-2 text-xs text-text-primary outline-none focus:border-accent-blue" disabled={!canEdit}>
-              {fromEntityFields.map((field) => <option key={field.name} value={field.name}>{field.name}</option>)}
-            </select>
+            {!conceptualMode && (
+              <select value={fromField} onChange={(e) => setFromField(e.target.value)} className="bg-bg-primary border border-border-primary rounded-md px-3 py-2 text-xs text-text-primary outline-none focus:border-accent-blue" disabled={!canEdit}>
+                {fromEntityFields.map((field) => <option key={field.name} value={field.name}>{field.name}</option>)}
+              </select>
+            )}
             <select value={toEntity} onChange={(e) => setToEntity(e.target.value)} className="bg-bg-primary border border-border-primary rounded-md px-3 py-2 text-xs text-text-primary outline-none focus:border-accent-blue" disabled={!canEdit}>
               {entities.map((entity) => <option key={entity.name} value={entity.name}>{entity.name}</option>)}
             </select>
-            <select value={toField} onChange={(e) => setToField(e.target.value)} className="bg-bg-primary border border-border-primary rounded-md px-3 py-2 text-xs text-text-primary outline-none focus:border-accent-blue" disabled={!canEdit}>
-              {toEntityFields.map((field) => <option key={field.name} value={field.name}>{field.name}</option>)}
-            </select>
+            {!conceptualMode && (
+              <select value={toField} onChange={(e) => setToField(e.target.value)} className="bg-bg-primary border border-border-primary rounded-md px-3 py-2 text-xs text-text-primary outline-none focus:border-accent-blue" disabled={!canEdit}>
+                {toEntityFields.map((field) => <option key={field.name} value={field.name}>{field.name}</option>)}
+              </select>
+            )}
           </div>
           <select
             value={cardinality}
@@ -285,6 +357,46 @@ export default function ModelerPanel() {
           >
             Create Relationship
           </button>
+        </div>
+      </PanelSection>
+
+      <PanelSection title="Promote" icon={<Wand2 size={11} />}>
+        <div className="space-y-2">
+          <div className="rounded-lg bg-bg-primary border border-border-primary px-2 py-2 text-[10px] text-text-muted leading-snug">
+            Promote conceptual models into logical structures, then into physical warehouse-ready models with preserved lineage.
+          </div>
+          {modelKind === "conceptual" && (
+            <>
+              <button
+                onClick={() => handlePromote("logical")}
+                disabled={!canEdit || promoting}
+                className="w-full px-3 py-2 rounded-md text-xs font-medium bg-accent-blue text-white hover:bg-accent-blue/80 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+              >
+                {promoting ? "Promoting…" : "Promote to Logical"}
+              </button>
+              <button
+                onClick={() => handlePromote("physical")}
+                disabled={!canEdit || promoting}
+                className="w-full px-3 py-2 rounded-md text-xs font-medium border border-border-primary text-text-secondary hover:bg-bg-hover disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+              >
+                Promote to Physical
+              </button>
+            </>
+          )}
+          {modelKind === "logical" && (
+            <button
+              onClick={() => handlePromote("physical")}
+              disabled={!canEdit || promoting}
+              className="w-full px-3 py-2 rounded-md text-xs font-medium bg-accent-blue text-white hover:bg-accent-blue/80 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+            >
+              {promoting ? "Promoting…" : "Promote to Physical"}
+            </button>
+          )}
+          {modelKind === "physical" && (
+            <div className="rounded-lg bg-bg-primary border border-border-primary px-2 py-2 text-[10px] text-text-muted leading-snug">
+              Physical models are the terminal forward-engineering layer.
+            </div>
+          )}
         </div>
       </PanelSection>
     </PanelFrame>

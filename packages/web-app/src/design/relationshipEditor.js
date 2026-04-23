@@ -12,14 +12,17 @@ export function relationCardinalityValue(rel) {
 
 export function buildRelationshipEditorPayload(rel, tables = []) {
   if (!rel) return null;
+  const conceptual = !rel.from?.col && !rel.to?.col;
   const entityList = Array.isArray(tables) ? tables : [];
   return {
     mode: "edit",
     relationship: rel,
+    modelKind: conceptual ? "conceptual" : undefined,
     fromEntity: rel._fromEntityName || rel.from?.table || "",
     fromColumn: rel.from?.col || "",
     toEntity: rel._toEntityName || rel.to?.table || "",
     toColumn: rel.to?.col || "",
+    conceptualLevel: conceptual,
     tables: entityList.map((table) => ({
       id: table.name || table.id,
       name: table.name || table.id,

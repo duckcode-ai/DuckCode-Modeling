@@ -32,6 +32,11 @@ const CARDINALITY_OPTIONS = [
   { value: "many_to_many", label: "N : M" },
 ];
 
+function endpointLabel(endpoint, fallbackEntity) {
+  const entity = fallbackEntity || endpoint?.table || endpoint?.entity || "—";
+  return endpoint?.col ? `${entity}.${endpoint.col}` : entity;
+}
+
 function relKindLabel(rel) {
   return NOTATION.kind(rel.from, rel.to);
 }
@@ -71,6 +76,7 @@ function ActionPicker({ label, value, onChange }) {
 function RelationshipInspector({ rel, tables }) {
   const openModal = useUiStore((s) => s.openModal);
   const kind = relKindLabel(rel);
+  const conceptual = !rel?.from?.col && !rel?.to?.col;
 
   const applyPatch = (patch) => {
     const s = useWorkspaceStore.getState();
@@ -130,7 +136,9 @@ function RelationshipInspector({ rel, tables }) {
         >
           <div>
             <div style={{ fontSize: 12, fontWeight: 600 }}>{rel._fromEntityName || rel.from.table}</div>
-            <div style={{ fontSize: 11, fontFamily: "var(--font-mono)", color: "var(--text-secondary)" }}>{rel.from.col}</div>
+            <div style={{ fontSize: 11, fontFamily: "var(--font-mono)", color: "var(--text-secondary)" }}>
+              {endpointLabel(rel.from, rel._fromEntityName)}
+            </div>
             <div style={{ fontSize: 10, color: "var(--text-tertiary)", marginTop: 2 }}>
               {NOTATION.cardinalityLabel(rel.from.min, rel.from.max)}
             </div>
@@ -138,51 +146,66 @@ function RelationshipInspector({ rel, tables }) {
           <ArrowRight size={14} color="var(--text-tertiary)" />
           <div>
             <div style={{ fontSize: 12, fontWeight: 600 }}>{rel._toEntityName || rel.to.table}</div>
-            <div style={{ fontSize: 11, fontFamily: "var(--font-mono)", color: "var(--text-secondary)" }}>{rel.to.col}</div>
+            <div style={{ fontSize: 11, fontFamily: "var(--font-mono)", color: "var(--text-secondary)" }}>
+              {endpointLabel(rel.to, rel._toEntityName)}
+            </div>
             <div style={{ fontSize: 10, color: "var(--text-tertiary)", marginTop: 2 }}>
               {NOTATION.cardinalityLabel(rel.to.min, rel.to.max)}
             </div>
           </div>
         </div>
+        {(rel.description || rel.verb || conceptual) && (
+          <div style={{ marginTop: 10, fontSize: 11, color: "var(--text-secondary)" }}>
+            {rel.verb && <div><strong>Verb:</strong> {rel.verb}</div>}
+            {rel.description && <div style={{ marginTop: rel.verb ? 4 : 0 }}>{rel.description}</div>}
+            {conceptual && !rel.description && !rel.verb && (
+              <div>Conceptual relationship between business concepts.</div>
+            )}
+          </div>
+        )}
       </PanelSection>
 
-      <PanelSection title="Referential actions">
-        <div style={{ display: "grid", gap: 14 }}>
-          <ActionPicker
-            label="ON DELETE"
-            value={rel.onDelete}
-            onChange={(action) => applyPatch({ on_delete: action })}
-          />
-          <ActionPicker
-            label="ON UPDATE"
-            value={rel.onUpdate}
-            onChange={(action) => applyPatch({ on_update: action })}
-          />
-        </div>
-      </PanelSection>
+      {!conceptual && (
+        <>
+          <PanelSection title="Referential actions">
+            <div style={{ display: "grid", gap: 14 }}>
+              <ActionPicker
+                label="ON DELETE"
+                value={rel.onDelete}
+                onChange={(action) => applyPatch({ on_delete: action })}
+              />
+              <ActionPicker
+                label="ON UPDATE"
+                value={rel.onUpdate}
+                onChange={(action) => applyPatch({ on_update: action })}
+              />
+            </div>
+          </PanelSection>
 
-      <PanelSection title="Options">
-        <div className="panel-btn-row" style={{ flexWrap: "wrap" }}>
-          <StatusPill
-            tone={rel.identifying ? "warning" : "neutral"}
-            onClick={() => applyPatch({ identifying: !rel.identifying })}
-            role="button"
-            aria-pressed={!!rel.identifying}
-            style={{ cursor: "pointer", opacity: rel.identifying ? 1 : 0.6 }}
-          >
-            IDENTIFYING
-          </StatusPill>
-          <StatusPill
-            tone={rel.dashed ? "info" : "neutral"}
-            onClick={() => applyPatch({ optional: !rel.dashed })}
-            role="button"
-            aria-pressed={!!rel.dashed}
-            style={{ cursor: "pointer", opacity: rel.dashed ? 1 : 0.6 }}
-          >
-            OPTIONAL
-          </StatusPill>
-        </div>
-      </PanelSection>
+          <PanelSection title="Options">
+            <div className="panel-btn-row" style={{ flexWrap: "wrap" }}>
+              <StatusPill
+                tone={rel.identifying ? "warning" : "neutral"}
+                onClick={() => applyPatch({ identifying: !rel.identifying })}
+                role="button"
+                aria-pressed={!!rel.identifying}
+                style={{ cursor: "pointer", opacity: rel.identifying ? 1 : 0.6 }}
+              >
+                IDENTIFYING
+              </StatusPill>
+              <StatusPill
+                tone={rel.dashed ? "info" : "neutral"}
+                onClick={() => applyPatch({ optional: !rel.dashed })}
+                role="button"
+                aria-pressed={!!rel.dashed}
+                style={{ cursor: "pointer", opacity: rel.dashed ? 1 : 0.6 }}
+              >
+                OPTIONAL
+              </StatusPill>
+            </div>
+          </PanelSection>
+        </>
+      )}
     </>
   );
 }
@@ -257,7 +280,7 @@ function TableRelationships({ table, relationships, onSelect, tables }) {
               {r.onDelete && <StatusPill tone="neutral">ON DELETE {r.onDelete}</StatusPill>}
             </div>
             <div style={{ fontSize: 11, color: "var(--text-secondary)", marginTop: 4, fontFamily: "var(--font-mono)" }}>
-              {r.from.table}.{r.from.col} → {r.to.table}.{r.to.col}
+              {endpointLabel(r.from, r._fromEntityName)} → {endpointLabel(r.to, r._toEntityName)}
             </div>
           </PanelCard>
         ))}

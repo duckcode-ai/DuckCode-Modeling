@@ -2,6 +2,11 @@ import React from "react";
 import { ArrowRight, Boxes, FileText, GitBranch, Layers3, TableProperties } from "lucide-react";
 import { PanelFrame, PanelSection, PanelCard, PanelEmpty, StatusPill, KeyValueGrid } from "./PanelFrame";
 
+function endpointLabel(endpoint) {
+  const table = endpoint?.table || endpoint?.entity || "—";
+  return endpoint?.col ? `${table}.${endpoint.col}` : table;
+}
+
 function relationshipCountForTable(table, relationships) {
   const tableId = String(table?.id || "");
   return (relationships || []).filter(
@@ -28,6 +33,7 @@ export default function SelectionSummaryPanel({
             items={[
               { label: "Active file", value: activeFile?.name || activeFile?.path || "No file open" },
               { label: "Model", value: schema?.name || "Project" },
+              { label: "Layer", value: schema?.modelKind || "physical" },
               { label: "Engine", value: schema?.engine || "DataLex" },
               { label: "Entities", value: String(tables.length) },
               { label: "Relationships", value: String(rels.length) },
@@ -56,8 +62,8 @@ export default function SelectionSummaryPanel({
         <PanelSection title="Endpoints" icon={<ArrowRight size={11} />}>
           <KeyValueGrid
             items={[
-              { label: "From", value: `${rel.from?.table || "—"}.${rel.from?.col || "id"}` },
-              { label: "To", value: `${rel.to?.table || "—"}.${rel.to?.col || "id"}` },
+              { label: "From", value: endpointLabel(rel.from) },
+              { label: "To", value: endpointLabel(rel.to) },
               { label: "Source", value: rel._sourceFile || (isDiagramFile ? "Active diagram" : "Active YAML") },
               { label: "On delete", value: rel.onDelete || "—" },
               { label: "On update", value: rel.onUpdate || "—" },
@@ -86,6 +92,7 @@ export default function SelectionSummaryPanel({
           items={[
             { label: "Source file", value: table?._sourceFile || "Active YAML" },
             { label: "Schema", value: table?.schema || "public" },
+            { label: "Domain", value: table?.domain || schema?.domain || "—" },
             { label: "Subject area", value: table?.subject_area || table?.subject || "—" },
             { label: "Columns", value: String(columns.length) },
             { label: "Relationships", value: String(relCount) },

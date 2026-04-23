@@ -92,7 +92,9 @@ function parseRelationshipEndpoint(value) {
   const raw = String(value || "").trim();
   if (!raw) return null;
   const dot = raw.lastIndexOf(".");
-  if (dot <= 0 || dot === raw.length - 1) return null;
+  if (dot <= 0 || dot === raw.length - 1) {
+    return { entity: raw, field: "" };
+  }
   return {
     entity: raw.slice(0, dot),
     field: raw.slice(dot + 1),
@@ -105,6 +107,7 @@ function relationshipEndpointKey(value) {
     const entity = String(value.entity || value.table || "").trim().toLowerCase();
     const field = String(value.field || value.column || value.col || "").trim().toLowerCase();
     if (entity && field) return `${entity}.${field}`;
+    if (entity) return entity;
   }
   return "";
 }
@@ -114,7 +117,7 @@ function normalizedRelationshipEndpoint(value) {
   if (value && typeof value === "object") {
     const entity = String(value.entity || value.table || "").trim();
     const field = String(value.field || value.column || value.col || "").trim();
-    if (entity && field) return { entity, field };
+    if (entity) return { entity, field };
   }
   return null;
 }
@@ -740,7 +743,7 @@ export function deleteDiagramEntity(yamlText, file, entityName, referencedYamlTe
  * relate, "Add Relationship" dialog) without mutating any of the
  * referenced model files. Shape matches `diagram.schema.json`:
  *   {name, from:{entity,field}, to:{entity,field}, cardinality,
- *    identifying?, label?}
+ *    identifying?, label?, description?, verb?}
  *
  * Dedupes by `{from, to}` endpoint pair — the same edge authored twice
  * is a no-op. Returns new YAML text, or null when the doc doesn't
@@ -752,7 +755,7 @@ export function addDiagramRelationship(yamlText, rel) {
   const fromFld = String(rel?.from?.field || "").trim();
   const toEnt = String(rel?.to?.entity || "").trim();
   const toFld = String(rel?.to?.field || "").trim();
-  if (!fromEnt || !fromFld || !toEnt || !toFld) return null;
+  if (!fromEnt || !toEnt) return null;
 
   if (!Array.isArray(doc.relationships)) doc.relationships = [];
   const dupe = doc.relationships.some((r) =>
@@ -763,12 +766,14 @@ export function addDiagramRelationship(yamlText, rel) {
 
   const entry = {
     name: rel?.name ? String(rel.name) : `${fromEnt}_to_${toEnt}`.toLowerCase(),
-    from: { entity: fromEnt, field: fromFld },
-    to: { entity: toEnt, field: toFld },
+    from: fromFld ? { entity: fromEnt, field: fromFld } : { entity: fromEnt },
+    to: toFld ? { entity: toEnt, field: toFld } : { entity: toEnt },
   };
   if (rel?.cardinality) entry.cardinality = String(rel.cardinality);
   if (rel?.identifying) entry.identifying = true;
   if (rel?.label) entry.label = String(rel.label);
+  if (rel?.description) entry.description = String(rel.description);
+  if (rel?.verb) entry.verb = String(rel.verb);
   doc.relationships.push(entry);
   return dump(doc);
 }
@@ -897,10 +902,16 @@ export function patchRelationship(yamlText, relName, patch) {
         if (Object.prototype.hasOwnProperty.call(rel.from, "entity")) rel.from.entity = parsed.entity;
         else if (Object.prototype.hasOwnProperty.call(rel.from, "table")) rel.from.table = parsed.entity;
         else rel.from.entity = parsed.entity;
-        if (Object.prototype.hasOwnProperty.call(rel.from, "field")) rel.from.field = parsed.field;
-        else if (Object.prototype.hasOwnProperty.call(rel.from, "column")) rel.from.column = parsed.field;
-        else if (Object.prototype.hasOwnProperty.call(rel.from, "col")) rel.from.col = parsed.field;
-        else rel.from.field = parsed.field;
+        if (parsed.field) {
+          if (Object.prototype.hasOwnProperty.call(rel.from, "field")) rel.from.field = parsed.field;
+          else if (Object.prototype.hasOwnProperty.call(rel.from, "column")) rel.from.column = parsed.field;
+          else if (Object.prototype.hasOwnProperty.call(rel.from, "col")) rel.from.col = parsed.field;
+          else rel.from.field = parsed.field;
+        } else {
+          delete rel.from.field;
+          delete rel.from.column;
+          delete rel.from.col;
+        }
       } else {
         rel.from = String(patch.from);
       }
@@ -915,10 +926,16 @@ export function patchRelationship(yamlText, relName, patch) {
         if (Object.prototype.hasOwnProperty.call(rel.to, "entity")) rel.to.entity = parsed.entity;
         else if (Object.prototype.hasOwnProperty.call(rel.to, "table")) rel.to.table = parsed.entity;
         else rel.to.entity = parsed.entity;
-        if (Object.prototype.hasOwnProperty.call(rel.to, "field")) rel.to.field = parsed.field;
-        else if (Object.prototype.hasOwnProperty.call(rel.to, "column")) rel.to.column = parsed.field;
-        else if (Object.prototype.hasOwnProperty.call(rel.to, "col")) rel.to.col = parsed.field;
-        else rel.to.field = parsed.field;
+        if (parsed.field) {
+          if (Object.prototype.hasOwnProperty.call(rel.to, "field")) rel.to.field = parsed.field;
+          else if (Object.prototype.hasOwnProperty.call(rel.to, "column")) rel.to.column = parsed.field;
+          else if (Object.prototype.hasOwnProperty.call(rel.to, "col")) rel.to.col = parsed.field;
+          else rel.to.field = parsed.field;
+        } else {
+          delete rel.to.field;
+          delete rel.to.column;
+          delete rel.to.col;
+        }
       } else {
         rel.to = String(patch.to);
       }
@@ -930,6 +947,10 @@ export function patchRelationship(yamlText, relName, patch) {
   if (patch.description !== undefined) {
     if (patch.description) rel.description = String(patch.description);
     else delete rel.description;
+  }
+  if (patch.verb !== undefined) {
+    if (patch.verb) rel.verb = String(patch.verb);
+    else delete rel.verb;
   }
   if (patch.on_delete !== undefined) {
     const v = String(patch.on_delete || "").trim();
@@ -954,8 +975,8 @@ export function patchRelationship(yamlText, relName, patch) {
     const from = normalizedRelationshipEndpoint(rel.from);
     const to = normalizedRelationshipEndpoint(rel.to);
     if (!from || !to) return null;
-    rel.from = { entity: from.entity, field: from.field };
-    rel.to = { entity: to.entity, field: to.field };
+    rel.from = from.field ? { entity: from.entity, field: from.field } : { entity: from.entity };
+    rel.to = to.field ? { entity: to.entity, field: to.field } : { entity: to.entity };
 
     const finalName = String(rel?.name || "").toLowerCase();
     const finalFromKey = relationshipEndpointKey(rel.from);

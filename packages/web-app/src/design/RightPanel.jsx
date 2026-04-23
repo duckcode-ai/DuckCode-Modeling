@@ -32,13 +32,18 @@ const IndexesView     = React.lazy(() => import("./inspector/IndexesView"));
 const SqlView         = React.lazy(() => import("./inspector/SqlView"));
 const YamlEditorShell = React.lazy(() => import("./inspector/YamlEditorShell"));
 
-const TABS = [
+const BASE_TABS = [
   { id: "COLUMNS",   label: "Columns" },
   { id: "RELATIONS", label: "Relations" },
   { id: "INDEXES",   label: "Indexes" },
   { id: "SQL",       label: "SQL" },
   { id: "YAML",      label: "YAML" },
 ];
+
+function relationshipEndpointLabel(endpoint, fallbackEntity) {
+  const entity = fallbackEntity || endpoint?.table || endpoint?.entity || "—";
+  return endpoint?.col ? `${entity}.${endpoint.col}` : entity;
+}
 
 /* Drag-resize handle on the LEFT edge of the right panel. Writes the
    pixel width directly to `--right-w` on the root during drag (via RAF)
@@ -103,9 +108,19 @@ export default function RightPanel({
   const setRightPanelTab = useUiStore((s) => s.setRightPanelTab);
   const rightPanelWidth = useUiStore((s) => s.rightPanelWidth);
   const setRightPanelWidth = useUiStore((s) => s.setRightPanelWidth);
+  const modelKind = String(schema?.modelKind || "physical").trim().toLowerCase();
+  const tabs = React.useMemo(() => {
+    if (modelKind === "conceptual") {
+      return BASE_TABS.filter((tabDef) => tabDef.id !== "INDEXES" && tabDef.id !== "SQL");
+    }
+    if (modelKind === "logical") {
+      return BASE_TABS.filter((tabDef) => tabDef.id !== "SQL");
+    }
+    return BASE_TABS;
+  }, [modelKind]);
 
   // Coerce to a known tab id.
-  const tab = TABS.some((t) => t.id === rightPanelTab) ? rightPanelTab : "COLUMNS";
+  const tab = tabs.some((t) => t.id === rightPanelTab) ? rightPanelTab : "COLUMNS";
 
   /* ── Header content varies by selection kind ──────────────── */
   const header = React.useMemo(() => {
@@ -114,9 +129,9 @@ export default function RightPanel({
         icon: <GitBranch size={14} />,
         eyebrow: "Relationship",
         title: rel.name,
-        subtitle: `${rel.from.table}.${rel.from.col} → ${rel.to.table}.${rel.to.col}`,
+        subtitle: `${relationshipEndpointLabel(rel.from, rel._fromEntityName)} → ${relationshipEndpointLabel(rel.to, rel._toEntityName)}`,
         statusTone: "accent",
-        statusLabel: "Relationship",
+        statusLabel: !rel.from?.col && !rel.to?.col ? "Conceptual" : "Relationship",
       };
     }
     if (table) {
@@ -219,7 +234,7 @@ export default function RightPanel({
           <InspectorTabs
             tab={tab}
             setTab={setRightPanelTab}
-            tabs={TABS}
+            tabs={tabs}
           />
         }
         bodyPadding={0}
