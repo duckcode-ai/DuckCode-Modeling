@@ -187,6 +187,7 @@ export function adaptDataLexYaml(yamlText) {
       subject_area: subjectArea || undefined,
       description: e.description ? String(e.description) : "",
       tags: Array.isArray(e.tags) ? e.tags : [],
+      terms: Array.isArray(e.terms) ? e.terms : [],
       owner: e.owner ? String(e.owner) : "",
       type: e.type ? String(e.type) : undefined,
       database: e.database ? String(e.database) : undefined,
@@ -767,6 +768,7 @@ function dataLexModelDocToEntity(doc) {
   };
   if (doc?.display && typeof doc.display === "object") entity.display = doc.display;
   if (Array.isArray(doc?.tags)) entity.tags = doc.tags;
+  if (Array.isArray(doc?.terms)) entity.terms = doc.terms;
   // Surface both spellings so a per-file `kind: model` picks up its
   // domain the same way an `entities:` block does. The downstream
   // schemaAdapter path already prefers `subject_area` over `subject`.
@@ -890,6 +892,7 @@ export function schemaToPanelModel(schema) {
       type: String(table.type || (table.kind === "ENUM" ? "enum" : "table")),
       description: String(table.description || ""),
       tags: Array.isArray(table.tags) ? table.tags : [],
+      terms: Array.isArray(table.terms) ? table.terms : [],
       owner: table.owner,
       subject_area: table.subject_area,
       schema: table.schema,

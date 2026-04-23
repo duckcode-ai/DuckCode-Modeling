@@ -78,13 +78,14 @@ export default function SelectionSummaryPanel({
   const pkCount = columns.filter((column) => column.pk).length;
   const fkCount = columns.filter((column) => column.fk || column.semanticFk).length;
   const relCount = relationshipCountForTable(table, relationships);
+  const conceptual = String(schema?.modelKind || "").toLowerCase() === "conceptual" || String(table?.type || "").toLowerCase() === "concept";
 
   return (
     <PanelFrame
       icon={<Boxes size={14} />}
       eyebrow="Inspector"
       title={table?.name || table?.id || "Selection"}
-      subtitle={isDiagramFile ? "Diagram selection summary" : "Selection summary"}
+      subtitle={conceptual ? "Business concept summary" : (isDiagramFile ? "Diagram selection summary" : "Selection summary")}
       status={<StatusPill tone="info">{table?.type || table?.kind || "table"}</StatusPill>}
     >
       <PanelSection title="Summary" icon={<FileText size={11} />}>
@@ -94,7 +95,7 @@ export default function SelectionSummaryPanel({
             { label: "Schema", value: table?.schema || "public" },
             { label: "Domain", value: table?.domain || schema?.domain || "—" },
             { label: "Subject area", value: table?.subject_area || table?.subject || "—" },
-            { label: "Columns", value: String(columns.length) },
+            { label: conceptual ? "Attributes" : "Columns", value: String(columns.length) },
             { label: "Relationships", value: String(relCount) },
             { label: "Primary keys", value: String(pkCount) },
             { label: "Foreign keys", value: String(fkCount) },
@@ -102,7 +103,7 @@ export default function SelectionSummaryPanel({
         />
       </PanelSection>
 
-      <PanelSection title="Fields" count={columns.length}>
+      <PanelSection title={conceptual ? "Attributes" : "Fields"} count={columns.length}>
         {columns.length === 0 ? (
           <PanelEmpty
             icon={Boxes}

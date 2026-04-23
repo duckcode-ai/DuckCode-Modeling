@@ -113,6 +113,10 @@ export default function ModelerPanel() {
   const fromEntityFields = entities.find((entity) => entity.name === fromEntity)?.fields || [];
   const toEntityFields = entities.find((entity) => entity.name === toEntity)?.fields || [];
   const conceptualMode = modelingViewMode === "conceptual" || modelKind === "conceptual";
+  const panelTitle = conceptualMode ? "Concept Studio" : "Modeler";
+  const panelSubtitle = conceptualMode
+    ? `${entities.length} ${entities.length === 1 ? "concept" : "concepts"} · business-first`
+    : `${entities.length} ${entities.length === 1 ? "entity" : "entities"} · ${modelKind}`;
 
   useEffect(() => {
     if (!fromEntityFields.some((field) => field.name === fromField)) {
@@ -224,8 +228,8 @@ export default function ModelerPanel() {
     <PanelFrame
       icon={<Wand2 size={14} />}
       eyebrow="Workspace"
-      title="Modeler"
-      subtitle={`${entities.length} ${entities.length === 1 ? "entity" : "entities"} · ${modelKind}`}
+      title={panelTitle}
+      subtitle={panelSubtitle}
     >
       <PanelSection title="Model Views" icon={<Layers3 size={11} />}>
         <div className="grid grid-cols-3 gap-2">
@@ -268,7 +272,7 @@ export default function ModelerPanel() {
         </div>
       </PanelSection>
 
-      <PanelSection title="Quick Create" icon={<Boxes size={11} />}>
+      <PanelSection title={conceptualMode ? "Quick Create Concepts" : "Quick Create"} icon={<Boxes size={11} />}>
         <div className="space-y-2">
           <input
             value={entityName}
@@ -313,7 +317,11 @@ export default function ModelerPanel() {
         </div>
       </PanelSection>
 
-      <PanelSection title="Relationship Tool" icon={<ArrowRightLeft size={11} />}>
+      <PanelSection
+        title={conceptualMode ? "Business Relationship Tool" : "Relationship Tool"}
+        icon={<ArrowRightLeft size={11} />}
+        description={conceptualMode ? "Define business links between concepts here. Edit the selected concept on the right." : undefined}
+      >
         <div className="space-y-2">
           <input
             value={relationshipName}

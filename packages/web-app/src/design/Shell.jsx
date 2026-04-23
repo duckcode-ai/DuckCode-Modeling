@@ -147,8 +147,7 @@ const LOGICAL_PHYSICAL_EDIT_BOTTOM_TABS = [
 ];
 
 const CONCEPTUAL_BOTTOM_TABS = [
-  { id: "modeler",       label: "Modeler",       icon: Wand2 },
-  { id: "properties",    label: "Properties",    icon: Columns3 },
+  { id: "modeler",       label: "Studio",        icon: Wand2 },
   { id: "dictionary",    label: "Dictionary",    icon: BookOpen },
   { id: "validation",    label: "Validation",    icon: ShieldCheck },
   { id: "history",       label: "History",       icon: Clock },
