@@ -1,12 +1,12 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { Boxes, ArrowRightLeft, Shapes, Layers3, Wand2 } from "lucide-react";
+import { Boxes, ArrowRightLeft, Shapes, Layers3, Wand2, Sparkles, MousePointerClick, PencilLine } from "lucide-react";
 import useWorkspaceStore from "../../stores/workspaceStore";
 import useDiagramStore from "../../stores/diagramStore";
 import useUiStore from "../../stores/uiStore";
 import useAuthStore from "../../stores/authStore";
 import { addEntityWithOptions, addRelationship } from "../../lib/yamlRoundTrip";
 import { transformActiveModel } from "../../lib/api";
-import { PanelFrame, PanelSection, PanelEmpty } from "./PanelFrame";
+import { PanelFrame, PanelSection, PanelEmpty, PanelCard, StatusPill } from "./PanelFrame";
 
 const VIEW_MODES = [
   { id: "conceptual", label: "Conceptual", description: "Business concepts and high-level relationships." },
@@ -75,7 +75,7 @@ export default function ModelerPanel() {
     setModelingViewMode,
     requestLayoutRefresh,
   } = useDiagramStore();
-  const { addToast } = useUiStore();
+  const { addToast, setRightPanelOpen, setRightPanelTab } = useUiStore();
   const { canEdit: canEditFn } = useAuthStore();
   const canEdit = canEditFn();
 
@@ -113,10 +113,16 @@ export default function ModelerPanel() {
   const fromEntityFields = entities.find((entity) => entity.name === fromEntity)?.fields || [];
   const toEntityFields = entities.find((entity) => entity.name === toEntity)?.fields || [];
   const conceptualMode = modelingViewMode === "conceptual" || modelKind === "conceptual";
+  const selectedEntity = entities.find((entity) => entity.name === fromEntity) || entities[0] || null;
   const panelTitle = conceptualMode ? "Concept Studio" : "Modeler";
   const panelSubtitle = conceptualMode
     ? `${entities.length} ${entities.length === 1 ? "concept" : "concepts"} · business-first`
     : `${entities.length} ${entities.length === 1 ? "entity" : "entities"} · ${modelKind}`;
+
+  const focusConceptDetails = React.useCallback(() => {
+    setRightPanelOpen(true);
+    setRightPanelTab("DETAILS");
+  }, [setRightPanelOpen, setRightPanelTab]);
 
   useEffect(() => {
     if (!fromEntityFields.some((field) => field.name === fromField)) {
@@ -253,6 +259,67 @@ export default function ModelerPanel() {
         </div>
       </PanelSection>
 
+      {conceptualMode && (
+        <PanelSection
+          title="Start Here"
+          icon={<Sparkles size={11} />}
+          description="Conceptual modeling should feel like business architecture, not table design. Use this flow to create boxes, connect them, and then fill in meaning on the right."
+        >
+          <div className="grid gap-2 md:grid-cols-3">
+            <PanelCard
+              tone="accent"
+              dense
+              icon={<Boxes size={12} />}
+              eyebrow="Step 1"
+              title="Add Concept Box"
+              subtitle="Create a new business concept on the canvas."
+            >
+              <div className="flex flex-wrap gap-2">
+                <StatusPill tone="accent">Name</StatusPill>
+                <StatusPill tone="neutral">Type</StatusPill>
+                <StatusPill tone="neutral">Subject area</StatusPill>
+              </div>
+            </PanelCard>
+            <PanelCard
+              tone="info"
+              dense
+              icon={<ArrowRightLeft size={12} />}
+              eyebrow="Step 2"
+              title="Create Relationship"
+              subtitle="Draw the business link and set the relationship meaning."
+            >
+              <div className="flex flex-wrap gap-2">
+                <StatusPill tone="info">Verb</StatusPill>
+                <StatusPill tone="neutral">Type</StatusPill>
+                <StatusPill tone="neutral">1:1 / 1:N</StatusPill>
+              </div>
+            </PanelCard>
+            <PanelCard
+              tone="success"
+              dense
+              icon={<PencilLine size={12} />}
+              eyebrow="Step 3"
+              title="Edit Meaning"
+              subtitle="Select a concept and complete the business metadata."
+              actions={
+                <button
+                  onClick={focusConceptDetails}
+                  className="px-2 py-1 rounded-md text-[10px] font-medium border border-border-primary text-text-secondary hover:bg-bg-hover transition-colors"
+                >
+                  Open Details
+                </button>
+              }
+            >
+              <div className="flex flex-wrap gap-2">
+                <StatusPill tone="success">Owner</StatusPill>
+                <StatusPill tone="neutral">Description</StatusPill>
+                <StatusPill tone="neutral">Terms</StatusPill>
+              </div>
+            </PanelCard>
+          </div>
+        </PanelSection>
+      )}
+
       <PanelSection title="Palette" icon={<Shapes size={11} />}>
         <div className="grid grid-cols-2 gap-2">
           {entityOptions.map((type) => (
@@ -272,33 +339,65 @@ export default function ModelerPanel() {
         </div>
       </PanelSection>
 
-      <PanelSection title={conceptualMode ? "Quick Create Concepts" : "Quick Create"} icon={<Boxes size={11} />}>
+      <PanelSection
+        title={conceptualMode ? "Add Concept Box" : "Quick Create"}
+        icon={<Boxes size={11} />}
+        description={conceptualMode ? "This creates a new concept box on the canvas. Keep it lightweight here, then enrich description, owner, and glossary terms in the right-side Details panel." : undefined}
+      >
         <div className="space-y-2">
-          <input
-            value={entityName}
-            onChange={(e) => setEntityName(e.target.value)}
-            placeholder="Entity name"
-            className="w-full bg-bg-primary border border-border-primary rounded-md px-3 py-2 text-xs text-text-primary outline-none focus:border-accent-blue"
-            disabled={!canEdit}
-          />
-          <select
-            value={entityType}
-            onChange={(e) => setEntityType(e.target.value)}
-            className="w-full bg-bg-primary border border-border-primary rounded-md px-3 py-2 text-xs text-text-primary outline-none focus:border-accent-blue"
-            disabled={!canEdit}
-          >
-            {entityOptions.map((type) => (
-              <option key={type} value={type}>{ENTITY_TYPES[type]?.label || type}</option>
-            ))}
-          </select>
-          <input
-            value={entitySubjectArea}
-            onChange={(e) => setEntitySubjectArea(e.target.value)}
-            list="subject-area-options"
-            placeholder="Subject area (optional)"
-            className="w-full bg-bg-primary border border-border-primary rounded-md px-3 py-2 text-xs text-text-primary outline-none focus:border-accent-blue"
-            disabled={!canEdit}
-          />
+          {conceptualMode && (
+            <PanelCard
+              tone="accent"
+              dense
+              icon={<MousePointerClick size={12} />}
+              title="What happens next"
+              subtitle="A new concept box appears on the canvas immediately after you click Create concept box."
+            >
+              Start with the concept name and subject area. Use the right-side Details panel for richer business meaning after the box exists.
+            </PanelCard>
+          )}
+          <div className="grid gap-2 md:grid-cols-2">
+            <label className="grid gap-1">
+              <span className="text-[10px] font-semibold uppercase tracking-[0.16em] text-text-muted">
+                {conceptualMode ? "Concept name" : "Entity name"}
+              </span>
+              <input
+                value={entityName}
+                onChange={(e) => setEntityName(e.target.value)}
+                placeholder={conceptualMode ? "Customer" : "Entity name"}
+                className="w-full bg-bg-primary border border-border-primary rounded-md px-3 py-2 text-xs text-text-primary outline-none focus:border-accent-blue"
+                disabled={!canEdit}
+              />
+            </label>
+            <label className="grid gap-1">
+              <span className="text-[10px] font-semibold uppercase tracking-[0.16em] text-text-muted">
+                {conceptualMode ? "Concept type" : "Entity type"}
+              </span>
+              <select
+                value={entityType}
+                onChange={(e) => setEntityType(e.target.value)}
+                className="w-full bg-bg-primary border border-border-primary rounded-md px-3 py-2 text-xs text-text-primary outline-none focus:border-accent-blue"
+                disabled={!canEdit}
+              >
+                {entityOptions.map((type) => (
+                  <option key={type} value={type}>{ENTITY_TYPES[type]?.label || type}</option>
+                ))}
+              </select>
+            </label>
+          </div>
+          <label className="grid gap-1">
+            <span className="text-[10px] font-semibold uppercase tracking-[0.16em] text-text-muted">
+              Subject area
+            </span>
+            <input
+              value={entitySubjectArea}
+              onChange={(e) => setEntitySubjectArea(e.target.value)}
+              list="subject-area-options"
+              placeholder="Customer, Orders, Billing…"
+              className="w-full bg-bg-primary border border-border-primary rounded-md px-3 py-2 text-xs text-text-primary outline-none focus:border-accent-blue"
+              disabled={!canEdit}
+            />
+          </label>
           <datalist id="subject-area-options">
             {subjectAreas.map((area) => (
               <option key={area.name} value={area.name} />
@@ -312,17 +411,28 @@ export default function ModelerPanel() {
             disabled={!canEdit}
             className="w-full px-3 py-2 rounded-md text-xs font-medium bg-accent-blue text-white hover:bg-accent-blue/80 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
           >
-            Add {ENTITY_TYPES[entityType]?.label || entityType}
+            {conceptualMode ? "Create concept box" : `Add ${ENTITY_TYPES[entityType]?.label || entityType}`}
           </button>
         </div>
       </PanelSection>
 
       <PanelSection
-        title={conceptualMode ? "Business Relationship Tool" : "Relationship Tool"}
+        title={conceptualMode ? "Connect Concepts" : "Relationship Tool"}
         icon={<ArrowRightLeft size={11} />}
-        description={conceptualMode ? "Define business links between concepts here. Edit the selected concept on the right." : undefined}
+        description={conceptualMode ? "This creates the arrow between two concept boxes. Use verb, type, and cardinality to make the business meaning explicit." : undefined}
       >
         <div className="space-y-2">
+          {conceptualMode && (
+            <PanelCard
+              tone="info"
+              dense
+              icon={<ArrowRightLeft size={12} />}
+              title="Relationship meaning"
+              subtitle="Use relationship details for business language, not physical foreign keys."
+            >
+              Example: <span className="text-text-primary font-medium">Customer places Order</span> or <span className="text-text-primary font-medium">Policy produces Claim</span>.
+            </PanelCard>
+          )}
           <input
             value={relationshipName}
             onChange={(e) => setRelationshipName(e.target.value)}
@@ -330,22 +440,44 @@ export default function ModelerPanel() {
             className="w-full bg-bg-primary border border-border-primary rounded-md px-3 py-2 text-xs text-text-primary outline-none focus:border-accent-blue"
             disabled={!canEdit}
           />
-          <div className="grid grid-cols-2 gap-2">
-            <select value={fromEntity} onChange={(e) => setFromEntity(e.target.value)} className="bg-bg-primary border border-border-primary rounded-md px-3 py-2 text-xs text-text-primary outline-none focus:border-accent-blue" disabled={!canEdit}>
-              {entities.map((entity) => <option key={entity.name} value={entity.name}>{entity.name}</option>)}
-            </select>
-            {!conceptualMode && (
-              <select value={fromField} onChange={(e) => setFromField(e.target.value)} className="bg-bg-primary border border-border-primary rounded-md px-3 py-2 text-xs text-text-primary outline-none focus:border-accent-blue" disabled={!canEdit}>
-                {fromEntityFields.map((field) => <option key={field.name} value={field.name}>{field.name}</option>)}
+          <div className={`grid gap-2 ${conceptualMode ? "md:grid-cols-3" : "grid-cols-2"}`}>
+            <label className="grid gap-1">
+              <span className="text-[10px] font-semibold uppercase tracking-[0.16em] text-text-muted">From</span>
+              <select value={fromEntity} onChange={(e) => setFromEntity(e.target.value)} className="bg-bg-primary border border-border-primary rounded-md px-3 py-2 text-xs text-text-primary outline-none focus:border-accent-blue" disabled={!canEdit}>
+                {entities.map((entity) => <option key={entity.name} value={entity.name}>{entity.name}</option>)}
               </select>
+            </label>
+            {!conceptualMode && (
+              <label className="grid gap-1">
+                <span className="text-[10px] font-semibold uppercase tracking-[0.16em] text-text-muted">From field</span>
+                <select value={fromField} onChange={(e) => setFromField(e.target.value)} className="bg-bg-primary border border-border-primary rounded-md px-3 py-2 text-xs text-text-primary outline-none focus:border-accent-blue" disabled={!canEdit}>
+                  {fromEntityFields.map((field) => <option key={field.name} value={field.name}>{field.name}</option>)}
+                </select>
+              </label>
             )}
-            <select value={toEntity} onChange={(e) => setToEntity(e.target.value)} className="bg-bg-primary border border-border-primary rounded-md px-3 py-2 text-xs text-text-primary outline-none focus:border-accent-blue" disabled={!canEdit}>
-              {entities.map((entity) => <option key={entity.name} value={entity.name}>{entity.name}</option>)}
-            </select>
-            {!conceptualMode && (
-              <select value={toField} onChange={(e) => setToField(e.target.value)} className="bg-bg-primary border border-border-primary rounded-md px-3 py-2 text-xs text-text-primary outline-none focus:border-accent-blue" disabled={!canEdit}>
-                {toEntityFields.map((field) => <option key={field.name} value={field.name}>{field.name}</option>)}
+            <label className="grid gap-1">
+              <span className="text-[10px] font-semibold uppercase tracking-[0.16em] text-text-muted">To</span>
+              <select value={toEntity} onChange={(e) => setToEntity(e.target.value)} className="bg-bg-primary border border-border-primary rounded-md px-3 py-2 text-xs text-text-primary outline-none focus:border-accent-blue" disabled={!canEdit}>
+                {entities.map((entity) => <option key={entity.name} value={entity.name}>{entity.name}</option>)}
               </select>
+            </label>
+            {!conceptualMode && (
+              <label className="grid gap-1">
+                <span className="text-[10px] font-semibold uppercase tracking-[0.16em] text-text-muted">To field</span>
+                <select value={toField} onChange={(e) => setToField(e.target.value)} className="bg-bg-primary border border-border-primary rounded-md px-3 py-2 text-xs text-text-primary outline-none focus:border-accent-blue" disabled={!canEdit}>
+                  {toEntityFields.map((field) => <option key={field.name} value={field.name}>{field.name}</option>)}
+                </select>
+              </label>
+            )}
+            {conceptualMode && selectedEntity && (
+              <PanelCard
+                dense
+                tone="neutral"
+                title="Selected concept"
+                subtitle={`${selectedEntity.name}${selectedEntity.subject_area ? ` · ${selectedEntity.subject_area}` : ""}`}
+              >
+                Choose both endpoints here, then open the right-side Relationships tab to enrich verb, rationale, and source of truth.
+              </PanelCard>
             )}
           </div>
           <select
@@ -363,7 +495,7 @@ export default function ModelerPanel() {
             disabled={!canEdit || entities.length < 2}
             className="w-full px-3 py-2 rounded-md text-xs font-medium border border-border-primary text-text-secondary hover:bg-bg-hover disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
           >
-            Create Relationship
+            {conceptualMode ? "Create relationship arrow" : "Create Relationship"}
           </button>
         </div>
       </PanelSection>

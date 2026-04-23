@@ -589,6 +589,11 @@ export default function Canvas({ tables, setTables, relationships, areas, select
   // Canvas level (not individual TableCards) so every card reads the same
   // snapshot per render pass, avoiding N subscriptions for large diagrams.
   const diffEntities = useUiStore((s) => s.diffState?.entities) || {};
+  const setBottomPanelTab = useUiStore((s) => s.setBottomPanelTab);
+  const setBottomPanelOpen = useUiStore((s) => s.setBottomPanelOpen);
+  const setRightPanelOpen = useUiStore((s) => s.setRightPanelOpen);
+  const setRightPanelTab = useUiStore((s) => s.setRightPanelTab);
+  const openModal = useUiStore((s) => s.openModal);
   const I = Icon;
   const [hovered, setHovered] = React.useState(null);
   const viewportRef = React.useRef(null);
@@ -596,11 +601,12 @@ export default function Canvas({ tables, setTables, relationships, areas, select
   const [zoom, setZoom] = React.useState(1);
   const [viewportState, setViewportState] = React.useState({ left: 0, top: 0, width: 1, height: 1 });
   const world = React.useMemo(() => getWorldBounds(tables), [tables]);
+  const conceptualMode = String(modelKind || "").toLowerCase() === "conceptual";
   const renderedAreas = React.useMemo(
-    () => String(modelKind || "").toLowerCase() === "conceptual"
+    () => conceptualMode
       ? buildConceptualAreas(tables, areas)
       : (areas || []),
-    [areas, modelKind, tables]
+    [areas, conceptualMode, tables]
   );
   const scaledWidth = Math.max(world.width * zoom, viewportState.width || 0);
   const scaledHeight = Math.max(world.height * zoom, viewportState.height || 0);
@@ -737,6 +743,38 @@ export default function Canvas({ tables, setTables, relationships, areas, select
     window.requestAnimationFrame(() => handleFit());
   }, [handleFit, onAutoLayout]);
 
+  const selectedTable = React.useMemo(
+    () => (selected?.type === "table" ? tables.find((table) => table.id === selected.id) || null : null),
+    [selected, tables]
+  );
+
+  const openConceptStudio = React.useCallback(() => {
+    setBottomPanelOpen(true);
+    setBottomPanelTab("modeler");
+  }, [setBottomPanelOpen, setBottomPanelTab]);
+
+  const openConceptDetails = React.useCallback(() => {
+    setRightPanelOpen(true);
+    setRightPanelTab("DETAILS");
+  }, [setRightPanelOpen, setRightPanelTab]);
+
+  const openConceptRelationshipDialog = React.useCallback(() => {
+    const orderedTables = Array.isArray(tables) ? tables : [];
+    const first = selectedTable || orderedTables[0] || null;
+    const second = orderedTables.find((table) => table.id !== first?.id) || orderedTables[1] || null;
+    openModal("newRelationship", {
+      modelKind: "conceptual",
+      conceptualLevel: true,
+      tables: orderedTables.map((table) => ({
+        id: table.name || table.id,
+        name: table.name || table.id,
+        columns: [],
+      })),
+      fromEntity: first?.name || first?.id || "",
+      toEntity: second?.name || second?.id || "",
+    });
+  }, [openModal, selectedTable, tables]);
+
   // Keyboard Delete / Backspace → delete the currently selected entity or
   // relationship. Ignored while the user is typing in an input/textarea or a
   // contentEditable region so column-name edits in the inspector don't nuke
@@ -778,6 +816,29 @@ export default function Canvas({ tables, setTables, relationships, areas, select
           </p>
         </div>
         <div className="canvas-actions">
+          {conceptualMode && (
+            <>
+              <button className="canvas-btn" onClick={openConceptStudio} title="Open the Concept Studio to create a new concept box">
+                <I.Plus />Add Concept
+              </button>
+              <button
+                className="canvas-btn"
+                onClick={openConceptRelationshipDialog}
+                title="Create a business relationship between concept boxes"
+                disabled={tables.length < 2}
+              >
+                <I.Relation />Add Relationship
+              </button>
+              <button
+                className="canvas-btn"
+                onClick={openConceptDetails}
+                title="Open the Details panel for business metadata"
+                disabled={!selectedTable}
+              >
+                <I.Edit />Edit Details
+              </button>
+            </>
+          )}
           <button className="canvas-btn" onClick={() => handleFit()} title="Fit all entities into view"><I.Fit />Fit</button>
           <button className="canvas-btn" onClick={() => handleAutoLayoutClick()} title="Auto-layout (ELK)"><I.Grid />Auto-layout</button>
           {onExport && <button className="canvas-btn" onClick={() => onExport()} title="Export DDL / SQL"><I.Download />Export</button>}
@@ -791,6 +852,9 @@ export default function Canvas({ tables, setTables, relationships, areas, select
           onClick={(e) => {
             if (e.target === e.currentTarget) onSelect(null);
           }}
+          onDoubleClick={(e) => {
+            if (conceptualMode && e.target === e.currentTarget) openConceptStudio();
+          }}
         >
           <div
             className="canvas-stage"
@@ -798,6 +862,9 @@ export default function Canvas({ tables, setTables, relationships, areas, select
             style={{ width: world.width, height: world.height, transform: `scale(${zoom})`, transformOrigin: "top left" }}
             onClick={(e) => {
               if (e.target === e.currentTarget) onSelect(null);
+            }}
+            onDoubleClick={(e) => {
+              if (conceptualMode && e.target === e.currentTarget) openConceptStudio();
             }}
             onDragOver={onDropYamlSource ? (e) => {
               // Accept the drag only if it advertises a YAML source payload —
@@ -821,6 +888,42 @@ export default function Canvas({ tables, setTables, relationships, areas, select
               onDropYamlSource({ path: payload.path, x, y });
             } : undefined}
           >
+            {conceptualMode && tables.length === 0 && (
+              <div
+                style={{
+                  position: "absolute",
+                  left: 48,
+                  top: 72,
+                  zIndex: 1,
+                  width: 360,
+                  padding: 18,
+                  borderRadius: 14,
+                  border: "1px solid var(--border-strong)",
+                  background: "color-mix(in srgb, var(--bg-2) 92%, transparent)",
+                  boxShadow: "var(--shadow-pop)",
+                  display: "grid",
+                  gap: 10,
+                }}
+              >
+                <div style={{ fontSize: 11, letterSpacing: "0.12em", textTransform: "uppercase", color: "var(--text-tertiary)" }}>
+                  Conceptual Flow
+                </div>
+                <div style={{ fontSize: 16, fontWeight: 700, color: "var(--text-primary)" }}>
+                  Start by adding your first concept box
+                </div>
+                <div style={{ fontSize: 12, lineHeight: 1.5, color: "var(--text-secondary)" }}>
+                  Conceptual mode is for business concepts and business relationships. Add the box first, then connect concepts with relationship arrows, then edit business meaning in Details.
+                </div>
+                <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                  <button className="canvas-btn" onClick={openConceptStudio}>
+                    <I.Plus />Add Concept
+                  </button>
+                  <button className="canvas-btn" onClick={openConceptDetails} disabled={!selectedTable}>
+                    <I.Edit />Edit Details
+                  </button>
+                </div>
+              </div>
+            )}
             <SubjectAreas areas={renderedAreas} />
             <Relationships tables={tables} relationships={relationships}
                            selected={selected} onSelect={onSelect}
