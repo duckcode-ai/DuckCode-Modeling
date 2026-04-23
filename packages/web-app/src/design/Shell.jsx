@@ -8,7 +8,7 @@
 import React, { useEffect, useState } from "react";
 import {
   Columns3, ShieldCheck, GitCompare, Clock, X,
-  BookOpen, ChevronUp,
+  BookOpen, ChevronUp, Wand2,
 } from "lucide-react";
 
 import yaml from "js-yaml";
@@ -40,6 +40,7 @@ const DiffPanel           = React.lazy(() => import("../components/panels/DiffPa
 const HistoryPanel        = React.lazy(() => import("../components/panels/HistoryPanel"));
 const DictionaryPanel     = React.lazy(() => import("../components/panels/DictionaryPanel"));
 const SelectionSummaryPanel = React.lazy(() => import("../components/panels/SelectionSummaryPanel"));
+const ModelerPanel        = React.lazy(() => import("../components/panels/ModelerPanel"));
 const SettingsDialog      = React.lazy(() => import("../components/dialogs/SettingsDialog"));
 const ConnectionsManager  = React.lazy(() => import("../components/dialogs/ConnectionsManager"));
 const CommitDialog        = React.lazy(() => import("../components/dialogs/CommitDialog"));
@@ -138,6 +139,7 @@ const THEME_STORAGE = "datalex.theme";
 const DENSITY_STORAGE = "datalex.density";
 
 const LOGICAL_PHYSICAL_EDIT_BOTTOM_TABS = [
+  { id: "modeler",       label: "Modeler",       icon: Wand2 },
   { id: "properties",    label: "Properties",    icon: Columns3 },
   { id: "validation",    label: "Validation",    icon: ShieldCheck },
   { id: "diff",          label: "Diff & Gate",   icon: GitCompare },
@@ -145,6 +147,7 @@ const LOGICAL_PHYSICAL_EDIT_BOTTOM_TABS = [
 ];
 
 const CONCEPTUAL_BOTTOM_TABS = [
+  { id: "modeler",       label: "Modeler",       icon: Wand2 },
   { id: "properties",    label: "Properties",    icon: Columns3 },
   { id: "dictionary",    label: "Dictionary",    icon: BookOpen },
   { id: "validation",    label: "Validation",    icon: ShieldCheck },
@@ -164,6 +167,7 @@ const LazyFallback = (
 function BottomPanelContent({ tab, table, rel, relationships, schema, activeFile, isDiagramFile }) {
   let node;
   switch (tab) {
+    case "modeler":       node = <ModelerPanel />; break;
     case "properties":
       node = (
         <SelectionSummaryPanel
@@ -1364,6 +1368,7 @@ export default function Shell() {
         {activeModal === "exportDdl"          && <ExportDdlDialog />}
         {activeModal === "applyDdl"           && <ApplyDdlDialog />}
         {activeModal === "importDialog"       && <PanelDialog kind="import" />}
+        {activeModal === "connectors"         && <PanelDialog kind="connectors" />}
         {activeModal === "importDbtRepo"      && <ImportDbtRepoDialog />}
         {activeModal === "newRelationship"    && <NewRelationshipDialog />}
         {activeModal === "entityPicker"       && <EntityPickerDialog />}
