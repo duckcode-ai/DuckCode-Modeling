@@ -80,7 +80,7 @@ export default function SqlView({ table, schema, isDiagramFile = false, onExport
           <button className="panel-btn" onClick={handleCopy} title="Copy SQL">
             <Copy size={12} /> {copied ? "Copied" : "Copy"}
           </button>
-          {!isDiagramFile && onExport && (
+          {onExport && (
             <button className="panel-btn" onClick={onExport} title="Open full export dialog">
               <FileCode2 size={12} /> Export…
             </button>

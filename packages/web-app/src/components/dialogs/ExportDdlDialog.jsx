@@ -15,6 +15,7 @@ import {
 import useUiStore from "../../stores/uiStore";
 import useWorkspaceStore from "../../stores/workspaceStore";
 import { generateForwardSql, saveFileContent } from "../../lib/api";
+import { buildForwardSqlForActiveFile, forwardSqlStem } from "../../lib/forwardSql";
 import Modal from "./Modal";
 
 const DIALECTS = [
@@ -27,7 +28,14 @@ const DIALECTS = [
 
 export default function ExportDdlDialog() {
   const { closeModal } = useUiStore();
-  const { activeFile, projectPath, projectConfig } = useWorkspaceStore();
+  const {
+    activeFile,
+    activeFileContent,
+    projectFiles,
+    fileContentCache,
+    projectPath,
+    projectConfig,
+  } = useWorkspaceStore();
   const [dialect, setDialect] = useState(
     () => String(projectConfig?.defaultDialect || "snowflake").toLowerCase()
   );
@@ -36,6 +44,12 @@ export default function ExportDdlDialog() {
   const [error, setError] = useState("");
   const [savedPath, setSavedPath] = useState("");
   const [copied, setCopied] = useState(false);
+  const composed = React.useMemo(() => buildForwardSqlForActiveFile({
+    activeFile,
+    activeFileContent,
+    projectFiles,
+    fileContentCache,
+  }), [activeFile, activeFileContent, projectFiles, fileContentCache]);
 
   const fileLabel = activeFile?.fullPath
     ? String(activeFile.fullPath).split("/").slice(-2).join("/")
@@ -43,11 +57,16 @@ export default function ExportDdlDialog() {
   const canRun = !!activeFile?.fullPath && !busy;
 
   const run = async () => {
-    if (!activeFile?.fullPath) { setError("Open a .model.yaml file first."); return; }
+    if (!activeFile?.fullPath) { setError("Open a model or diagram file first."); return; }
     setBusy(true); setError(""); setSavedPath(""); setCopied(false);
     try {
-      const res = await generateForwardSql(activeFile.fullPath, dialect);
-      setSql(String(res?.sql || res?.output || "").trim());
+      if (composed.isDiagram) {
+        if (!composed.sql) throw new Error("Could not compose SQL from the active diagram.");
+        setSql(String(composed.sql || "").trim());
+      } else {
+        const res = await generateForwardSql(activeFile.fullPath, dialect);
+        setSql(String(res?.sql || res?.output || "").trim());
+      }
     } catch (err) {
       setError(err.message || String(err));
     } finally {
@@ -59,9 +78,7 @@ export default function ExportDdlDialog() {
     if (!sql || !activeFile?.fullPath || !projectPath) return;
     setBusy(true); setError("");
     try {
-      const fileName = String(activeFile.fullPath)
-        .split("/").pop()
-        .replace(/\.model\.ya?ml$/i, "") || "model";
+      const fileName = forwardSqlStem(activeFile.fullPath);
       const configured = projectConfig?.ddlDialects?.[dialect] || `DataLex/generated-sql/ddl/${dialect}`;
       const folder = String(configured).replace(/^\/+|\/+$/g, "");
       const outPath = `${String(projectPath).replace(/\/+$/, "")}/${folder}/${fileName}.sql`;
@@ -87,7 +104,7 @@ export default function ExportDdlDialog() {
     <Modal
       icon={<FileCode2 size={14} />}
       title="Export DDL"
-      subtitle={fileLabel ? `Forward-engineer ${fileLabel}` : "Open a model file to generate SQL."}
+      subtitle={fileLabel ? `Forward-engineer ${fileLabel}` : "Open a model or diagram file to generate SQL."}
       size={hasOutput ? "xl" : "md"}
       onClose={closeModal}
       footer={
@@ -168,7 +185,7 @@ export default function ExportDdlDialog() {
 
       {!hasOutput && !error && (
         <p className="dlx-modal-hint" style={{ marginTop: 0 }}>
-          Pick a SQL dialect and press <strong>Run</strong> to generate forward DDL for the current model.
+          Pick a SQL dialect and press <strong>Run</strong> to generate forward DDL for the current {composed.isDiagram ? "diagram" : "model"}.
           Nothing is written to disk until you click <strong>Save to disk</strong>.
         </p>
       )}

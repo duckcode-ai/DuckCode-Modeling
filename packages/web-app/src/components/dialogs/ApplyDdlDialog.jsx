@@ -15,6 +15,7 @@ import useWorkspaceStore from "../../stores/workspaceStore";
 import {
   generateForwardSql, applyForwardSql, fetchConnections,
 } from "../../lib/api";
+import { buildForwardSqlForActiveFile } from "../../lib/forwardSql";
 import Modal from "./Modal";
 
 const DIALECTS = [
@@ -27,13 +28,19 @@ const DIALECTS = [
 
 export default function ApplyDdlDialog() {
   const { closeModal, addToast } = useUiStore();
-  const { activeFile, projectConfig } = useWorkspaceStore();
+  const {
+    activeFile,
+    activeFileContent,
+    projectConfig,
+    projectFiles,
+    fileContentCache,
+  } = useWorkspaceStore();
 
   const [dialect, setDialect] = useState(
     () => String(projectConfig?.defaultDialect || "snowflake").toLowerCase()
   );
   const [connections, setConnections] = useState([]);
-  const [connectorName, setConnectorName] = useState("");
+  const [selectedConnectionId, setSelectedConnectionId] = useState("");
   const [sql, setSql] = useState("");
   const [applyResult, setApplyResult] = useState(null);
   const [busy, setBusy] = useState(false);
@@ -51,22 +58,34 @@ export default function ApplyDdlDialog() {
     fetchConnections().then((list) => {
       if (!alive) return;
       setConnections(list || []);
-      if ((list || []).length === 1) setConnectorName(list[0].connection_name || "");
+      if ((list || []).length === 1) setSelectedConnectionId(list[0].id || "");
     }).catch(() => { /* surfaced via per-action errors */ });
     return () => { alive = false; };
   }, []);
 
+  const composed = useMemo(() => buildForwardSqlForActiveFile({
+    activeFile,
+    activeFileContent,
+    projectFiles,
+    fileContentCache,
+  }), [activeFile, activeFileContent, projectFiles, fileContentCache]);
+
   const selectedConnection = useMemo(
-    () => connections.find((c) => c.connection_name === connectorName) || null,
-    [connections, connectorName]
+    () => connections.find((c) => c.id === selectedConnectionId) || null,
+    [connections, selectedConnectionId]
   );
 
   const generate = async () => {
-    if (!activeFile?.fullPath) { setError("Open a .model.yaml file first."); return; }
+    if (!activeFile?.fullPath) { setError("Open a model or diagram file first."); return; }
     setBusy(true); setError(""); setApplyResult(null);
     try {
-      const res = await generateForwardSql(activeFile.fullPath, dialect);
-      setSql(String(res?.sql || res?.output || "").trim());
+      if (composed.isDiagram) {
+        if (!composed.sql) throw new Error("Could not compose SQL from the active diagram.");
+        setSql(String(composed.sql || "").trim());
+      } else {
+        const res = await generateForwardSql(activeFile.fullPath, dialect);
+        setSql(String(res?.sql || res?.output || "").trim());
+      }
     } catch (err) {
       setError(err?.message || String(err));
     } finally {
@@ -81,8 +100,8 @@ export default function ApplyDdlDialog() {
     try {
       const result = await applyForwardSql({
         connector: selectedConnection.connector,
+        connection_id: selectedConnection.id,
         dialect,
-        connection_name: selectedConnection.connection_name,
         sql,
         dry_run: dryRun,
         output_json: true,
@@ -110,12 +129,15 @@ export default function ApplyDdlDialog() {
   const hasOutput = !!sql;
   const canGenerate = !!activeFile?.fullPath && !busy;
   const canApply = hasOutput && !!selectedConnection && !busy && !applyDisabled;
+  const sourceLabel = fileLabel
+    ? (composed.isDiagram ? `${fileLabel} (diagram)` : fileLabel)
+    : (composed.isDiagram ? "current diagram" : "current model");
 
   return (
     <Modal
       icon={<UploadCloud size={14} />}
       title="Apply to warehouse"
-      subtitle={fileLabel ? `Forward-engineer and apply ${fileLabel}` : "Open a model file to generate SQL."}
+      subtitle={fileLabel ? `Forward-engineer and apply ${sourceLabel}` : "Open a model or diagram file to generate SQL."}
       size={hasOutput ? "xl" : "md"}
       onClose={closeModal}
       footer={
@@ -172,14 +194,14 @@ export default function ApplyDdlDialog() {
           ) : (
             <select
               className="panel-select"
-              value={connectorName}
-              onChange={(e) => setConnectorName(e.target.value)}
+              value={selectedConnectionId}
+              onChange={(e) => setSelectedConnectionId(e.target.value)}
               disabled={busy}
             >
-              <option value="">Choose connector…</option>
+              <option value="">Choose connection…</option>
               {connections.map((c) => (
-                <option key={c.connection_name} value={c.connection_name}>
-                  {c.connection_name} · {c.connector}
+                <option key={c.id} value={c.id}>
+                  {(c.name || c.connection_name || c.id)} · {c.connector}
                 </option>
               ))}
             </select>
@@ -248,7 +270,7 @@ export default function ApplyDdlDialog() {
 
       {!hasOutput && !error && (
         <p className="dlx-modal-hint" style={{ marginTop: 0 }}>
-          Generate DDL for the current model, then pick a connector profile and {" "}
+          Generate SQL for the {composed.isDiagram ? "current diagram" : "current model"}, then pick a connector profile and {" "}
           <strong>Dry run</strong> to validate against the warehouse before applying.
         </p>
       )}

@@ -168,7 +168,7 @@ export default function RightPanel({
     body = <YamlEditorShell />;
   } else if (tab === "SQL") {
     body = (isDiagramFile && schema?.tables?.length)
-      ? <SqlView table={table} schema={schema} isDiagramFile={true} />
+      ? <SqlView table={table} schema={schema} isDiagramFile={true} onExport={onExportDdl} />
       : table
         ? <SqlView table={table} schema={schema} isDiagramFile={false} onExport={onExportDdl} />
         : <PanelEmpty icon={Database} title="SQL preview" description="Select a table to see its CREATE statement." />;

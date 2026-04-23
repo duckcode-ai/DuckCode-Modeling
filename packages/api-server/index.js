@@ -3462,6 +3462,7 @@ app.post("/api/forward/apply", express.json({ limit: "10mb" }), async (req, res)
   try {
     const {
       connector,
+      connection_id,
       dialect,
       sql_file,
       sql,
@@ -3493,8 +3494,9 @@ app.post("/api/forward/apply", express.json({ limit: "10mb" }), async (req, res)
       return res.status(400).json({ error: "Provide exactly one input mode: sql_file, sql, or old_model+new_model" });
     }
 
-    conn = buildConnArgs(params);
-    const args = [join(REPO_ROOT, "datalex"), "apply", String(connector), "--dialect", String(dialect || connector), ...conn.args];
+    const resolved = await resolveConnectionRequest({ connector, connectionId: connection_id, params });
+    conn = buildConnArgs(resolved.params);
+    const args = [join(REPO_ROOT, "datalex"), "apply", String(resolved.connector), "--dialect", String(dialect || resolved.connector), ...conn.args];
 
     if (model_schema) args.push("--model-schema", String(model_schema));
     if (migration_name) args.push("--migration-name", String(migration_name));
@@ -3533,11 +3535,12 @@ app.post("/api/forward/apply", express.json({ limit: "10mb" }), async (req, res)
     }
     res.json({
       success: true,
-      connector: String(connector),
+      connector: String(resolved.connector),
       summary,
       output: summary ? null : trimmed,
     });
   } catch (err) {
+    if (err instanceof ApiError) return apiFail(res, err.status, err.code, err.message, err.details);
     const stderr = err.stderr || err.message;
     const stdout = err.stdout || "";
     res.status(500).json({ error: String(stderr).trim(), output: String(stdout).trim() || null });
