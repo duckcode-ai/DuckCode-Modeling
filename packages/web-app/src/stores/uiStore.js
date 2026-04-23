@@ -144,6 +144,7 @@ const useUiStore = create((set, get) => ({
 
   // ── Connector deep-link (sidebar → ConnectorsPanel pre-selection) ──
   pendingConnectorType: null,
+  pendingConnectionId: null,
 
   // ── Pending search query (ViewerWelcome → GlobalSearchPanel handoff) ──
   pendingSearchQuery: "",
@@ -162,6 +163,7 @@ const useUiStore = create((set, get) => ({
   // ── Actions ──
   setActiveActivity: (activity) => set({ activeActivity: activity }),
   setPendingConnectorType: (type) => set({ pendingConnectorType: type }),
+  setPendingConnectionId: (id) => set({ pendingConnectionId: id }),
   setPendingSearchQuery: (q) => set({ pendingSearchQuery: q }),
 
   toggleTheme: () => set((s) => {

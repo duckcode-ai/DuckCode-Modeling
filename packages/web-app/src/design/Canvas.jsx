@@ -708,7 +708,6 @@ export default function Canvas({ tables, setTables, relationships, areas, select
           <button className="canvas-btn" onClick={() => handleFit()} title="Fit all entities into view"><I.Fit />Fit</button>
           <button className="canvas-btn" onClick={() => handleAutoLayoutClick()} title="Auto-layout (ELK)"><I.Grid />Auto-layout</button>
           <button className="canvas-btn" onClick={() => onExport && onExport()} title="Export DDL / SQL"><I.Download />Export</button>
-          <button className="canvas-btn primary" onClick={() => onExport && onExport()}><I.Sparkle />Generate SQL</button>
         </div>
       </div>
 

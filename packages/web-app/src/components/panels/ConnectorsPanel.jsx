@@ -429,7 +429,14 @@ export default function ConnectorsPanel() {
     loadProjects,
     selectProject,
   } = useWorkspaceStore();
-  const { addToast, setBottomPanelTab, pendingConnectorType, setPendingConnectorType } = useUiStore();
+  const {
+    addToast,
+    setBottomPanelTab,
+    pendingConnectorType,
+    setPendingConnectorType,
+    pendingConnectionId,
+    setPendingConnectionId,
+  } = useUiStore();
 
   // Deep-link from sidebar connector click
   useEffect(() => {
@@ -532,7 +539,7 @@ export default function ConnectorsPanel() {
     resetWizard();
   };
 
-  const loadSavedConnection = (connection) => {
+  const loadSavedConnection = useCallback((connection) => {
     const details = connection?.details || {};
     const secrets = connection?.secrets || {};
     const restored = {};
@@ -551,7 +558,15 @@ export default function ConnectorsPanel() {
     setFormValues(restored);
     setShowSecrets({});
     resetWizard();
-  };
+  }, []);
+
+  useEffect(() => {
+    if (!pendingConnectionId || !savedConnections.length) return;
+    const connection = savedConnections.find((entry) => entry.id === pendingConnectionId);
+    if (!connection) return;
+    loadSavedConnection(connection);
+    setPendingConnectionId(null);
+  }, [loadSavedConnection, pendingConnectionId, savedConnections, setPendingConnectionId]);
 
   const handleFieldChange = (key, value) => {
     setFormValues((prev) => ({ ...prev, [key]: value }));
@@ -602,7 +617,11 @@ export default function ConnectorsPanel() {
     setLoading(true);
     setError(null);
     try {
-      const data = await apiPost("/api/connectors/schemas", { connector: selectedConnector, ...formValues });
+      const data = await apiPost("/api/connectors/schemas", {
+        connector: selectedConnector,
+        connection_id: activeConnectionId,
+        ...formValues,
+      });
       setSchemas(data);
       // Auto-select all schemas by default
       setSelectedSchemas(new Set(data.map((s) => s.name)));
@@ -635,7 +654,12 @@ export default function ConnectorsPanel() {
     setError(null);
     setPreviewSchema(schemaName);
     try {
-      const params = { connector: selectedConnector, ...formValues, db_schema: schemaName };
+      const params = {
+        connector: selectedConnector,
+        connection_id: activeConnectionId,
+        ...formValues,
+        db_schema: schemaName,
+      };
       if (selectedConnector === "bigquery") params.dataset = schemaName;
       const data = await apiPost("/api/connectors/tables", params);
       setPreviewTables(data);

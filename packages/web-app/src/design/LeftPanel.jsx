@@ -1,4 +1,4 @@
-/* Left panel — Object List / Explorer / Themes. Ported from DataLex design prototype.
+/* Left panel — Object List / Explorer / Database Browser. Ported from DataLex design prototype.
  *
  * The EXPLORER tab renders the active project's file tree. We build it on the
  * fly with `buildFileTree` (pure, memo-friendly) so adding a file anywhere in
@@ -9,13 +9,13 @@
  */
 import React from "react";
 import Icon from "./icons";
-import { THEMES } from "./notation";
 import { buildFileTree, countFiles } from "../lib/fileTree";
 import useWorkspaceStore from "../stores/workspaceStore";
 import useUiStore from "../stores/uiStore";
 import ExplorerContextMenu from "../components/panels/ExplorerContextMenu";
+import DatabaseBrowserPanel from "../components/panels/DatabaseBrowserPanel";
 
-export default function LeftPanel({ activeTable, onSelectTable, tables, theme, setTheme, subjectAreas = [], connectionLabel = "workspace", connectionDsn = "", schemas = [], onAddEntity, projects = [], activeProjectId = null, onSelectProject = null }) {
+export default function LeftPanel({ activeTable, onSelectTable, tables, subjectAreas = [], connectionLabel = "workspace", connectionDsn = "", schemas = [], onAddEntity, projects = [], activeProjectId = null, onSelectProject = null, onOpenConnectors = null, onManageConnections = null }) {
   const I = Icon;
   const [tab, setTab] = React.useState("OBJECTS");
   const [query, setQuery] = React.useState("");
@@ -206,12 +206,10 @@ export default function LeftPanel({ activeTable, onSelectTable, tables, theme, s
     </div>
   );
 
-  const schemaList = schemas.length ? schemas : [{ name: "public", count: tables.length }];
-
   return (
     <div className="left">
       <div className="left-tabs">
-        {["OBJECTS", "EXPLORER", "THEMES"].map((t) => (
+        {["OBJECTS", "EXPLORER", "DATABASE"].map((t) => (
           <button key={t} className={`left-tab ${tab === t ? "active" : ""}`} onClick={() => setTab(t)}>{t}</button>
         ))}
       </div>
@@ -383,45 +381,12 @@ export default function LeftPanel({ activeTable, onSelectTable, tables, theme, s
         </div>
       )}
 
-      {tab === "THEMES" && (
-        <div style={{ padding: "14px 16px", overflowY: "auto" }}>
-          <div style={{ fontSize: 10, color: "var(--text-tertiary)", marginBottom: 10, letterSpacing: "0.08em", textTransform: "uppercase", fontWeight: 600 }}>Appearance</div>
-          {THEMES.map((t) => {
-            const active = t.id === theme;
-            return (
-              <button key={t.id} onClick={() => setTheme(t.id)}
-                style={{
-                  width: "100%", textAlign: "left",
-                  display: "flex", alignItems: "center", gap: 10,
-                  padding: "10px 10px", marginBottom: 6,
-                  border: `1px solid ${active ? "var(--accent)" : "var(--border-default)"}`,
-                  borderRadius: 8,
-                  background: active ? "var(--accent-dim)" : "var(--bg-2)",
-                  cursor: "pointer", transition: "all 120ms var(--ease)",
-                }}>
-                <div style={{ display: "flex", gap: 0, borderRadius: 4, overflow: "hidden", border: "1px solid var(--border-default)" }}>
-                  {t.colors.map((c, i) => <div key={i} style={{ width: 12, height: 28, background: c }} />)}
-                </div>
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ fontSize: 12, fontWeight: 600, color: "var(--text-primary)", display: "flex", alignItems: "center", gap: 6 }}>
-                    {t.name}
-                    <span style={{
-                      fontSize: 9, fontFamily: "var(--font-mono)", letterSpacing: "0.06em", textTransform: "uppercase",
-                      padding: "1px 5px", borderRadius: 3, background: "var(--bg-3)", color: "var(--text-tertiary)",
-                    }}>{t.mode}</span>
-                  </div>
-                  <div style={{ fontSize: 11, color: "var(--text-tertiary)", marginTop: 2 }}>{t.sub}</div>
-                </div>
-                {active && <I.Check />}
-              </button>
-            );
-          })}
-          <div style={{ fontSize: 10, color: "var(--text-tertiary)", margin: "18px 0 8px", letterSpacing: "0.08em", textTransform: "uppercase", fontWeight: 600 }}>Keyboard</div>
-          <div style={{ fontSize: 11, color: "var(--text-secondary)", display: "flex", alignItems: "center", justifyContent: "space-between", padding: "6px 2px" }}>
-            <span>Cycle themes</span>
-            <span style={{ fontFamily: "var(--font-mono)", fontSize: 10, padding: "2px 6px", background: "var(--bg-3)", borderRadius: 4, border: "1px solid var(--border-default)" }}>⌘⇧T</span>
-          </div>
-        </div>
+      {tab === "DATABASE" && (
+        <DatabaseBrowserPanel
+          I={I}
+          onOpenConnectors={onOpenConnectors}
+          onManageConnections={onManageConnections}
+        />
       )}
     </div>
   );

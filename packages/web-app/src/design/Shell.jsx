@@ -1164,8 +1164,6 @@ export default function Shell() {
         activeTable={selected?.type === "table" ? selected.id : null}
         onSelectTable={(id) => handleSelect({ type: "table", id })}
         tables={tables}
-        theme={theme}
-        setTheme={setTheme}
         subjectAreas={subjectAreaTreeItems}
         schemas={schemaList}
         connectionLabel={
@@ -1182,6 +1180,8 @@ export default function Shell() {
         activeProjectId={activeProjectId}
         onSelectProject={(id) => selectProject(id)}
         onAddEntity={handleAddEntity}
+        onOpenConnectors={() => openModal("connectors")}
+        onManageConnections={() => openModal("connectionsManager")}
       />
 
       {/* Main canvas cell swaps based on the top-bar ViewSwitcher.

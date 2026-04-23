@@ -772,6 +772,43 @@ async function appendConnectionImportEvent({ connectionId, connector, params = {
   return conn;
 }
 
+function sanitizeConnectionParams(params = {}) {
+  return Object.fromEntries(
+    Object.entries(params).filter(([, value]) => value !== "__redacted__")
+  );
+}
+
+async function resolveConnectionRequest({ connector, connectionId = null, params = {} }) {
+  const incoming = sanitizeConnectionParams(params);
+  if (!connectionId) {
+    if (!connector) throw new ApiError(400, "VALIDATION", "Missing connector type");
+    if (connector === "bigquery" && incoming.db_schema && !incoming.dataset) {
+      incoming.dataset = incoming.db_schema;
+    }
+    return { connector, params: incoming };
+  }
+
+  const connections = await loadConnections();
+  const profile = connections.find((entry) => entry.id === connectionId);
+  if (!profile) {
+    throw new ApiError(404, "NOT_FOUND", `Connection not found: ${connectionId}`);
+  }
+  if (connector && profile.connector && connector !== profile.connector) {
+    throw new ApiError(400, "VALIDATION", "Connector does not match saved connection");
+  }
+
+  const resolvedConnector = profile.connector || connector;
+  const merged = {
+    ...(profile.details || {}),
+    ...(profile.secrets || {}),
+    ...incoming,
+  };
+  if (resolvedConnector === "bigquery" && merged.db_schema && !merged.dataset) {
+    merged.dataset = merged.db_schema;
+  }
+  return { connector: resolvedConnector, params: merged, profile };
+}
+
 // List all registered projects
 app.get("/api/projects", async (_req, res) => {
   try {
@@ -3696,11 +3733,11 @@ app.post("/api/connectors/test", express.json(), async (req, res) => {
   let conn = { args: [], cleanup: () => {} };
   const startedAt = Date.now();
   try {
-    const { connector, connection_name, connection_id: _connectionId, ...params } = req.body;
-    if (!connector) return res.status(400).json({ error: "Missing connector type" });
+    const { connector, connection_name, connection_id: connectionId, ...params } = req.body || {};
+    const resolved = await resolveConnectionRequest({ connector, connectionId, params });
 
-    conn = buildConnArgs(params);
-    const args = [join(REPO_ROOT, "datalex"), "pull", connector, "--test", ...conn.args];
+    conn = buildConnArgs(resolved.params);
+    const args = [join(REPO_ROOT, "datalex"), "pull", resolved.connector, "--test", ...conn.args];
 
     try {
       const output = execFileSync(PYTHON, args, { encoding: "utf-8", timeout: 30000, cwd: REPO_ROOT });
@@ -3710,8 +3747,8 @@ app.post("/api/connectors/test", express.json(), async (req, res) => {
       let saved = null;
       if (ok) {
         saved = await upsertConnectionProfile({
-          connector,
-          params,
+          connector: resolved.connector,
+          params: resolved.params,
           connectionName: connection_name,
         });
       }
@@ -3734,6 +3771,7 @@ app.post("/api/connectors/test", express.json(), async (req, res) => {
       conn.cleanup();
     }
   } catch (err) {
+    if (err instanceof ApiError) return apiFail(res, err.status, err.code, err.message, err.details);
     res.status(500).json({ error: err.message });
   }
 });
@@ -3760,15 +3798,16 @@ function extractServerVersion(output) {
 app.post("/api/connectors/schemas", express.json(), async (req, res) => {
   let conn = { args: [], cleanup: () => {} };
   try {
-    const { connector, ...params } = req.body;
-    if (!connector) return res.status(400).json({ error: "Missing connector type" });
+    const { connector, connection_id: connectionId, ...params } = req.body || {};
+    const resolved = await resolveConnectionRequest({ connector, connectionId, params });
 
-    conn = buildConnArgs(params);
-    const args = [join(REPO_ROOT, "datalex"), "schemas", connector, "--output-json", ...conn.args];
+    conn = buildConnArgs(resolved.params);
+    const args = [join(REPO_ROOT, "datalex"), "schemas", resolved.connector, "--output-json", ...conn.args];
     const output = execFileSync(PYTHON, args, { encoding: "utf-8", timeout: 30000, cwd: REPO_ROOT });
     const schemas = JSON.parse(output);
     res.json(schemas);
   } catch (err) {
+    if (err instanceof ApiError) return apiFail(res, err.status, err.code, err.message, err.details);
     const stderr = err.stderr || err.message;
     res.status(500).json({ error: stderr });
   } finally {
@@ -3780,15 +3819,16 @@ app.post("/api/connectors/schemas", express.json(), async (req, res) => {
 app.post("/api/connectors/tables", express.json(), async (req, res) => {
   let conn = { args: [], cleanup: () => {} };
   try {
-    const { connector, ...params } = req.body;
-    if (!connector) return res.status(400).json({ error: "Missing connector type" });
+    const { connector, connection_id: connectionId, ...params } = req.body || {};
+    const resolved = await resolveConnectionRequest({ connector, connectionId, params });
 
-    conn = buildConnArgs(params);
-    const args = [join(REPO_ROOT, "datalex"), "tables", connector, "--output-json", ...conn.args];
+    conn = buildConnArgs(resolved.params);
+    const args = [join(REPO_ROOT, "datalex"), "tables", resolved.connector, "--output-json", ...conn.args];
     const output = execFileSync(PYTHON, args, { encoding: "utf-8", timeout: 30000, cwd: REPO_ROOT });
     const tables = JSON.parse(output);
     res.json(tables);
   } catch (err) {
+    if (err instanceof ApiError) return apiFail(res, err.status, err.code, err.message, err.details);
     const stderr = err.stderr || err.message;
     res.status(500).json({ error: stderr });
   } finally {
@@ -3808,11 +3848,11 @@ app.post("/api/connectors/pull", express.json(), async (req, res) => {
       project_id,
       project_path,
       ...params
-    } = req.body;
-    if (!connector) return res.status(400).json({ error: "Missing connector type" });
+    } = req.body || {};
+    const resolved = await resolveConnectionRequest({ connector, connectionId: connection_id, params });
 
-    conn = buildConnArgs(params);
-    const args = [join(REPO_ROOT, "datalex"), "pull", connector, ...conn.args];
+    conn = buildConnArgs(resolved.params);
+    const args = [join(REPO_ROOT, "datalex"), "pull", resolved.connector, ...conn.args];
     if (model_name) { args.push("--model-name", model_name); }
     if (tables) {
       const tableList = typeof tables === "string" ? tables.split(",").map(t => t.trim()).filter(Boolean) : tables;
@@ -3832,12 +3872,12 @@ app.post("/api/connectors/pull", express.json(), async (req, res) => {
     const indexes = model?.indexes || [];
     const fieldCount = entities.reduce((sum, e) => sum + (e.fields || []).length, 0);
 
-    const schemaName = params.db_schema || params.dataset || model_name || "default";
+    const schemaName = resolved.params.db_schema || resolved.params.dataset || model_name || "default";
 
     const savedConnection = await appendConnectionImportEvent({
       connectionId: connection_id,
-      connector,
-      params,
+      connector: resolved.connector,
+      params: resolved.params,
       event: {
         mode: "pull-single",
         projectId: project_id || null,
@@ -3860,6 +3900,7 @@ app.post("/api/connectors/pull", express.json(), async (req, res) => {
       connectionId: savedConnection?.id || null,
     });
   } catch (err) {
+    if (err instanceof ApiError) return apiFail(res, err.status, err.code, err.message, err.details);
     const stderr = err.stderr || err.message;
     res.status(500).json({ error: stderr });
   } finally {
@@ -3879,14 +3920,15 @@ app.post("/api/connectors/pull-multi", express.json(), async (req, res) => {
       project_id,
       project_path,
       ...params
-    } = req.body;
-    if (!connector) return res.status(400).json({ error: "Missing connector type" });
+    } = req.body || {};
     if (!schemaList || !Array.isArray(schemaList) || schemaList.length === 0) {
       return res.status(400).json({ error: "Missing schemas array" });
     }
 
+    const resolved = await resolveConnectionRequest({ connector, connectionId: connection_id, params });
+
     // Build base args once (handles temp key file)
-    baseConn = buildConnArgs(params);
+    baseConn = buildConnArgs(resolved.params);
 
     const results = [];
     const errors = [];
@@ -3897,10 +3939,10 @@ app.post("/api/connectors/pull-multi", express.json(), async (req, res) => {
 
       try {
         const schemaParams = { db_schema: schemaName };
-        if (connector === "bigquery") schemaParams.dataset = schemaName;
+        if (resolved.connector === "bigquery") schemaParams.dataset = schemaName;
         const schemaConn = buildConnArgs(schemaParams);
 
-        const args = [join(REPO_ROOT, "datalex"), "pull", connector, ...baseConn.args, ...schemaConn.args];
+        const args = [join(REPO_ROOT, "datalex"), "pull", resolved.connector, ...baseConn.args, ...schemaConn.args];
         args.push("--model-name", schemaName);
 
         if (tablesToPull && Array.isArray(tablesToPull) && tablesToPull.length > 0) {
@@ -3943,8 +3985,8 @@ app.post("/api/connectors/pull-multi", express.json(), async (req, res) => {
 
     const savedConnection = await appendConnectionImportEvent({
       connectionId: connection_id,
-      connector,
-      params,
+      connector: resolved.connector,
+      params: resolved.params,
       event: {
         mode: "pull-multi",
         projectId: project_id || null,
@@ -3969,6 +4011,7 @@ app.post("/api/connectors/pull-multi", express.json(), async (req, res) => {
       connectionId: savedConnection?.id || null,
     });
   } catch (err) {
+    if (err instanceof ApiError) return apiFail(res, err.status, err.code, err.message, err.details);
     res.status(500).json({ error: err.message });
   } finally {
     baseConn.cleanup();
@@ -3998,9 +4041,6 @@ app.post("/api/connectors/pull/stream", express.json(), async (req, res) => {
     dbt_layout,
     ...params
   } = req.body || {};
-  if (!connector) {
-    return res.status(400).json({ error: "Missing connector type" });
-  }
 
   res.setHeader("Content-Type", "text/event-stream");
   res.setHeader("Cache-Control", "no-cache");
@@ -4014,14 +4054,16 @@ app.post("/api/connectors/pull/stream", express.json(), async (req, res) => {
   };
 
   let conn = { args: [], cleanup: () => {} };
+  let resolved = null;
   try {
-    conn = buildConnArgs(params);
+    resolved = await resolveConnectionRequest({ connector, connectionId: connection_id, params });
+    conn = buildConnArgs(resolved.params);
   } catch (err) {
     writeEvent("error", { message: err.message });
     return res.end();
   }
 
-  const pullArgs = ["pull", connector, ...conn.args];
+  const pullArgs = ["pull", resolved.connector, ...conn.args];
   if (model_name) pullArgs.push("--model-name", model_name);
   if (tables) {
     const list = typeof tables === "string"
@@ -4037,7 +4079,7 @@ app.post("/api/connectors/pull/stream", express.json(), async (req, res) => {
   let stdoutBuf = "";
   let stderrBuf = "";
 
-  writeEvent("start", { connector, pid: child.pid });
+  writeEvent("start", { connector: resolved.connector, pid: child.pid });
 
   const emitLines = (buf, streamName) => {
     const lines = buf.split(/\r?\n/);
@@ -4104,13 +4146,13 @@ app.post("/api/connectors/pull/stream", express.json(), async (req, res) => {
     try {
       const saved = await appendConnectionImportEvent({
         connectionId: connection_id,
-        connector,
-        params,
+        connector: resolved.connector,
+        params: resolved.params,
         event: {
           mode: "pull-stream",
           projectId: project_id || null,
           projectPath: project_path || null,
-          schemas: [params.db_schema || params.dataset || model_name || "default"],
+          schemas: [resolved.params.db_schema || resolved.params.dataset || model_name || "default"],
           files: [],
           totalEntities: 0,
           totalFields: 0,
