@@ -743,7 +743,9 @@ export default function DiagramCanvas() {
   useEffect(() => {
     const applyMutation = (mutated) => {
       if (mutated && typeof mutated.yaml === "string" && !mutated.error) {
-        useWorkspaceStore.getState().updateContent(mutated.yaml);
+        const s = useWorkspaceStore.getState();
+        s.updateContent(mutated.yaml);
+        s.flushAutosave?.().catch(() => {});
       } else if (mutated?.error) {
         useUiStore.getState().addToast?.({ type: "error", message: mutated.error });
       }

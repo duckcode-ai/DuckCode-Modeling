@@ -121,23 +121,24 @@ const IS_DOCKER_RUNTIME = existsSync("/.dockerenv");
 const DIRECT_APPLY_ENABLED = ["1", "true", "yes", "on"].includes(String(process.env.DM_ENABLE_DIRECT_APPLY || "").toLowerCase());
 const DATALEX_CONFIG_DIRNAME = ".datalex";
 const DATALEX_PROJECT_CONFIG = join(DATALEX_CONFIG_DIRNAME, "project.json");
+const DATALEX_WORKSPACE_ROOT = "DataLex";
 const DATALEX_DEFAULT_STRUCTURE = {
   version: 1,
   // Default to snowflake so baseline DDL generation works for new projects without extra config.
   // Connector pulls can still set this explicitly based on the chosen connector.
   defaultDialect: "snowflake",
-  modelsDir: "models",
-  migrationsDir: "migrations",
-  ddlDir: "ddl",
+  modelsDir: DATALEX_WORKSPACE_ROOT,
+  migrationsDir: `${DATALEX_WORKSPACE_ROOT}/generated-sql/migrations`,
+  ddlDir: `${DATALEX_WORKSPACE_ROOT}/generated-sql/ddl`,
   migrationDialects: {
-    snowflake: "migrations/snowflake",
-    databricks: "migrations/databricks",
-    bigquery: "migrations/bigquery",
+    snowflake: `${DATALEX_WORKSPACE_ROOT}/generated-sql/migrations/snowflake`,
+    databricks: `${DATALEX_WORKSPACE_ROOT}/generated-sql/migrations/databricks`,
+    bigquery: `${DATALEX_WORKSPACE_ROOT}/generated-sql/migrations/bigquery`,
   },
   ddlDialects: {
-    snowflake: "ddl/snowflake",
-    databricks: "ddl/databricks",
-    bigquery: "ddl/bigquery",
+    snowflake: `${DATALEX_WORKSPACE_ROOT}/generated-sql/ddl/snowflake`,
+    databricks: `${DATALEX_WORKSPACE_ROOT}/generated-sql/ddl/databricks`,
+    bigquery: `${DATALEX_WORKSPACE_ROOT}/generated-sql/ddl/bigquery`,
   },
 };
 
@@ -413,7 +414,10 @@ async function bootstrapProjectStructure(projectPath, { initializeGit = false } 
   const isInsideExistingRepo = Boolean(gitRoot) && isPathInside(gitRoot, absoluteProjectPath);
 
   const dirs = [
-    "models",
+    DATALEX_WORKSPACE_ROOT,
+    join(DATALEX_WORKSPACE_ROOT, "diagrams"),
+    join(DATALEX_WORKSPACE_ROOT, "domains"),
+    join(DATALEX_WORKSPACE_ROOT, "projects"),
     "migrations/snowflake",
     "migrations/databricks",
     "migrations/bigquery",
@@ -436,7 +440,7 @@ async function bootstrapProjectStructure(projectPath, { initializeGit = false } 
     "",
     "## Structure",
     "",
-    "- models/: source .model.yaml files",
+    `- ${DATALEX_WORKSPACE_ROOT}/: DataLex modeling workspace (diagrams, domains, projects, YAML assets)`,
     "- migrations/: generated SQL artifacts by connector",
     "- guides/: team onboarding and runbooks",
     "- .github/workflows/: CI/CD automation templates",
@@ -485,7 +489,7 @@ async function bootstrapProjectStructure(projectPath, { initializeGit = false } 
     join(absoluteProjectPath, DATALEX_PROJECT_CONFIG),
     `${JSON.stringify(DATALEX_DEFAULT_STRUCTURE, null, 2)}\n`
   );
-  await writeFileIfMissing(join(absoluteProjectPath, "models", ".gitkeep"), "");
+  await writeFileIfMissing(join(absoluteProjectPath, DATALEX_WORKSPACE_ROOT, ".gitkeep"), "");
   await writeFileIfMissing(
     join(absoluteProjectPath, "guides", "README.md"),
     "# Guides\n\nAdd setup, GitOps, and testing playbooks for your team.\n"
@@ -925,10 +929,10 @@ app.get("/api/projects/:id/files", async (req, res) => {
     if (!existsSync(structure.modelPath)) {
       await mkdir(structure.modelPath, { recursive: true });
     }
-    // Project-open hook: keep the conventional diagrams folder visible in
+    // Project-open hook: keep the conventional workspace folders visible in
     // Explorer even for projects that weren't created via dbt import. Safe
     // to call every time — idempotent and never rewrites existing files.
-    ensureDiagramsFolder(structure.modelPath);
+    ensureWorkspaceFolders(structure.modelPath);
 
     const files = await walkYamlFiles(structure.modelPath);
     res.json({
@@ -2077,17 +2081,19 @@ async function resolveProjectAndModelPath(projectId) {
 // later doc declares the same entity. The CLI still uses the richer Python
 // merge for two-way sync; this JS variant is scoped to the "N candidates,
 // no prior current" save-all path.
-// Ensure `datalex/diagrams/` exists under the given root. Idempotent —
-// never touches existing files; writes `.gitkeep` only when the folder
-// is freshly created so the empty folder round-trips through git.
-// Silent on errors (callers are project-open hooks, not actionable).
-function ensureDiagramsFolder(rootPath) {
+// Ensure the conventional DataLex workspace folders exist under the current
+// model root. Idempotent — never touches existing files; writes `.gitkeep`
+// only when a folder is freshly created so the empty structure round-trips
+// through git. Silent on errors (callers are project-open hooks, not actionable).
+function ensureWorkspaceFolders(rootPath) {
   try {
-    const diagramsDir = join(rootPath, "datalex", "diagrams");
-    if (!existsSync(diagramsDir)) {
-      mkdirSync(diagramsDir, { recursive: true });
-      const keepFile = join(diagramsDir, ".gitkeep");
-      if (!existsSync(keepFile)) writeFileSync(keepFile, "", "utf-8");
+    for (const rel of ["diagrams", "domains", "projects"]) {
+      const fullDir = join(rootPath, rel);
+      if (!existsSync(fullDir)) {
+        mkdirSync(fullDir, { recursive: true });
+        const keepFile = join(fullDir, ".gitkeep");
+        if (!existsSync(keepFile)) writeFileSync(keepFile, "", "utf-8");
+      }
     }
     return { ok: true };
   } catch (err) {
@@ -3278,7 +3284,7 @@ app.post("/api/dbt/import", requireAdmin, express.json({ limit: "2mb" }), async 
     const hasDiagram = tree.some((e) => /\.diagram\.ya?ml$/i.test(e.path));
     if (!hasDiagram) {
       tree.push({
-        path: "datalex/diagrams/overview.diagram.yaml",
+        path: "diagrams/overview.diagram.yaml",
         content:
           "kind: diagram\n" +
           "name: overview\n" +
@@ -3298,14 +3304,17 @@ app.post("/api/dbt/import", requireAdmin, express.json({ limit: "2mb" }), async 
     // `success: true`; now we return 207 with the failure list.
     const writeFailures = [];
     if (editInPlace && resolvedProjectDir) {
+      const workspaceRoot = join(resolvedProjectDir, DATALEX_WORKSPACE_ROOT);
+      ensureWorkspaceFolders(workspaceRoot);
       for (const entry of tree) {
         // `.diagram.yaml` is a DataLex convention — keep that exact
         // extension. Everything else (dbt model/source files) converts
-        // back to `.yml` to match what's on disk in a dbt repo.
+        // to `.yml`, but lands inside the dedicated DataLex workspace
+        // instead of mutating the original dbt source tree.
         const destRel = /\.diagram\.ya?ml$/i.test(entry.path)
           ? entry.path
           : entry.path.replace(/\.yaml$/i, ".yml");
-        const destAbs = join(resolvedProjectDir, destRel);
+        const destAbs = join(workspaceRoot, destRel);
         try {
           if (!existsSync(destAbs)) {
             mkdirSync(dirname(destAbs), { recursive: true });
@@ -3319,13 +3328,32 @@ app.post("/api/dbt/import", requireAdmin, express.json({ limit: "2mb" }), async 
           });
         }
       }
-      // Seed `datalex/diagrams/` so the Explorer shows the conventional
-      // diagrams location immediately after import. Shared with the
+      try {
+        const configPath = join(resolvedProjectDir, DATALEX_PROJECT_CONFIG);
+        let existingConfig = {};
+        if (existsSync(configPath)) {
+          existingConfig = JSON.parse(readFileSync(configPath, "utf-8")) || {};
+        }
+        mkdirSync(dirname(configPath), { recursive: true });
+        writeFileSync(
+          configPath,
+          `${JSON.stringify({ ...DATALEX_DEFAULT_STRUCTURE, ...existingConfig, modelsDir: DATALEX_WORKSPACE_ROOT }, null, 2)}\n`,
+          "utf-8"
+        );
+      } catch (err) {
+        writeFailures.push({
+          path: DATALEX_PROJECT_CONFIG,
+          code: "INTERNAL",
+          error: String(err?.message || err).slice(0, 400),
+        });
+      }
+      // Seed the DataLex workspace folders so the Explorer shows the conventional
+      // modeling layout immediately after import. Shared with the
       // project-open hook on GET /files.
-      const seed = ensureDiagramsFolder(resolvedProjectDir);
+      const seed = ensureWorkspaceFolders(workspaceRoot);
       if (!seed.ok) {
         writeFailures.push({
-          path: "datalex/diagrams/.gitkeep",
+          path: `${DATALEX_WORKSPACE_ROOT}/diagrams/.gitkeep`,
           code: "INTERNAL",
           error: seed.error,
         });

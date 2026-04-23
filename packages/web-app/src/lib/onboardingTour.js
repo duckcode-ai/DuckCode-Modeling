@@ -55,7 +55,7 @@ const TOUR_STEPS = [
     popover: {
       title: "3 · Create a diagram",
       description:
-        "Click the Layers icon to create a <code>.diagram.yaml</code> under <code>datalex/diagrams/</code>. A diagram is just a curated view over your models — you can have many, each with its own layout.",
+        "Click the Layers icon to create a <code>.diagram.yaml</code> under <code>DataLex/diagrams/</code>. A diagram is just a curated view over your models — you can have many, each with its own layout.",
       side: "bottom",
       align: "end",
     },

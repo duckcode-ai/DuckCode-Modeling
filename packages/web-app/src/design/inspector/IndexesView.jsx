@@ -48,6 +48,7 @@ export default function IndexesView({ table, indexes }) {
     const result = addIndex(s.activeFileContent, clean, table.name, selectedFields, unique, type);
     if (result?.yaml && !result.error) {
       s.updateContent(result.yaml);
+      s.flushAutosave?.().catch(() => {});
       resetForm();
     }
   };
@@ -56,7 +57,10 @@ export default function IndexesView({ table, indexes }) {
     if (!window.confirm(`Drop index “${ixName}”?`)) return;
     const s = useWorkspaceStore.getState();
     const result = removeIndex(s.activeFileContent, ixName);
-    if (result?.yaml && !result.error) s.updateContent(result.yaml);
+    if (result?.yaml && !result.error) {
+      s.updateContent(result.yaml);
+      s.flushAutosave?.().catch(() => {});
+    }
   };
 
   const toggleField = (fieldName) => {

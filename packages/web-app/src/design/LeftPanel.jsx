@@ -90,7 +90,7 @@ export default function LeftPanel({ activeTable, onSelectTable, tables, theme, s
         const name = window.prompt("New diagram name:", "untitled");
         if (!name) return;
         // Drop the new .diagram.yaml into the clicked folder. Root target
-        // falls through to the default datalex/diagrams/ location.
+        // falls through to the default diagrams/ location inside DataLex.
         const folder = menu.target === "folder" ? menu.path || "" : "";
         await createNewDiagram(name, folder);
       } else if (actionId === "rename") {
@@ -337,7 +337,7 @@ export default function LeftPanel({ activeTable, onSelectTable, tables, theme, s
                     title="New diagram"
                     onClick={async () => {
                       const name = window.prompt(
-                        "Diagram name (saved as datalex/diagrams/<name>.diagram.yaml):",
+                        "Diagram name (saved as DataLex/diagrams/<name>.diagram.yaml):",
                         "untitled"
                       );
                       if (!name || !name.trim()) return;

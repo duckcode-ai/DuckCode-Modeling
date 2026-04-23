@@ -1109,8 +1109,9 @@ input { font: inherit; color: inherit; }
 }
 .canvas-inner {
   position: relative;
-  width: 2400px;
-  height: 1600px;
+}
+.canvas-stage {
+  position: relative;
 }
 
 /* Subject area (group) */

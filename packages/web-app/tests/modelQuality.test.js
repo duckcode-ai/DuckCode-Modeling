@@ -78,6 +78,47 @@ metrics:
   assert.ok(codes.includes("METRIC_TIME_DIMENSION_NOT_FOUND"));
 });
 
+test("runModelChecks accepts object-shaped relationship endpoints", () => {
+  const yamlText = `${BASE_HEADER}
+  layer: transform
+
+entities:
+  - name: Customer
+    type: table
+    grain: [customer_id]
+    fields:
+      - name: customer_id
+        type: integer
+        primary_key: true
+      - name: customer_name
+        type: text
+  - name: Order
+    type: table
+    grain: [order_id]
+    fields:
+      - name: order_id
+        type: integer
+        primary_key: true
+      - name: customer_id
+        type: integer
+
+relationships:
+  - name: order_customer
+    from:
+      entity: Order
+      field: customer_id
+    to:
+      entity: Customer
+      field: customer_id
+    cardinality: many_to_one
+`;
+
+  const check = runModelChecks(yamlText);
+  const codes = check.errors.map((item) => item.code);
+  assert.equal(codes.includes("INVALID_RELATIONSHIP_FROM"), false);
+  assert.equal(codes.includes("INVALID_RELATIONSHIP_TO"), false);
+});
+
 test("runGate reports metric contract breaking changes", () => {
   const oldYamlText = `${BASE_HEADER}
   layer: report

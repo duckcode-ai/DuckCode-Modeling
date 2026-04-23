@@ -105,6 +105,7 @@ export default function ViewsView({ onSelectTable }) {
       return;
     }
     updateContent(next);
+    useWorkspaceStore.getState().flushAutosave?.().catch(() => {});
     addToast({ type: "success", message: `Added view “${clean}”.` });
   };
 
@@ -136,6 +137,7 @@ export default function ViewsView({ onSelectTable }) {
       return;
     }
     updateContent(next);
+    useWorkspaceStore.getState().flushAutosave?.().catch(() => {});
     addToast({ type: "success", message: `Added materialized view “${clean}”.` });
   };
 
@@ -147,6 +149,7 @@ export default function ViewsView({ onSelectTable }) {
       return;
     }
     updateContent(result.yaml);
+    useWorkspaceStore.getState().flushAutosave?.().catch(() => {});
     const extras = [];
     if (result.impact.relationships) extras.push(`${result.impact.relationships} relationship${result.impact.relationships === 1 ? "" : "s"}`);
     if (result.impact.indexes)       extras.push(`${result.impact.indexes} index${result.impact.indexes === 1 ? "" : "es"}`);

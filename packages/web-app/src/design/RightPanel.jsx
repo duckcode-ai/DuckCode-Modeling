@@ -96,7 +96,8 @@ function ResizeHandle({ initialWidth, onCommit }) {
 
 export default function RightPanel({
   table, rel, tables, selectedCol, setSelectedCol,
-  relationships = [], indexes = [], onDeleteEntity, onSelectRel, onExportDdl,
+  relationships = [], indexes = [], schema = null, isDiagramFile = false,
+  onDeleteEntity, onSelectRel, onExportDdl,
 }) {
   const rightPanelTab = useUiStore((s) => s.rightPanelTab);
   const setRightPanelTab = useUiStore((s) => s.setRightPanelTab);
@@ -165,6 +166,12 @@ export default function RightPanel({
   let body;
   if (tab === "YAML") {
     body = <YamlEditorShell />;
+  } else if (tab === "SQL") {
+    body = (isDiagramFile && schema?.tables?.length)
+      ? <SqlView table={table} schema={schema} isDiagramFile={true} />
+      : table
+        ? <SqlView table={table} schema={schema} isDiagramFile={false} onExport={onExportDdl} />
+        : <PanelEmpty icon={Database} title="SQL preview" description="Select a table to see its CREATE statement." />;
   } else if (noSelection) {
     body = (
       <PanelEmpty
@@ -194,10 +201,6 @@ export default function RightPanel({
     body = table
       ? <IndexesView table={table} indexes={indexes} />
       : <PanelEmpty icon={Database} title="Indexes" description="Select a table to view its indexes." />;
-  } else if (tab === "SQL") {
-    body = table
-      ? <SqlView table={table} onExport={onExportDdl} />
-      : <PanelEmpty icon={Database} title="SQL preview" description="Select a table to see its CREATE statement." />;
   }
 
   return (

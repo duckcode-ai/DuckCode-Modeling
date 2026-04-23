@@ -314,7 +314,7 @@ function buildDefaultMigrationPath(projectPath, modelPath, connectorType = "snow
   const modelStem = sanitizeModelStem(modelName.replace(/\.model\.ya?ml$/i, ""), "model");
   const stamp = formatUtcMigrationTimestamp();
   const connectorFolder = sanitizeModelStem(String(connectorType || "snowflake"), "snowflake");
-  return joinPath(basePath, `migrations/${connectorFolder}/${stamp}__${modelStem}.sql`);
+  return joinPath(basePath, `DataLex/generated-sql/migrations/${connectorFolder}/${stamp}__${modelStem}.sql`);
 }
 
 function buildDefaultDdlPath(projectPath, modelPath, connectorType = "snowflake") {
@@ -325,7 +325,7 @@ function buildDefaultDdlPath(projectPath, modelPath, connectorType = "snowflake"
     .pop() || "model";
   const modelStem = sanitizeModelStem(modelName.replace(/\.model\.ya?ml$/i, ""), "model");
   const connectorFolder = sanitizeModelStem(String(connectorType || "snowflake"), "snowflake");
-  return joinPath(basePath, `ddl/${connectorFolder}/${modelStem}.sql`);
+  return joinPath(basePath, `DataLex/generated-sql/ddl/${connectorFolder}/${modelStem}.sql`);
 }
 
 const FORWARD_GITOPS_CONNECTORS = new Set(["snowflake", "databricks", "bigquery"]);

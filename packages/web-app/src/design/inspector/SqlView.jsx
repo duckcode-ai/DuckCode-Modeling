@@ -13,9 +13,9 @@ import yaml from "js-yaml";
 import { Copy, FileCode2 } from "lucide-react";
 import { PanelSection } from "../../components/panels/PanelFrame";
 import useWorkspaceStore from "../../stores/workspaceStore";
-import { generateEntityDDL, highlightSql } from "../../lib/ddl";
+import { generateEntityDDL, generateSchemaDDL, highlightSql } from "../../lib/ddl";
 
-export default function SqlView({ table, onExport }) {
+export default function SqlView({ table, schema, isDiagramFile = false, onExport }) {
   const activeFileContent = useWorkspaceStore((s) => s.activeFileContent);
   const [copied, setCopied] = React.useState(false);
 
@@ -24,6 +24,10 @@ export default function SqlView({ table, onExport }) {
      failure, entity missing) falls back to the flattened `table` we were
      given — so the preview is always populated. */
   const { sql, html } = React.useMemo(() => {
+    if (isDiagramFile) {
+      const source = generateSchemaDDL(schema);
+      return { sql: source, html: highlightSql(source) };
+    }
     if (!table) return { sql: "", html: "" };
     let entity = null;
     let relationships = [];
@@ -56,7 +60,7 @@ export default function SqlView({ table, onExport }) {
       relationships,
     });
     return { sql: source, html: highlightSql(source) };
-  }, [table, activeFileContent]);
+  }, [table, schema, isDiagramFile, activeFileContent]);
 
   const handleCopy = async () => {
     try {
@@ -66,17 +70,17 @@ export default function SqlView({ table, onExport }) {
     } catch (_e) { /* clipboard blocked — ignore */ }
   };
 
-  if (!table) return null;
+  if (!table && !isDiagramFile) return null;
 
   return (
     <PanelSection
-      title="CREATE statement"
+      title={isDiagramFile ? "Diagram SQL script" : "CREATE statement"}
       action={
         <div className="panel-btn-row">
           <button className="panel-btn" onClick={handleCopy} title="Copy SQL">
             <Copy size={12} /> {copied ? "Copied" : "Copy"}
           </button>
-          {onExport && (
+          {!isDiagramFile && onExport && (
             <button className="panel-btn" onClick={onExport} title="Open full export dialog">
               <FileCode2 size={12} /> Export…
             </button>
@@ -88,7 +92,9 @@ export default function SqlView({ table, onExport }) {
         <code dangerouslySetInnerHTML={{ __html: html }} />
       </pre>
       <div style={{ fontSize: 10, color: "var(--text-tertiary)", marginTop: 6 }}>
-        Preview is client-side + dialect-agnostic. Use <strong>Export…</strong> for production-grade DDL.
+        {isDiagramFile
+          ? "Script is composed client-side from the models and relationships currently on the canvas."
+          : <>Preview is client-side + dialect-agnostic. Use <strong>Export…</strong> for production-grade DDL.</>}
       </div>
     </PanelSection>
   );

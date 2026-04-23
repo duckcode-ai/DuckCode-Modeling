@@ -62,7 +62,7 @@ export default function ExportDdlDialog() {
       const fileName = String(activeFile.fullPath)
         .split("/").pop()
         .replace(/\.model\.ya?ml$/i, "") || "model";
-      const configured = projectConfig?.ddlDialects?.[dialect] || `ddl/${dialect}`;
+      const configured = projectConfig?.ddlDialects?.[dialect] || `DataLex/generated-sql/ddl/${dialect}`;
       const folder = String(configured).replace(/^\/+|\/+$/g, "");
       const outPath = `${String(projectPath).replace(/\/+$/, "")}/${folder}/${fileName}.sql`;
       await saveFileContent(outPath, `${sql}\n`);

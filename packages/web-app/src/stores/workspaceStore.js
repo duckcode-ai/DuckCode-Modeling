@@ -26,6 +26,7 @@ import {
 import { removeEntity } from "../lib/yamlRoundTrip";
 import { SAMPLE_MODEL } from "../sampleModel";
 import { normalizeImportedModelFileName } from "../lib/importModelName";
+import { normalizeDiagramYaml } from "../design/yamlPatch";
 import useHistoryStore, { fileKeyOf } from "./historyStore";
 // Path matching helpers live in lib/renamePaths so they can be unit
 // tested without the full zustand + API surface. See that file for
@@ -437,6 +438,17 @@ function joinPath(basePath, childPath) {
   return `${base}/${child}`;
 }
 
+function normalizeWorkspacePath(path) {
+  return String(path || "").replace(/\\/g, "/").replace(/^[/\\]+/, "");
+}
+
+function fileRefMatches(fileInfo, fileRef) {
+  const target = normalizeWorkspacePath(fileRef);
+  if (!target) return false;
+  const candidate = normalizeWorkspacePath(fileInfo?.fullPath || fileInfo?.path || fileInfo?.name || "");
+  return candidate === target;
+}
+
 function sanitizeModelStem(name, fallback = "model") {
   const text = String(name || "")
     .trim()
@@ -453,7 +465,9 @@ function buildDefaultDdlPath(projectPath, projectConfig, modelFullPath, dialect)
   const stem = sanitizeModelStem(fileName.replace(/\.model\.ya?ml$/i, ""), "model");
 
   const configured = projectConfig?.ddlDialects?.[dialect] || "";
-  const ddlFolder = configured ? String(configured).replace(/^\/+|\/+$/g, "") : `ddl/${dialect}`;
+  const ddlFolder = configured
+    ? String(configured).replace(/^\/+|\/+$/g, "")
+    : `DataLex/generated-sql/ddl/${dialect}`;
   return joinPath(base, `${ddlFolder}/${stem}.sql`);
 }
 function deriveModelNameFromPath(pathOrName) {
@@ -874,7 +888,7 @@ const useWorkspaceStore = create((set, get) => ({
     // Prefer an empty `.diagram.yaml` overview as the landing tab so the
     // user sees a blank "build your first diagram" canvas instead of
     // whichever source file happens to parse first. The api-server
-    // seeds `datalex/diagrams/overview.diagram.yaml` when none exists.
+    // seeds `diagrams/overview.diagram.yaml` when none exists.
     // Falls back to the previous staging → marts → anything ordering.
     const firstModel =
       docs.find((d) => /\.diagram\.ya?ml$/i.test(d.fullPath)) ||
@@ -918,9 +932,9 @@ const useWorkspaceStore = create((set, get) => ({
    * variant above:
    *   - `offlineMode` stays false
    *   - `activeProjectId` is set; `projects` list is refreshed
-   *   - each doc's `fullPath` is derived from `meta.datalex.dbt.source_path`
-   *     so Save All writes back to the *original* dbt file path (with
-   *     the original `.yml` extension), not a parallel `.yaml`
+   *   - each doc's `fullPath` stays inside the dedicated DataLex workspace
+   *     (`DataLex/` in the repo, exposed by the API as relative paths such
+   *     as `models/...` / `diagrams/...`)
    *   - every file is dirty (differs from disk) and localDocuments holds
    *     the in-memory edit buffer until the user clicks Save All
    *
@@ -937,25 +951,14 @@ const useWorkspaceStore = create((set, get) => ({
       throw new Error("loadDbtImportTreeAsProject: requires { id, path } project record.");
     }
 
-    // Rewrite each imported doc's path to match its original dbt file:
-    // `models/staging/stg_customers.yaml` (importer convention) →
-    // `models/staging/stg_customers.yml` (what's actually in the dbt repo).
-    // Source-path metadata is carried under `meta.datalex.dbt.source_path`
-    // when available; otherwise we fall back to the importer-written path.
-    const rewritePath = (rawPath, yamlText) => {
-      let preferred = String(rawPath || "").replace(/^[/\\]+/, "");
-      try {
-        const doc = parseYamlObjectSafe(yamlText);
-        const srcPath =
-          doc?.meta?.datalex?.dbt?.source_path ||
-          doc?.meta?.datalex?.dbt?.original_file_path;
-        if (srcPath && typeof srcPath === "string") {
-          preferred = srcPath.replace(/^[/\\]+/, "");
-        }
-      } catch (_) { /* fall through */ }
-      // dbt repos almost always use `.yml`; the importer emits `.yaml`.
-      // Normalise so the save destination matches what `git diff` expects.
-      // `.diagram.yaml` is a DataLex convention — keep the full extension.
+    // Keep every imported doc inside the dedicated DataLex workspace. The
+    // server already exposes paths relative to `DataLex/`, so the client only
+    // needs to normalize legacy `datalex/` prefixes and `.yaml` vs `.yml`.
+    const rewritePath = (rawPath) => {
+      const preferred = String(rawPath || "")
+        .replace(/^[/\\]+/, "")
+        .replace(/^datalex\//i, "")
+        .replace(/^DataLex\//i, "");
       if (/\.diagram\.ya?ml$/i.test(preferred)) return preferred;
       return preferred.replace(/\.yaml$/i, ".yml");
     };
@@ -966,7 +969,7 @@ const useWorkspaceStore = create((set, get) => ({
     const ts = Date.now();
     const docs = tree.map((entry, i) => {
       const content = String(entry.content || "");
-      const fullPath = rewritePath(entry.path || entry.fullPath, content);
+      const fullPath = rewritePath(entry.path || entry.fullPath);
       destCounts.set(fullPath, (destCounts.get(fullPath) || 0) + 1);
       const name = fullPath.split("/").pop() || `file-${i}.yml`;
       return {
@@ -1563,9 +1566,14 @@ const useWorkspaceStore = create((set, get) => ({
     if (saveKey && saveInFlight.has(saveKey)) return;
     if (saveKey) saveInFlight.add(saveKey);
 
+    const isDiagramFile = /\.diagram\.ya?ml$/i.test(String(activeFile.name || activeFile.fullPath || ""));
+    const contentToSave = isDiagramFile
+      ? (normalizeDiagramYaml(activeFileContent) || activeFileContent)
+      : activeFileContent;
+
     set({ loading: true, error: null, lastAutoGeneratedDdl: null, lastAutoGenerateError: null });
     try {
-      await saveFileContent(activeFile.fullPath, activeFileContent);
+      await saveFileContent(activeFile.fullPath, contentToSave);
 
       // Auto-generate baseline DDL on save (GitOps mode). We only do this for .model.yaml files
       // and only when the project has a default dialect set (from the connector pull flow).
@@ -1597,11 +1605,12 @@ const useWorkspaceStore = create((set, get) => ({
         const lookup = activeFile[key];
         const openTabs = (s.openTabs || []).map((t) =>
           t && t[key] === lookup
-            ? { ...t, content: activeFileContent, originalContent: activeFileContent }
+            ? { ...t, content: contentToSave, originalContent: contentToSave }
             : t,
         );
         return {
-          originalContent: activeFileContent,
+          activeFileContent: contentToSave,
+          originalContent: contentToSave,
           isDirty: false,
           loading: false,
           openTabs,
@@ -1705,8 +1714,8 @@ const useWorkspaceStore = create((set, get) => ({
     }
   },
 
-  /* Create a new .diagram.yaml file. Defaults to `datalex/diagrams/` to
-     match the conventional layout, but accepts `targetFolder` so the
+  /* Create a new .diagram.yaml file. Defaults to `diagrams/` inside the
+     dedicated DataLex workspace to match the conventional layout, but accepts `targetFolder` so the
      Explorer context-menu "New diagram here" can land it in the clicked
      folder instead. Target folder is a POSIX subpath relative to the
      project model root — same shape as Explorer node `path` values. */
@@ -1719,7 +1728,7 @@ const useWorkspaceStore = create((set, get) => ({
     const folder = String(targetFolder || "").replace(/^\/+|\/+$/g, "");
     const subpath = folder
       ? `${folder}/${clean}.diagram.yaml`
-      : `datalex/diagrams/${clean}.diagram.yaml`;
+      : `diagrams/${clean}.diagram.yaml`;
     const content =
       `kind: diagram\n` +
       `name: ${clean}\n` +
@@ -1779,6 +1788,86 @@ const useWorkspaceStore = create((set, get) => ({
       results.forEach(([k, v]) => { next[k] = v; });
       return { fileContentCache: next };
     });
+  },
+
+  /* Apply and persist a mutation to a non-active file referenced by the
+     current diagram. Used by diagram inspectors so editing a column on a
+     referenced entity writes back to the source model YAML, not the
+     `.diagram.yaml` wrapper file. */
+  mutateReferencedFile: async (fileRef, mutator) => {
+    const state = get();
+    const normalizedRef = normalizeWorkspacePath(fileRef);
+    if (!normalizedRef) {
+      throw new Error("Referenced file path is missing.");
+    }
+    if (typeof mutator !== "function") {
+      throw new Error("mutateReferencedFile requires a mutator function.");
+    }
+
+    const fromActive = fileRefMatches(state.activeFile, normalizedRef) ? state.activeFile : null;
+    const fromTabs = (state.openTabs || []).find((tab) => fileRefMatches(tab, normalizedRef)) || null;
+    const fromProject = (state.projectFiles || []).find((file) => fileRefMatches(file, normalizedRef)) || null;
+    const fromOffline = (state.localDocuments || []).find((doc) => fileRefMatches(doc, normalizedRef)) || null;
+    const targetFile = fromActive || fromTabs || fromProject || fromOffline;
+
+    let currentContent = null;
+    if (fromActive && typeof state.activeFileContent === "string") {
+      currentContent = state.activeFileContent;
+    } else if (typeof fromTabs?.content === "string") {
+      currentContent = fromTabs.content;
+    } else if (typeof state.fileContentCache?.[normalizedRef] === "string") {
+      currentContent = state.fileContentCache[normalizedRef];
+    } else if (state.offlineMode && typeof fromOffline?.content === "string") {
+      currentContent = fromOffline.content;
+    } else if (targetFile?.fullPath) {
+      const loaded = await fetchFileContent(targetFile.fullPath);
+      currentContent = String(loaded?.content ?? "");
+    }
+
+    if (typeof currentContent !== "string") {
+      throw new Error(`Could not load referenced file: ${fileRef}`);
+    }
+
+    const nextContent = await mutator(currentContent, targetFile);
+    if (typeof nextContent !== "string" || nextContent === currentContent) {
+      return { changed: false, file: targetFile, content: currentContent };
+    }
+
+    if (state.offlineMode) {
+      const nextDocs = (state.localDocuments || []).map((doc) =>
+        fileRefMatches(doc, normalizedRef) ? { ...doc, content: nextContent } : doc
+      );
+      set({ localDocuments: nextDocs });
+      get().saveOfflineDocs();
+    } else {
+      if (!targetFile?.fullPath) {
+        throw new Error(`Could not resolve on-disk path for referenced file: ${fileRef}`);
+      }
+      await saveFileContent(targetFile.fullPath, nextContent);
+    }
+
+    set((s) => {
+      const nextTabs = (s.openTabs || []).map((tab) => (
+        fileRefMatches(tab, normalizedRef)
+          ? { ...tab, content: nextContent, originalContent: nextContent }
+          : tab
+      ));
+      const nextCache = { ...(s.fileContentCache || {}), [normalizedRef]: nextContent };
+      const activeMatches = fileRefMatches(s.activeFile, normalizedRef);
+      return {
+        openTabs: nextTabs,
+        fileContentCache: nextCache,
+        activeFile: activeMatches && s.activeFile
+          ? { ...s.activeFile, content: nextContent }
+          : s.activeFile,
+        activeFileContent: activeMatches ? nextContent : s.activeFileContent,
+        originalContent: activeMatches ? nextContent : s.originalContent,
+        isDirty: activeMatches ? false : s.isDirty,
+        modelGraphVersion: (s.modelGraphVersion || 0) + 1,
+      };
+    });
+
+    return { changed: true, file: targetFile, content: nextContent };
   },
 
   /* Append one or more file references to the active diagram buffer.

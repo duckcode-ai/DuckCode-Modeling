@@ -4,6 +4,7 @@ import Icon from "./icons";
 import { NOTATION, FK_COLOR_MAP } from "./notation";
 import useUiStore from "../stores/uiStore";
 import NodeErrorBoundary from "../components/shared/NodeErrorBoundary";
+import { openRelationshipEditor } from "./relationshipEditor";
 
 // Visual lexicon for the git-diff overlay (v0.4.2). Kept as a module
 // constant so Legend / tests / future tooltip work can import the same
@@ -14,10 +15,65 @@ const DIFF_COLORS = {
   removed:  { stroke: "#ef4444", fill: "rgba(239,68,68,0.10)",  label: "DEL", title: "Removed since baseline" },
 };
 
-function TableCard({ table, selected, onSelect, onMove, onMoveEnd, onStartConnect, diffStatus }) {
+const DEFAULT_WORLD_WIDTH = 2400;
+const DEFAULT_WORLD_HEIGHT = 1600;
+const WORLD_PADDING = 180;
+const MIN_ZOOM = 0.5;
+const MAX_ZOOM = 2.25;
+
+function estimateTableBounds(table) {
+  const width = Number.isFinite(Number(table?.width)) ? Number(table.width) : 240;
+  const rowCount = Array.isArray(table?.columns) ? table.columns.length : 0;
+  const bodyHeight = Math.max(1, rowCount) * 26;
+  const footerHeight = table?.kind === "ENUM" ? 0 : 28;
+  return {
+    width,
+    height: 32 + bodyHeight + footerHeight + 12,
+  };
+}
+
+function getWorldBounds(tables) {
+  if (!Array.isArray(tables) || tables.length === 0) {
+    return {
+      minX: 0,
+      minY: 0,
+      maxX: DEFAULT_WORLD_WIDTH,
+      maxY: DEFAULT_WORLD_HEIGHT,
+      width: DEFAULT_WORLD_WIDTH,
+      height: DEFAULT_WORLD_HEIGHT,
+    };
+  }
+  let minX = Infinity;
+  let minY = Infinity;
+  let maxX = 0;
+  let maxY = 0;
+  tables.forEach((table) => {
+    const x = Number.isFinite(Number(table?.x)) ? Number(table.x) : 0;
+    const y = Number.isFinite(Number(table?.y)) ? Number(table.y) : 0;
+    const bounds = estimateTableBounds(table);
+    minX = Math.min(minX, x);
+    minY = Math.min(minY, y);
+    maxX = Math.max(maxX, x + bounds.width);
+    maxY = Math.max(maxY, y + bounds.height);
+  });
+  const paddedWidth = Math.max(DEFAULT_WORLD_WIDTH, maxX + WORLD_PADDING);
+  const paddedHeight = Math.max(DEFAULT_WORLD_HEIGHT, maxY + WORLD_PADDING);
+  return {
+    minX: Number.isFinite(minX) ? minX : 0,
+    minY: Number.isFinite(minY) ? minY : 0,
+    maxX,
+    maxY,
+    width: paddedWidth,
+    height: paddedHeight,
+  };
+}
+
+function TableCard({ table, selected, onSelect, onMove, onMoveEnd, onStartConnect, diffStatus, zoom }) {
   const I = Icon;
   const cardRef = React.useRef(null);
   const drag = React.useRef(null);
+
+  const hasValue = (value) => value != null && String(value).trim() !== "";
 
   const onMouseDown = (e) => {
     // Dragging from a column's key dot starts a relationship draw instead
@@ -36,12 +92,16 @@ function TableCard({ table, selected, onSelect, onMove, onMoveEnd, onStartConnec
     }
     if (e.target.closest(".tc-badges, button, .tc-colflags")) return;
     const rect = cardRef.current.getBoundingClientRect();
-    drag.current = { dx: e.clientX - rect.left, dy: e.clientY - rect.top, moved: false };
+    drag.current = { dx: (e.clientX - rect.left) / zoom, dy: (e.clientY - rect.top) / zoom, moved: false };
     onSelect({ type: "table", id: table.id });
     const onMove2 = (ev) => {
       const parent = cardRef.current.parentElement.getBoundingClientRect();
       drag.current.moved = true;
-      onMove(table.id, ev.clientX - parent.left - drag.current.dx, ev.clientY - parent.top - drag.current.dy);
+      onMove(
+        table.id,
+        (ev.clientX - parent.left) / zoom - drag.current.dx,
+        (ev.clientY - parent.top) / zoom - drag.current.dy,
+      );
     };
     const onUp = () => {
       window.removeEventListener("mousemove", onMove2);
@@ -58,9 +118,12 @@ function TableCard({ table, selected, onSelect, onMove, onMoveEnd, onStartConnec
 
   const colFlags = (c) => {
     const flags = [];
+    if (c.pk) flags.push({ k: "PK", I: I.Key, title: "PRIMARY KEY" });
+    if (c.fk) flags.push({ k: "FK", I: I.Link, title: `FOREIGN KEY${c.fk ? ` → ${c.fk}` : ""}` });
+    if (c.nn) flags.push({ k: "NN", I: I.NotNull, title: "NOT NULL" });
     if (c.unique && !c.pk) flags.push({ k: "UQ", I: I.Unique, title: "UNIQUE" });
     if (c.check) flags.push({ k: "CK", I: I.Check2, title: "CHECK: " + c.check });
-    if (c.default) flags.push({ k: "DF", I: I.Default, title: "DEFAULT " + c.default });
+    if (hasValue(c.default)) flags.push({ k: "DF", I: I.Default, title: "DEFAULT " + c.default });
     if (c.generated) flags.push({ k: "GN", I: I.Generated, title: "GENERATED" });
     return flags;
   };
@@ -109,7 +172,7 @@ function TableCard({ table, selected, onSelect, onMove, onMoveEnd, onStartConnec
       <div className="tc-rows">
         {table.columns.map((c) => {
           const isPk = c.pk;
-          const isFk = !!c.fk;
+          const isFk = !!c.fk || !!c.semanticFk;
           const flags = colFlags(c);
           return (
             <div key={c.name} className={`tc-row ${isPk ? "pk" : ""}`} data-col={c.name}>
@@ -126,9 +189,11 @@ function TableCard({ table, selected, onSelect, onMove, onMoveEnd, onStartConnec
                     <f.I />
                   </span>
                 ))}
-                <span className={`tc-nn ${c.nn ? "required" : ""}`} title={c.nn ? "NOT NULL" : "nullable"}>
-                  {c.nn ? "NN" : "·"}
-                </span>
+                {flags.length === 0 && (
+                  <span className="tc-nn" title="No constraints">
+                    ·
+                  </span>
+                )}
               </div>
             </div>
           );
@@ -202,28 +267,34 @@ function drawEnd(x, y, side, spec, idPrefix, active, dimmed) {
   );
 }
 
-function Relationships({ tables, relationships, selected, onSelect, hovered, setHovered }) {
+function Relationships({ tables, relationships, selected, onSelect, hovered, setHovered, width, height, zoom, stageRef }) {
   const [anchors, setAnchors] = React.useState({});
+  const openModal = useUiStore((s) => s.openModal);
 
   const recalc = React.useCallback(() => {
     const next = {};
-    const inner = document.querySelector(".canvas-inner");
+    const inner = stageRef.current;
     if (!inner) return;
     const innerRect = inner.getBoundingClientRect();
     tables.forEach((t) => {
       const el = document.getElementById(`tc-${t.id}`);
       if (!el) return;
       const r = el.getBoundingClientRect();
-      next[t.id] = { x: r.left - innerRect.left, y: r.top - innerRect.top, w: r.width, h: r.height };
+      next[t.id] = {
+        x: (r.left - innerRect.left) / zoom,
+        y: (r.top - innerRect.top) / zoom,
+        w: r.width / zoom,
+        h: r.height / zoom,
+      };
       t.columns.forEach((c) => {
         const row = el.querySelector(`.tc-row[data-col="${c.name}"]`);
         if (!row) return;
         const rr = row.getBoundingClientRect();
-        next[`${t.id}.${c.name}`] = { cy: rr.top + rr.height / 2 - innerRect.top };
+        next[`${t.id}.${c.name}`] = { cy: (rr.top + rr.height / 2 - innerRect.top) / zoom };
       });
     });
     setAnchors(next);
-  }, [tables]);
+  }, [stageRef, tables, zoom]);
 
   React.useEffect(() => { recalc(); }, [recalc]);
   React.useEffect(() => {
@@ -294,7 +365,7 @@ function Relationships({ tables, relationships, selected, onSelect, hovered, set
   };
 
   return (
-    <svg className="rel-svg" width="2400" height="1600">
+    <svg className="rel-svg" width={width} height={height}>
       {relationships.map((r) => {
         const ports = autoPorts(r.from, r.to);
         if (!ports) return null;
@@ -309,6 +380,11 @@ function Relationships({ tables, relationships, selected, onSelect, hovered, set
         return (
           <g key={r.id}
              onClick={(e) => { e.stopPropagation(); onSelect({ type: "rel", id: r.id }); }}
+             onDoubleClick={(e) => {
+               e.stopPropagation();
+               onSelect({ type: "rel", id: r.id });
+               openRelationshipEditor(openModal, r, tables);
+             }}
              onMouseEnter={() => setHovered(r.id)}
              onMouseLeave={() => setHovered(null)}
              style={{ cursor: "pointer" }}>
@@ -450,7 +526,13 @@ export default function Canvas({ tables, setTables, relationships, areas, select
   const diffEntities = useUiStore((s) => s.diffState?.entities) || {};
   const I = Icon;
   const [hovered, setHovered] = React.useState(null);
-  const innerRef = React.useRef(null);
+  const viewportRef = React.useRef(null);
+  const stageRef = React.useRef(null);
+  const [zoom, setZoom] = React.useState(1);
+  const [viewportState, setViewportState] = React.useState({ left: 0, top: 0, width: 1, height: 1 });
+  const world = React.useMemo(() => getWorldBounds(tables), [tables]);
+  const scaledWidth = Math.max(world.width * zoom, viewportState.width || 0);
+  const scaledHeight = Math.max(world.height * zoom, viewportState.height || 0);
 
   // Live connect-drag state: set on mousedown over a column key, cleared on
   // mouseup. While active, we draw a temporary rubber-band line from the
@@ -464,14 +546,14 @@ export default function Canvas({ tables, setTables, relationships, areas, select
   };
 
   const handleStartConnect = React.useCallback((seed, downEvent) => {
-    const inner = innerRef.current;
-    if (!inner) return;
-    const rect = inner.getBoundingClientRect();
+    const stage = stageRef.current;
+    if (!stage) return;
+    const rect = stage.getBoundingClientRect();
     // Start coords: the column's key dot, converted to canvas-inner space.
     const keyEl = downEvent.target.closest(".tc-key");
     const keyRect = keyEl?.getBoundingClientRect();
-    const startX = keyRect ? keyRect.left + keyRect.width / 2 - rect.left : downEvent.clientX - rect.left;
-    const startY = keyRect ? keyRect.top + keyRect.height / 2 - rect.top : downEvent.clientY - rect.top;
+    const startX = keyRect ? (keyRect.left + keyRect.width / 2 - rect.left) / zoom : (downEvent.clientX - rect.left) / zoom;
+    const startY = keyRect ? (keyRect.top + keyRect.height / 2 - rect.top) / zoom : (downEvent.clientY - rect.top) / zoom;
 
     setConnectDrag({
       ...seed,
@@ -480,8 +562,8 @@ export default function Canvas({ tables, setTables, relationships, areas, select
     });
 
     const onMove = (ev) => {
-      const r = inner.getBoundingClientRect();
-      setConnectDrag((prev) => prev ? { ...prev, curX: ev.clientX - r.left, curY: ev.clientY - r.top } : prev);
+      const r = stage.getBoundingClientRect();
+      setConnectDrag((prev) => prev ? { ...prev, curX: (ev.clientX - r.left) / zoom, curY: (ev.clientY - r.top) / zoom } : prev);
     };
     const onUp = (ev) => {
       window.removeEventListener("mousemove", onMove);
@@ -509,30 +591,80 @@ export default function Canvas({ tables, setTables, relationships, areas, select
     };
     window.addEventListener("mousemove", onMove);
     window.addEventListener("mouseup", onUp);
-  }, [onConnect]);
+  }, [onConnect, zoom]);
+
+  const syncViewport = React.useCallback(() => {
+    const viewport = viewportRef.current;
+    if (!viewport) return;
+    setViewportState({
+      left: viewport.scrollLeft,
+      top: viewport.scrollTop,
+      width: viewport.clientWidth,
+      height: viewport.clientHeight,
+    });
+  }, []);
+
+  React.useEffect(() => {
+    syncViewport();
+    const viewport = viewportRef.current;
+    if (!viewport) return undefined;
+    viewport.addEventListener("scroll", syncViewport, { passive: true });
+    window.addEventListener("resize", syncViewport);
+    return () => {
+      viewport.removeEventListener("scroll", syncViewport);
+      window.removeEventListener("resize", syncViewport);
+    };
+  }, [syncViewport]);
+
+  const applyZoom = React.useCallback((nextZoom) => {
+    const viewport = viewportRef.current;
+    if (!viewport) return;
+    const clamped = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, nextZoom));
+    const focusX = viewport.clientWidth / 2;
+    const focusY = viewport.clientHeight / 2;
+    const worldX = (viewport.scrollLeft + focusX) / zoom;
+    const worldY = (viewport.scrollTop + focusY) / zoom;
+    setZoom(clamped);
+    window.requestAnimationFrame(() => {
+      viewport.scrollLeft = Math.max(0, worldX * clamped - focusX);
+      viewport.scrollTop = Math.max(0, worldY * clamped - focusY);
+      syncViewport();
+    });
+  }, [syncViewport, zoom]);
 
   // Fit: scroll the .canvas viewport so the bounding box of all tables is in
-  // view. We use the prop-provided onFit if the host wants to do something
-  // smarter (e.g., zoom), otherwise we approximate by scrolling to the
-  // top-left of the bounding box with a 32px padding.
+  // view. The legacy canvas used to only scroll to the top-left; now it
+  // computes a real zoom-to-fit and centers the model in the viewport.
   const handleFit = React.useCallback(() => {
     if (onFit) { onFit(); return; }
-    const inner = innerRef.current;
-    if (!inner || !tables.length) return;
-    const viewport = inner.parentElement; // .canvas scroll container
+    const viewport = viewportRef.current;
     if (!viewport) return;
-    let minX = Infinity, minY = Infinity;
-    for (const t of tables) {
-      if (typeof t.x === "number" && t.x < minX) minX = t.x;
-      if (typeof t.y === "number" && t.y < minY) minY = t.y;
-    }
-    if (!Number.isFinite(minX) || !Number.isFinite(minY)) return;
-    viewport.scrollTo({
-      left: Math.max(0, minX - 32),
-      top: Math.max(0, minY - 32),
-      behavior: "smooth",
+    if (!tables.length) return;
+    const padding = 48;
+    const rawWidth = Math.max(1, world.maxX - world.minX + padding * 2);
+    const rawHeight = Math.max(1, world.maxY - world.minY + padding * 2);
+    const fitZoom = Math.max(
+      MIN_ZOOM,
+      Math.min(
+        MAX_ZOOM,
+        (viewport.clientWidth - padding * 2) / rawWidth,
+        (viewport.clientHeight - padding * 2) / rawHeight,
+      ),
+    );
+    setZoom(fitZoom);
+    window.requestAnimationFrame(() => {
+      const left = Math.max(0, (world.minX - padding) * fitZoom - Math.max(0, viewport.clientWidth - rawWidth * fitZoom) / 2);
+      const top = Math.max(0, (world.minY - padding) * fitZoom - Math.max(0, viewport.clientHeight - rawHeight * fitZoom) / 2);
+      viewport.scrollTo({ left, top, behavior: "smooth" });
+      syncViewport();
     });
-  }, [onFit, tables]);
+  }, [onFit, syncViewport, tables.length, world]);
+
+  const handleAutoLayoutClick = React.useCallback(async () => {
+    if (!onAutoLayout) return;
+    await onAutoLayout();
+    window.requestAnimationFrame(() => handleFit());
+  }, [handleFit, onAutoLayout]);
 
   // Keyboard Delete / Backspace → delete the currently selected entity or
   // relationship. Ignored while the user is typing in an input/textarea or a
@@ -574,82 +706,94 @@ export default function Canvas({ tables, setTables, relationships, areas, select
         </div>
         <div className="canvas-actions">
           <button className="canvas-btn" onClick={() => handleFit()} title="Fit all entities into view"><I.Fit />Fit</button>
-          <button className="canvas-btn" onClick={() => onAutoLayout && onAutoLayout()} title="Auto-layout (ELK)"><I.Grid />Auto-layout</button>
+          <button className="canvas-btn" onClick={() => handleAutoLayoutClick()} title="Auto-layout (ELK)"><I.Grid />Auto-layout</button>
           <button className="canvas-btn" onClick={() => onExport && onExport()} title="Export DDL / SQL"><I.Download />Export</button>
           <button className="canvas-btn primary" onClick={() => onExport && onExport()}><I.Sparkle />Generate SQL</button>
         </div>
       </div>
 
-      <div className="canvas">
+      <div className="canvas" ref={viewportRef}>
         <div
           className="canvas-inner"
-          ref={innerRef}
+          style={{ width: scaledWidth, height: scaledHeight }}
           onClick={(e) => {
-            if (e.target.classList.contains("canvas-inner")) onSelect(null);
+            if (e.target === e.currentTarget) onSelect(null);
           }}
-          onDragOver={onDropYamlSource ? (e) => {
-            // Accept the drag only if it advertises a YAML source payload —
-            // plain file-path drags (folder moves) fall through.
-            if (Array.from(e.dataTransfer.types || []).includes("application/x-datalex-yaml-source")) {
-              e.preventDefault();
-              e.dataTransfer.dropEffect = "copy";
-            }
-          } : undefined}
-          onDrop={onDropYamlSource ? (e) => {
-            const raw = e.dataTransfer.getData("application/x-datalex-yaml-source");
-            if (!raw) return;
-            e.preventDefault();
-            let payload;
-            try { payload = JSON.parse(raw); } catch (_err) { return; }
-            if (!payload || !payload.path) return;
-            const inner = innerRef.current;
-            const rect = inner?.getBoundingClientRect();
-            const x = rect ? Math.max(0, e.clientX - rect.left) : 60;
-            const y = rect ? Math.max(0, e.clientY - rect.top) : 60;
-            onDropYamlSource({ path: payload.path, x, y });
-          } : undefined}
         >
-          <SubjectAreas areas={areas} />
-          <Relationships tables={tables} relationships={relationships}
-                         selected={selected} onSelect={onSelect}
-                         hovered={hovered} setHovered={setHovered} />
-          {tables.map((t) => (
-            <NodeErrorBoundary
-              key={t.id}
-              label={t?.name || t?.id || "entity"}
-              style={{ position: "absolute", left: t?.x ?? 40, top: t?.y ?? 40 }}
-            >
-              <TableCard table={t}
-                         selected={selected?.type === "table" && selected.id === t.id}
-                         onSelect={onSelect}
-                         onMove={onMoveTable}
-                         onMoveEnd={onMoveEnd}
-                         onStartConnect={handleStartConnect}
-                         diffStatus={diffEntities[t.name] || diffEntities[t.id] || null} />
-            </NodeErrorBoundary>
-          ))}
-          {connectDrag && (
-            <svg
-              className="rel-svg"
-              width="2400"
-              height="1600"
-              style={{ pointerEvents: "none", position: "absolute", inset: 0 }}
-              aria-hidden="true"
-            >
-              <line
-                x1={connectDrag.startX}
-                y1={connectDrag.startY}
-                x2={connectDrag.curX}
-                y2={connectDrag.curY}
-                stroke="var(--accent)"
-                strokeWidth="1.6"
-                strokeDasharray="4 3"
-                strokeLinecap="round"
-              />
-              <circle cx={connectDrag.curX} cy={connectDrag.curY} r="3.5"
-                      fill="var(--accent)" stroke="var(--bg-canvas)" strokeWidth="1.5" />
-            </svg>
-          )}
+          <div
+            className="canvas-stage"
+            ref={stageRef}
+            style={{ width: world.width, height: world.height, transform: `scale(${zoom})`, transformOrigin: "top left" }}
+            onClick={(e) => {
+              if (e.target === e.currentTarget) onSelect(null);
+            }}
+            onDragOver={onDropYamlSource ? (e) => {
+              // Accept the drag only if it advertises a YAML source payload —
+              // plain file-path drags (folder moves) fall through.
+              if (Array.from(e.dataTransfer.types || []).includes("application/x-datalex-yaml-source")) {
+                e.preventDefault();
+                e.dataTransfer.dropEffect = "copy";
+              }
+            } : undefined}
+            onDrop={onDropYamlSource ? (e) => {
+              const raw = e.dataTransfer.getData("application/x-datalex-yaml-source");
+              if (!raw) return;
+              e.preventDefault();
+              let payload;
+              try { payload = JSON.parse(raw); } catch (_err) { return; }
+              if (!payload || !payload.path) return;
+              const stage = stageRef.current;
+              const rect = stage?.getBoundingClientRect();
+              const x = rect ? Math.max(0, (e.clientX - rect.left) / zoom) : 60;
+              const y = rect ? Math.max(0, (e.clientY - rect.top) / zoom) : 60;
+              onDropYamlSource({ path: payload.path, x, y });
+            } : undefined}
+          >
+            <SubjectAreas areas={areas} />
+            <Relationships tables={tables} relationships={relationships}
+                           selected={selected} onSelect={onSelect}
+                           hovered={hovered} setHovered={setHovered}
+                           width={world.width} height={world.height}
+                           zoom={zoom} stageRef={stageRef} />
+            {tables.map((t) => (
+              <NodeErrorBoundary
+                key={t.id}
+                label={t?.name || t?.id || "entity"}
+                style={{ position: "absolute", left: t?.x ?? 40, top: t?.y ?? 40 }}
+              >
+                <TableCard table={t}
+                           selected={selected?.type === "table" && selected.id === t.id}
+                           onSelect={onSelect}
+                           onMove={onMoveTable}
+                           onMoveEnd={onMoveEnd}
+                           onStartConnect={handleStartConnect}
+                           diffStatus={diffEntities[t.name] || diffEntities[t.id] || null}
+                           zoom={zoom} />
+              </NodeErrorBoundary>
+            ))}
+            {connectDrag && (
+              <svg
+                className="rel-svg"
+                width={world.width}
+                height={world.height}
+                style={{ pointerEvents: "none", position: "absolute", inset: 0 }}
+                aria-hidden="true"
+              >
+                <line
+                  x1={connectDrag.startX}
+                  y1={connectDrag.startY}
+                  x2={connectDrag.curX}
+                  y2={connectDrag.curY}
+                  stroke="var(--accent)"
+                  strokeWidth="1.6"
+                  strokeDasharray="4 3"
+                  strokeLinecap="round"
+                />
+                <circle cx={connectDrag.curX} cy={connectDrag.curY} r="3.5"
+                        fill="var(--accent)" stroke="var(--bg-canvas)" strokeWidth="1.5" />
+              </svg>
+            )}
+          </div>
         </div>
       </div>
 
@@ -661,22 +805,30 @@ export default function Canvas({ tables, setTables, relationships, areas, select
           {tables.map((t) => (
             <div key={t.id} className="mm-table"
                  style={{
-                   left: `${(t.x / 2400) * 100}%`,
-                   top: `${(t.y / 1600) * 100}%`,
-                   width: `${(240 / 2400) * 100}%`,
-                   height: `${((t.columns.length * 20 + 30) / 1600) * 100}%`,
+                   left: `${(t.x / Math.max(1, world.width)) * 100}%`,
+                   top: `${(t.y / Math.max(1, world.height)) * 100}%`,
+                   width: `${(estimateTableBounds(t).width / Math.max(1, world.width)) * 100}%`,
+                   height: `${(estimateTableBounds(t).height / Math.max(1, world.height)) * 100}%`,
                    background: `var(--cat-${t.cat})`,
                    opacity: 0.6,
                  }} />
           ))}
-          <div className="mm-viewport" style={{ left: "4%", top: "2%", width: "58%", height: "48%" }} />
+          <div
+            className="mm-viewport"
+            style={{
+              left: `${(viewportState.left / Math.max(1, world.width * zoom)) * 100}%`,
+              top: `${(viewportState.top / Math.max(1, world.height * zoom)) * 100}%`,
+              width: `${(viewportState.width / Math.max(1, world.width * zoom)) * 100}%`,
+              height: `${(viewportState.height / Math.max(1, world.height * zoom)) * 100}%`,
+            }}
+          />
         </div>
       </div>
 
       <div className="zoom-bar">
-        <button className="zoom-btn"><I.Minus /></button>
-        <div className="zoom-level">100%</div>
-        <button className="zoom-btn"><I.Plus /></button>
+        <button className="zoom-btn" title="Zoom out" onClick={() => applyZoom(zoom - 0.1)}><I.Minus /></button>
+        <div className="zoom-level">{Math.round(zoom * 100)}%</div>
+        <button className="zoom-btn" title="Zoom in" onClick={() => applyZoom(zoom + 0.1)}><I.Plus /></button>
         <button className="zoom-btn" title="Fit" onClick={() => handleFit()}><I.Fit /></button>
       </div>
     </div>

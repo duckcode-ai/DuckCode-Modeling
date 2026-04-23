@@ -10,12 +10,13 @@
  * columns. That keeps it fast — one dialog, enter-to-submit.
  */
 import React, { useState } from "react";
-import { GitBranch, AlertCircle, Link2 } from "lucide-react";
+import { GitBranch, AlertCircle, Link2, ArrowRightLeft } from "lucide-react";
 import Modal from "./Modal";
 import useUiStore from "../../stores/uiStore";
 import useWorkspaceStore from "../../stores/workspaceStore";
 import { addRelationship } from "../../lib/yamlRoundTrip";
 import { patchRelationship, addDiagramRelationship } from "../../design/yamlPatch";
+import { relationCardinalityValue } from "../../design/relationshipEditor";
 
 const CARDINALITIES = [
   { id: "one_to_one",   label: "One-to-one",   sub: "1 : 1" },
@@ -39,6 +40,8 @@ function defaultRelName(fromEntity, toEntity) {
 
 export default function NewRelationshipDialog() {
   const { closeModal, addToast, modalPayload } = useUiStore();
+  const editMode = modalPayload?.mode === "edit";
+  const editingRelationship = editMode ? (modalPayload?.relationship || null) : null;
   // Endpoint source: a drag on the canvas pre-fills from/to/columns and the
   // dialog is a one-pane confirmation. The toolbar / command-palette / right-
   // click paths send `tables:[{id,name,columns:[{name}]}]` in the payload and
@@ -54,12 +57,19 @@ export default function NewRelationshipDialog() {
   const [toEntity, setToEntity] = useState(initToEntity);
   const [toColumn, setToColumn] = useState(initToColumn);
 
-  const [name, setName] = useState(() => defaultRelName(initFromEntity, initToEntity));
-  const [cardinality, setCardinality] = useState("many_to_one");
-  const [identifying, setIdentifying] = useState(false);
-  const [optional, setOptional] = useState(false);
-  const [onDelete, setOnDelete] = useState("");
+  const [name, setName] = useState(() => String(modalPayload?.name || defaultRelName(initFromEntity, initToEntity)));
+  const [cardinality, setCardinality] = useState(String(modalPayload?.cardinality || relationCardinalityValue(editingRelationship) || "many_to_one"));
+  const [identifying, setIdentifying] = useState(!!modalPayload?.identifying);
+  const [optional, setOptional] = useState(!!modalPayload?.optional);
+  const [onDelete, setOnDelete] = useState(String(modalPayload?.onDelete || ""));
   const [error, setError] = useState("");
+
+  const handleSwapEndpoints = React.useCallback(() => {
+    setFromEntity(toEntity);
+    setFromColumn(toColumn);
+    setToEntity(fromEntity);
+    setToColumn(fromColumn);
+  }, [fromColumn, fromEntity, toColumn, toEntity]);
 
   // When the user picks entities in picker mode, refresh the default name.
   React.useEffect(() => {
@@ -123,6 +133,7 @@ export default function NewRelationshipDialog() {
     setError("");
 
     const s = useWorkspaceStore.getState();
+    const targetName = name.trim() || editingRelationship?.name || defaultRelName(fromEntity, toEntity);
     // Detect diagram mode: when the active file is a .diagram.yaml, the FK
     // should land in the diagram's top-level `relationships:` block — not
     // injected into whichever referenced model file. Diagram YAML doesn't
@@ -131,9 +142,73 @@ export default function NewRelationshipDialog() {
     const activeName = String(s.activeFile?.name || "");
     const isDiagram = /\.diagram\.ya?ml$/i.test(activeName);
 
+    if (editMode) {
+      if (!editingRelationship) {
+        setError("Missing relationship metadata for edit.");
+        return;
+      }
+      if (editingRelationship?._origin === "field_fk") {
+        setError("This relationship comes from a foreign-key field. Edit the column FK in the source model instead.");
+        return;
+      }
+      const patch = {
+        name: targetName,
+        from: `${fromEntity}.${fromColumn}`,
+        to: `${toEntity}.${toColumn}`,
+        cardinality,
+        identifying,
+        optional,
+        on_delete: onDelete || undefined,
+        _match: {
+          from: `${editingRelationship?._fromEntityName || editingRelationship?.from?.table || ""}.${editingRelationship?.from?.col || ""}`,
+          to: `${editingRelationship?._toEntityName || editingRelationship?.to?.table || ""}.${editingRelationship?.to?.col || ""}`,
+        },
+      };
+      const applyPatch = (content) => patchRelationship(content, editingRelationship.name, patch);
+
+      if (editingRelationship?._origin === "model_relationship" && editingRelationship?._sourceFile) {
+        s.mutateReferencedFile(editingRelationship._sourceFile, applyPatch)
+          .then((result) => {
+            if (!result?.changed) {
+              setError("Could not update the relationship in its source YAML.");
+              return;
+            }
+            addToast({
+              type: "success",
+              message: `Updated ${fromEntity}.${fromColumn} → ${toEntity}.${toColumn}.`,
+            });
+            closeModal();
+          })
+          .catch((err) => {
+            setError(err?.message || String(err));
+          });
+        return;
+      }
+
+      const next = applyPatch(s.activeFileContent);
+      if (!next) {
+        setError("Could not update the relationship in the active YAML.");
+        return;
+      }
+      if (next === s.activeFileContent) {
+        addToast({ type: "info", message: "No relationship changes to save." });
+        closeModal();
+        return;
+      }
+      s.updateContent(next);
+      s.flushAutosave?.().catch(() => {});
+      s.bumpModelGraphVersion?.();
+      addToast({
+        type: "success",
+        message: `Updated ${fromEntity}.${fromColumn} → ${toEntity}.${toColumn}.`,
+      });
+      closeModal();
+      return;
+    }
+
     if (isDiagram) {
       const next = addDiagramRelationship(s.activeFileContent, {
-        name: name.trim(),
+        name: targetName,
         from: { entity: fromEntity, field: fromColumn },
         to: { entity: toEntity, field: toColumn },
         cardinality,
@@ -149,6 +224,8 @@ export default function NewRelationshipDialog() {
         return;
       }
       s.updateContent(next);
+      s.flushAutosave?.().catch(() => {});
+      s.bumpModelGraphVersion?.();
       addToast({
         type: "success",
         message: `Linked ${fromEntity}.${fromColumn} → ${toEntity}.${toColumn} (diagram).`,
@@ -163,7 +240,7 @@ export default function NewRelationshipDialog() {
     const to = `${toEntity}.${toColumn}`;
     const { yaml: next, error: err } = addRelationship(
       s.activeFileContent,
-      name.trim(),
+      targetName,
       from,
       to,
       cardinality,
@@ -179,7 +256,7 @@ export default function NewRelationshipDialog() {
     // helper rather than expanding addRelationship's signature.
     let yamlOut = next;
     if (identifying || optional || onDelete) {
-      const patched = patchRelationship(yamlOut, name.trim(), {
+      const patched = patchRelationship(yamlOut, targetName, {
         identifying: identifying ? true : undefined,
         optional: optional ? true : undefined,
         on_delete: onDelete || undefined,
@@ -188,6 +265,8 @@ export default function NewRelationshipDialog() {
     }
 
     s.updateContent(yamlOut);
+    s.flushAutosave?.().catch(() => {});
+    s.bumpModelGraphVersion?.();
     addToast({
       type: "success",
       message: `Linked ${fromEntity}.${fromColumn} → ${toEntity}.${toColumn}.`,
@@ -201,7 +280,7 @@ export default function NewRelationshipDialog() {
     return (
       <Modal
         icon={<GitBranch size={14} />}
-        title="New relationship"
+        title={editMode ? "Edit relationship" : "New relationship"}
         size="md"
         onClose={closeModal}
         footer={<button type="button" className="panel-btn" onClick={closeModal}>Close</button>}
@@ -217,8 +296,8 @@ export default function NewRelationshipDialog() {
   return (
     <Modal
       icon={<GitBranch size={14} />}
-      title="New relationship"
-      subtitle="Declare a foreign-key edge between two entities. Writes to model YAML."
+      title={editMode ? "Edit relationship" : "New relationship"}
+      subtitle={editMode ? "Update endpoints, cardinality, and options for this relationship." : "Declare a foreign-key edge between two entities. Writes to model YAML."}
       size="md"
       onClose={closeModal}
       footer={
@@ -230,14 +309,14 @@ export default function NewRelationshipDialog() {
             className="panel-btn primary"
             disabled={!canSubmit || !!endpointError}
           >
-            Create
+            {editMode ? "Save" : "Create"}
           </button>
         </>
       }
     >
       <form id="new-rel-form" onSubmit={handleSubmit} style={{ display: "contents" }}>
         {/* Endpoint picker (toolbar / command-palette entry) OR summary (drag). */}
-        {pickableTables ? (
+        {pickableTables || editMode ? (
           <div className="dlx-modal-section" style={{ marginBottom: 14 }}>
             <label className="dlx-modal-field-label">Endpoints</label>
             <div style={{ display: "grid", gridTemplateColumns: "1fr auto 1fr", gap: 8, alignItems: "end" }}>
@@ -275,7 +354,19 @@ export default function NewRelationshipDialog() {
                 </select>
               </div>
 
-              <Link2 size={14} style={{ color: "var(--text-tertiary)", marginBottom: 10 }} />
+              <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 6, marginBottom: 10 }}>
+                <button
+                  type="button"
+                  className="panel-btn"
+                  onClick={handleSwapEndpoints}
+                  title="Swap relationship direction"
+                  disabled={!fromEntity || !toEntity}
+                  style={{ padding: "6px 8px" }}
+                >
+                  <ArrowRightLeft size={12} />
+                </button>
+                <Link2 size={14} style={{ color: "var(--text-tertiary)" }} />
+              </div>
 
               {/* To side */}
               <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
@@ -376,6 +467,36 @@ export default function NewRelationshipDialog() {
                 </button>
               );
             })}
+          </div>
+        </div>
+
+        <div className="dlx-modal-section">
+          <label className="dlx-modal-field-label">Preview</label>
+          <div
+            style={{
+              display: "grid",
+              gap: 8,
+              padding: "10px 12px",
+              background: "var(--bg-2)",
+              border: "1px solid var(--border-default)",
+              borderRadius: 8,
+            }}
+          >
+            <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+              <span style={{ fontSize: 12, fontWeight: 600, color: "var(--text-primary)" }}>
+                {fromEntity || "From entity"}.{fromColumn || "column"}
+              </span>
+              <span style={{ fontSize: 11, color: "var(--text-tertiary)" }}>{CARDINALITIES.find((c) => c.id === cardinality)?.sub || ""}</span>
+              <span style={{ fontSize: 12, fontWeight: 600, color: "var(--text-primary)" }}>
+                {toEntity || "To entity"}.{toColumn || "column"}
+              </span>
+            </div>
+            <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+              <span className="status-pill tone-info">{CARDINALITIES.find((c) => c.id === cardinality)?.label || "Relationship"}</span>
+              {identifying && <span className="status-pill tone-warning">Identifying</span>}
+              {optional && <span className="status-pill tone-neutral">Optional</span>}
+              {onDelete && <span className="status-pill tone-neutral">ON DELETE {onDelete}</span>}
+            </div>
           </div>
         </div>
 

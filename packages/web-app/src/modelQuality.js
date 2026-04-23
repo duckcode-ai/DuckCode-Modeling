@@ -149,7 +149,7 @@ function nudgeIssues(model) {
   const relEntityNames = new Set();
   relationships.forEach((rel) => {
     ["from", "to"].forEach((side) => {
-      const ref = rel?.[side] || "";
+      const ref = relationshipRefString(rel?.[side]);
       if (ref.includes(".")) relEntityNames.add(ref.split(".")[0]);
     });
   });
@@ -395,6 +395,17 @@ function isObject(value) {
   return !!value && typeof value === "object" && !Array.isArray(value);
 }
 
+function relationshipRefString(ref) {
+  if (typeof ref === "string") return ref.trim();
+  if (isObject(ref)) {
+    const entity = String(ref.entity || ref.table || "").trim();
+    const field = String(ref.field || ref.col || ref.column || "").trim();
+    if (entity && field) return `${entity}.${field}`;
+    if (entity) return entity;
+  }
+  return "";
+}
+
 function parseYaml(yamlText) {
   try {
     const parsed = yaml.load(yamlText);
@@ -607,12 +618,14 @@ function structuralIssues(model) {
         if (typeof rel.name !== "string" || rel.name.length === 0) {
           issues.push(issue("error", "INVALID_RELATIONSHIP_NAME", "Relationship name is required.", `/relationships/${idx}/name`));
         }
-        if (typeof rel.from !== "string" || !REF_NAME.test(rel.from)) {
+        const fromRef = relationshipRefString(rel.from);
+        const toRef = relationshipRefString(rel.to);
+        if (!REF_NAME.test(fromRef)) {
           issues.push(
             issue("error", "INVALID_RELATIONSHIP_FROM", "relationships.from must be Entity.field.", `/relationships/${idx}/from`)
           );
         }
-        if (typeof rel.to !== "string" || !REF_NAME.test(rel.to)) {
+        if (!REF_NAME.test(toRef)) {
           issues.push(
             issue("error", "INVALID_RELATIONSHIP_TO", "relationships.to must be Entity.field.", `/relationships/${idx}/to`)
           );
@@ -854,8 +867,8 @@ function relationshipGraph(model) {
   const relationships = Array.isArray(model.relationships) ? model.relationships : [];
 
   relationships.forEach((rel) => {
-    const fromRef = rel?.from || "";
-    const toRef = rel?.to || "";
+    const fromRef = relationshipRefString(rel?.from);
+    const toRef = relationshipRefString(rel?.to);
     if (!fromRef.includes(".") || !toRef.includes(".")) {
       return;
     }
@@ -1090,22 +1103,24 @@ function semanticIssues(model) {
   const hasImports = Array.isArray(model.model?.imports) && model.model.imports.length > 0;
   relationships.forEach((rel, idx) => {
     const relName = rel?.name || `<relationship-${idx}>`;
-    if (typeof rel?.from === "string" && !refs.has(rel.from)) {
+    const fromRef = relationshipRefString(rel?.from);
+    const toRef = relationshipRefString(rel?.to);
+    if (fromRef && !refs.has(fromRef)) {
       issues.push(
         issue(
           hasImports ? "warn" : "error",
           "RELATIONSHIP_REF_NOT_FOUND",
-          `Relationship '${relName}' source '${rel.from}' does not exist.${hasImports ? " (may be in an imported model)" : ""}`,
+          `Relationship '${relName}' source '${fromRef}' does not exist.${hasImports ? " (may be in an imported model)" : ""}`,
           `/relationships/${idx}/from`
         )
       );
     }
-    if (typeof rel?.to === "string" && !refs.has(rel.to)) {
+    if (toRef && !refs.has(toRef)) {
       issues.push(
         issue(
           hasImports ? "warn" : "error",
           "RELATIONSHIP_REF_NOT_FOUND",
-          `Relationship '${relName}' target '${rel.to}' does not exist.${hasImports ? " (may be in an imported model)" : ""}`,
+          `Relationship '${relName}' target '${toRef}' does not exist.${hasImports ? " (may be in an imported model)" : ""}`,
           `/relationships/${idx}/to`
         )
       );
@@ -1310,7 +1325,7 @@ function fieldMap(entity) {
 }
 
 function relationshipKey(rel) {
-  return `${rel?.name || ""}|${rel?.from || ""}|${rel?.to || ""}|${rel?.cardinality || ""}`;
+  return `${rel?.name || ""}|${relationshipRefString(rel?.from)}|${relationshipRefString(rel?.to)}|${rel?.cardinality || ""}`;
 }
 
 function metricMap(model) {

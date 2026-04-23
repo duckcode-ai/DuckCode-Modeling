@@ -69,9 +69,13 @@ test("cross-file diagram relationship survives adapter round-trip", () => {
   );
 
   const r = adapted.relationships[0];
-  assert.equal(r.from.table, "stg_orders");
+  const ordersNode = adapted.tables.find((t) => t.name === "stg_orders");
+  const customersNode = adapted.tables.find((t) => t.name === "stg_customers");
+  assert.ok(ordersNode);
+  assert.ok(customersNode);
+  assert.equal(r.from.table, ordersNode.id);
   assert.equal(r.from.col, "customer_id");
-  assert.equal(r.to.table, "stg_customers");
+  assert.equal(r.to.table, customersNode.id);
   assert.equal(r.to.col, "customer_id");
 });
 
