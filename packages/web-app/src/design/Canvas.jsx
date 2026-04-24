@@ -5,7 +5,8 @@ import { NOTATION, FK_COLOR_MAP } from "./notation";
 import useUiStore from "../stores/uiStore";
 import NodeErrorBoundary from "../components/shared/NodeErrorBoundary";
 import { openRelationshipEditor } from "./relationshipEditor";
-import { buildConceptualAreas, conceptualRelationshipLabel } from "../lib/conceptualModeling";
+import { buildConceptualAreas, conceptualRelationshipLabel, conceptualRelationshipSentence } from "../lib/conceptualModeling";
+import ConstraintBadges, { getConstraintSpecs } from "../components/shared/ConstraintBadges";
 
 // Visual lexicon for the git-diff overlay (v0.4.2). Kept as a module
 // constant so Legend / tests / future tooltip work can import the same
@@ -92,8 +93,6 @@ function TableCard({ table, selected, onSelect, onMove, onMoveEnd, onStartConnec
   const conceptual = isConceptTable(table, modelKind);
   const logical = String(modelKind || table?.modelKind || "").toLowerCase() === "logical";
 
-  const hasValue = (value) => value != null && String(value).trim() !== "";
-
   const onMouseDown = (e) => {
     // Dragging from a column key dot or the card-level relationship handle
     // starts a relationship draw instead of a table move. Conceptual and
@@ -133,18 +132,6 @@ function TableCard({ table, selected, onSelect, onMove, onMoveEnd, onStartConnec
     };
     window.addEventListener("mousemove", onMove2);
     window.addEventListener("mouseup", onUp);
-  };
-
-  const colFlags = (c) => {
-    const flags = [];
-    if (c.pk) flags.push({ k: "PK", I: I.Key, title: "PRIMARY KEY" });
-    if (c.fk) flags.push({ k: "FK", I: I.Link, title: `FOREIGN KEY${c.fk ? ` → ${c.fk}` : ""}` });
-    if (c.nn) flags.push({ k: "NN", I: I.NotNull, title: "NOT NULL" });
-    if (c.unique && !c.pk) flags.push({ k: "UQ", I: I.Unique, title: "UNIQUE" });
-    if (c.check) flags.push({ k: "CK", I: I.Check2, title: "CHECK: " + c.check });
-    if (hasValue(c.default)) flags.push({ k: "DF", I: I.Default, title: "DEFAULT " + c.default });
-    if (c.generated) flags.push({ k: "GN", I: I.Generated, title: "GENERATED" });
-    return flags;
   };
 
   const diffTheme = diffStatus ? DIFF_COLORS[diffStatus] : null;
@@ -287,7 +274,7 @@ function TableCard({ table, selected, onSelect, onMove, onMoveEnd, onStartConnec
             {table.columns.map((c) => {
               const isPk = c.pk;
               const isFk = !!c.fk || !!c.semanticFk;
-              const flags = colFlags(c);
+              const flags = getConstraintSpecs(c);
               return (
                 <div key={c.name} className={`tc-row ${isPk ? "pk" : ""}`} data-col={c.name}>
                   <div className={`tc-key ${isPk ? "pk" : ""} ${isFk ? "fk" : ""}`}>
@@ -298,16 +285,7 @@ function TableCard({ table, selected, onSelect, onMove, onMoveEnd, onStartConnec
                   <div className="tc-col">{c.name}</div>
                   <div className="tc-type">{c.type}</div>
                   <div className="tc-colflags">
-                    {flags.map((f) => (
-                      <span key={f.k} className={`tc-cf tc-cf-${f.k.toLowerCase()}`} title={f.title}>
-                        <f.I />
-                      </span>
-                    ))}
-                    {flags.length === 0 && (
-                      <span className="tc-nn" title="No constraints">
-                        ·
-                      </span>
-                    )}
+                    <ConstraintBadges column={c} size={11} showEmpty />
                   </div>
                 </div>
               );
@@ -494,6 +472,8 @@ function Relationships({ tables, relationships, selected, onSelect, hovered, set
         const fkColor = r.onDelete ? FK_COLOR_MAP[r.onDelete] : null;
         const conceptual = !r?.from?.col && !r?.to?.col;
         const relLabel = conceptualRelationshipLabel(r);
+        const relSentence = conceptual ? conceptualRelationshipSentence(r) : "";
+        const relCardinality = `${NOTATION.cardinalityLabel(r.from.min, r.from.max)} : ${NOTATION.cardinalityLabel(r.to.min, r.to.max)}`;
         const strokeCls = `rel-line ${r.dashed ? "" : "strong"} ${emphasize ? "active" : ""} ${r.identifying ? "identifying" : ""} ${dimmed ? "dimmed" : ""}`;
         return (
           <g key={r.id}
@@ -516,11 +496,16 @@ function Relationships({ tables, relationships, selected, onSelect, hovered, set
                     textAnchor="middle">
                 {conceptual && relLabel ? (
                   <>
-                    <tspan x={(a.x + b.x) / 2} dy="0">{relLabel}</tspan>
-                    <tspan x={(a.x + b.x) / 2} dy="12">{NOTATION.cardinalityLabel(r.from.min, r.from.max)} : {NOTATION.cardinalityLabel(r.to.min, r.to.max)}</tspan>
+                    <tspan x={(a.x + b.x) / 2} dy="0">{relSentence || relLabel}</tspan>
+                    <tspan x={(a.x + b.x) / 2} dy="12">{relLabel !== relSentence && relLabel ? relLabel : relCardinality}</tspan>
+                  </>
+                ) : conceptual && relSentence ? (
+                  <>
+                    <tspan x={(a.x + b.x) / 2} dy="0">{relSentence}</tspan>
+                    <tspan x={(a.x + b.x) / 2} dy="12">{relCardinality}</tspan>
                   </>
                 ) : (
-                  `${NOTATION.cardinalityLabel(r.from.min, r.from.max)} : ${NOTATION.cardinalityLabel(r.to.min, r.to.max)}`
+                  relCardinality
                 )}
               </text>
             )}
@@ -534,11 +519,83 @@ function Relationships({ tables, relationships, selected, onSelect, hovered, set
   );
 }
 
-function SubjectAreas({ areas }) {
+function SubjectAreas({ areas, tables, setTables, onMoveGroupEnd, zoom }) {
+  const drag = React.useRef(null);
+
+  const matchingTableIds = React.useCallback((area) => {
+    const label = String(area?.label || "").trim();
+    if (!label) return [];
+    const wanted = label.toLowerCase();
+    return (tables || [])
+      .filter((table) => {
+        const candidates = [
+          table?.subject_area,
+          table?.domain,
+          table?.subject,
+        ].map((value) => String(value || "").trim().toLowerCase()).filter(Boolean);
+        return candidates.includes(wanted);
+      })
+      .map((table) => table.id);
+  }, [tables]);
+
+  const onMouseDown = React.useCallback((area, event) => {
+    if (!setTables) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const tableIds = matchingTableIds(area);
+    if (tableIds.length === 0) return;
+    drag.current = {
+      startX: event.clientX,
+      startY: event.clientY,
+      tableIds,
+      moved: false,
+      deltaX: 0,
+      deltaY: 0,
+    };
+    const onMove = (moveEvent) => {
+      if (!drag.current) return;
+      const dx = (moveEvent.clientX - drag.current.startX) / zoom;
+      const dy = (moveEvent.clientY - drag.current.startY) / zoom;
+      drag.current.deltaX = dx;
+      drag.current.deltaY = dy;
+      drag.current.moved = Math.abs(dx) > 0 || Math.abs(dy) > 0;
+      setTables((prev) => prev.map((table) => (
+        drag.current.tableIds.includes(table.id)
+          ? { ...table, x: Math.max(0, Math.round(table.x + dx - (drag.current.appliedDx || 0))), y: Math.max(0, Math.round(table.y + dy - (drag.current.appliedDy || 0))) }
+          : table
+      )));
+      drag.current.appliedDx = dx;
+      drag.current.appliedDy = dy;
+    };
+    const onUp = () => {
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", onUp);
+      const snapshot = drag.current;
+      drag.current = null;
+      if (!snapshot?.moved || !onMoveGroupEnd) return;
+      const movedTables = (tables || [])
+        .filter((table) => snapshot.tableIds.includes(table.id))
+        .map((table) => ({
+          ...table,
+          x: Math.max(0, Math.round(table.x + (snapshot.appliedDx || 0))),
+          y: Math.max(0, Math.round(table.y + (snapshot.appliedDy || 0))),
+        }));
+      onMoveGroupEnd(movedTables);
+    };
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
+  }, [matchingTableIds, onMoveGroupEnd, setTables, tables, zoom]);
+
   return (
     <>
       {areas.map((a) => (
-        <div key={a.id} className={`subject-area cat-${a.cat}`} style={{ left: a.x, top: a.y, width: a.w, height: a.h }}>
+        <div
+          key={a.id}
+          className={`subject-area cat-${a.cat}`}
+          style={{ left: a.x, top: a.y, width: a.w, height: a.h }}
+          onMouseDown={(event) => onMouseDown(a, event)}
+          title="Drag to move this conceptual group"
+        >
           <span className={`subject-area-label cat-${a.cat}`}>{a.label}{typeof a.count === "number" ? ` · ${a.count}` : ""}</span>
         </div>
       ))}
@@ -643,7 +700,7 @@ function Legend({ open, onToggle }) {
   );
 }
 
-export default function Canvas({ tables, setTables, relationships, areas, selected, onSelect, onMoveEnd, onConnect, onDropYamlSource, onDeleteEntity, onDeleteRelationship, onAutoLayout, onFit, onExport, title, engine, modelKind = "physical", legendOpen, setLegendOpen }) {
+export default function Canvas({ tables, setTables, relationships, areas, selected, onSelect, onMoveEnd, onMoveGroupEnd, onConnect, onDropYamlSource, onDeleteEntity, onDeleteRelationship, onAutoLayout, onFit, onExport, title, engine, modelKind = "physical", legendOpen, setLegendOpen }) {
   // Git-diff overlay (v0.4.2). Subscribe to the entity→status map so each
   // TableCard can render an ADD/MOD/DEL decoration. Pulled here at the
   // Canvas level (not individual TableCards) so every card reads the same
@@ -658,7 +715,10 @@ export default function Canvas({ tables, setTables, relationships, areas, select
   const [hovered, setHovered] = React.useState(null);
   const viewportRef = React.useRef(null);
   const stageRef = React.useRef(null);
+  const panDragRef = React.useRef(null);
+  const panFrameRef = React.useRef(0);
   const [zoom, setZoom] = React.useState(1);
+  const [isPanning, setIsPanning] = React.useState(false);
   const [viewportState, setViewportState] = React.useState({ left: 0, top: 0, width: 1, height: 1 });
   const world = React.useMemo(() => getWorldBounds(tables, modelKind), [tables, modelKind]);
   const conceptualMode = String(modelKind || "").toLowerCase() === "conceptual";
@@ -754,12 +814,56 @@ export default function Canvas({ tables, setTables, relationships, areas, select
     };
   }, [syncViewport]);
 
-  const applyZoom = React.useCallback((nextZoom) => {
+  const handleStartPan = React.useCallback((event) => {
+    if (event.button !== 0) return;
+    const viewport = viewportRef.current;
+    if (!viewport) return;
+    const blocked = event.target?.closest?.(".table-card, .subject-area, .legend, .legend-toggle, .canvas-chrome, .minimap, .zoom-bar, .canvas-btn, .icon-btn");
+    if (blocked) return;
+    panDragRef.current = {
+      startX: event.clientX,
+      startY: event.clientY,
+      scrollLeft: viewport.scrollLeft,
+      scrollTop: viewport.scrollTop,
+      moved: false,
+    };
+    document.body.style.userSelect = "none";
+    const onMove = (moveEvent) => {
+      if (!panDragRef.current || !viewportRef.current) return;
+      moveEvent.preventDefault();
+      const dx = moveEvent.clientX - panDragRef.current.startX;
+      const dy = moveEvent.clientY - panDragRef.current.startY;
+      if (!panDragRef.current.moved && (Math.abs(dx) > 2 || Math.abs(dy) > 2)) {
+        panDragRef.current.moved = true;
+        setIsPanning(true);
+      }
+      if (panFrameRef.current) cancelAnimationFrame(panFrameRef.current);
+      panFrameRef.current = requestAnimationFrame(() => {
+        if (!panDragRef.current || !viewportRef.current) return;
+        viewportRef.current.scrollLeft = panDragRef.current.scrollLeft - dx;
+        viewportRef.current.scrollTop = panDragRef.current.scrollTop - dy;
+      });
+    };
+    const onUp = () => {
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", onUp);
+      document.body.style.userSelect = "";
+      if (panFrameRef.current) cancelAnimationFrame(panFrameRef.current);
+      panFrameRef.current = 0;
+      panDragRef.current = null;
+      setIsPanning(false);
+    };
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
+  }, []);
+
+  const applyZoomAtPoint = React.useCallback((nextZoom, clientX, clientY) => {
     const viewport = viewportRef.current;
     if (!viewport) return;
     const clamped = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, nextZoom));
-    const focusX = viewport.clientWidth / 2;
-    const focusY = viewport.clientHeight / 2;
+    const rect = viewport.getBoundingClientRect();
+    const focusX = clientX - rect.left;
+    const focusY = clientY - rect.top;
     const worldX = (viewport.scrollLeft + focusX) / zoom;
     const worldY = (viewport.scrollTop + focusY) / zoom;
     setZoom(clamped);
@@ -769,6 +873,23 @@ export default function Canvas({ tables, setTables, relationships, areas, select
       syncViewport();
     });
   }, [syncViewport, zoom]);
+
+  const applyZoom = React.useCallback((nextZoom) => {
+    const viewport = viewportRef.current;
+    if (!viewport) return;
+    const focusX = viewport.clientWidth / 2;
+    const focusY = viewport.clientHeight / 2;
+    const rect = viewport.getBoundingClientRect();
+    applyZoomAtPoint(nextZoom, rect.left + focusX, rect.top + focusY);
+  }, [applyZoomAtPoint]);
+
+  const handleWheel = React.useCallback((event) => {
+    const blocked = event.target?.closest?.(".table-card, .legend, .legend-toggle, .canvas-chrome, .minimap, .zoom-bar, .canvas-btn, .icon-btn");
+    if (blocked) return;
+    event.preventDefault();
+    const factor = Math.exp(-event.deltaY * 0.0015);
+    applyZoomAtPoint(zoom * factor, event.clientX, event.clientY);
+  }, [applyZoomAtPoint, zoom]);
 
   // Fit: scroll the .canvas viewport so the bounding box of all tables is in
   // view. The legacy canvas used to only scroll to the top-left; now it
@@ -816,6 +937,13 @@ export default function Canvas({ tables, setTables, relationships, areas, select
 
   const openNewConceptDialog = React.useCallback((point = {}) => {
     openModal("newConcept", {
+      x: Number.isFinite(Number(point.x)) ? Number(point.x) : undefined,
+      y: Number.isFinite(Number(point.y)) ? Number(point.y) : undefined,
+    });
+  }, [openModal]);
+
+  const openNewLogicalEntityDialog = React.useCallback((point = {}) => {
+    openModal("newLogicalEntity", {
       x: Number.isFinite(Number(point.x)) ? Number(point.x) : undefined,
       y: Number.isFinite(Number(point.y)) ? Number(point.y) : undefined,
     });
@@ -922,7 +1050,7 @@ export default function Canvas({ tables, setTables, relationships, areas, select
           )}
           {!conceptualMode && String(modelKind || "").toLowerCase() === "logical" && (
             <>
-              <button data-tour="add-entities" className="canvas-btn" onClick={openStudio} title="Add logical entities, attributes, keys, and generated dbt output">
+              <button data-tour="add-entities" className="canvas-btn" onClick={() => openNewLogicalEntityDialog()} title="Create a logical entity with starter attributes and keys">
                 <I.Plus />Add Entity
               </button>
               <button
@@ -958,7 +1086,12 @@ export default function Canvas({ tables, setTables, relationships, areas, select
         </div>
       </div>
 
-      <div className="canvas" ref={viewportRef}>
+      <div
+        className={`canvas ${isPanning ? "panning" : "can-pan"}`}
+        ref={viewportRef}
+        onMouseDown={handleStartPan}
+        onWheel={handleWheel}
+      >
         <div
           className="canvas-inner"
           style={{ width: scaledWidth, height: scaledHeight }}
@@ -966,12 +1099,14 @@ export default function Canvas({ tables, setTables, relationships, areas, select
             if (e.target === e.currentTarget) onSelect(null);
           }}
           onDoubleClick={(e) => {
-            if (conceptualMode && e.target === e.currentTarget) {
+            if ((conceptualMode || String(modelKind || "").toLowerCase() === "logical") && e.target === e.currentTarget) {
               const rect = stageRef.current?.getBoundingClientRect();
-              openNewConceptDialog({
+              const point = {
                 x: rect ? Math.max(0, (e.clientX - rect.left) / zoom) : undefined,
                 y: rect ? Math.max(0, (e.clientY - rect.top) / zoom) : undefined,
-              });
+              };
+              if (conceptualMode) openNewConceptDialog(point);
+              else openNewLogicalEntityDialog(point);
             }
           }}
         >
@@ -983,12 +1118,14 @@ export default function Canvas({ tables, setTables, relationships, areas, select
               if (e.target === e.currentTarget) onSelect(null);
             }}
             onDoubleClick={(e) => {
-              if (conceptualMode && e.target === e.currentTarget) {
+              if ((conceptualMode || String(modelKind || "").toLowerCase() === "logical") && e.target === e.currentTarget) {
                 const rect = stageRef.current?.getBoundingClientRect();
-                openNewConceptDialog({
+                const point = {
                   x: rect ? Math.max(0, (e.clientX - rect.left) / zoom) : undefined,
                   y: rect ? Math.max(0, (e.clientY - rect.top) / zoom) : undefined,
-                });
+                };
+                if (conceptualMode) openNewConceptDialog(point);
+                else openNewLogicalEntityDialog(point);
               }
             }}
             onDragOver={onDropYamlSource ? (e) => {
@@ -1049,7 +1186,13 @@ export default function Canvas({ tables, setTables, relationships, areas, select
                 </div>
               </div>
             )}
-            <SubjectAreas areas={renderedAreas} />
+            <SubjectAreas
+              areas={renderedAreas}
+              tables={tables}
+              setTables={setTables}
+              onMoveGroupEnd={onMoveGroupEnd}
+              zoom={zoom}
+            />
             <Relationships tables={tables} relationships={relationships}
                            selected={selected} onSelect={onSelect}
                            hovered={hovered} setHovered={setHovered}

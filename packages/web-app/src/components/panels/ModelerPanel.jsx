@@ -252,6 +252,116 @@ export default function ModelerPanel() {
     );
   }
 
+  if (modelKind === "logical") {
+    const relationshipCount = Array.isArray(model?.relationships) ? model.relationships.length : 0;
+    return (
+      <PanelFrame
+        icon={<Wand2 size={14} />}
+        eyebrow="Logical Blueprint"
+        title="Logical Model"
+        subtitle={`${entities.length} ${entities.length === 1 ? "entity" : "entities"} · ${relationshipCount} relationships`}
+      >
+        <PanelSection title="Process" icon={<Layers3 size={11} />}>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 8 }}>
+            {[
+              ["1", "Shape", "Define logical entities, attributes, and naming before warehouse-specific modeling."],
+              ["2", "Key", "Capture candidate keys, business keys, and inheritance for reusable business structure."],
+              ["3", "Relate", "Connect entities with logical relationships, role names, and cardinality."],
+            ].map(([n, title, text]) => (
+              <div key={n} style={{ border: "1px solid var(--border-default)", borderRadius: 8, padding: 10, background: "var(--bg-1)" }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11, fontWeight: 700, color: "var(--text-primary)" }}>
+                  <span style={{ width: 18, height: 18, borderRadius: 999, display: "inline-grid", placeItems: "center", background: "rgba(8,145,178,0.14)", color: "#06b6d4", fontFamily: "var(--font-mono)" }}>{n}</span>
+                  {title}
+                </div>
+                <div style={{ marginTop: 6, fontSize: 10.5, lineHeight: 1.4, color: "var(--text-tertiary)" }}>{text}</div>
+              </div>
+            ))}
+          </div>
+        </PanelSection>
+
+        <PanelSection title="Actions" icon={<Plus size={11} />}>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            <button
+              className="panel-btn primary"
+              disabled={!canEdit}
+              onClick={() => openModal("newLogicalEntity")}
+            >
+              <Plus size={12} /> Add Logical Entity
+            </button>
+            <button
+              className="panel-btn"
+              disabled={!canEdit || entities.length < 2}
+              onClick={() => openModal("newRelationship", {
+                modelKind: "logical",
+                tables: entities.map((entity) => ({ id: entity.name, name: entity.name, columns: [] })),
+                fromEntity: entities[0]?.name || "",
+                toEntity: entities[1]?.name || "",
+              })}
+            >
+              <ArrowRightLeft size={12} /> Add Relationship
+            </button>
+          </div>
+        </PanelSection>
+
+        <PanelSection title="Selected Entity" icon={<Info size={11} />}>
+          {selectedEntity ? (
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(0, 1fr))", gap: 8 }}>
+              {[
+                ["Name", selectedEntity.logical_name || selectedEntity.name],
+                ["Subject area", selectedEntity.subject_area || selectedEntity.domain || "unassigned"],
+                ["Candidate keys", String(Array.isArray(selectedEntity.candidate_keys) ? selectedEntity.candidate_keys.length : 0)],
+                ["Business keys", String(Array.isArray(selectedEntity.business_keys) ? selectedEntity.business_keys.length : 0)],
+              ].map(([label, value]) => (
+                <div key={label} style={{ border: "1px solid var(--border-default)", borderRadius: 8, padding: "8px 10px", background: "var(--bg-1)", minWidth: 0 }}>
+                  <div style={{ fontSize: 10, textTransform: "uppercase", letterSpacing: "0.08em", color: "var(--text-tertiary)" }}>{label}</div>
+                  <div style={{ marginTop: 3, fontSize: 12, color: "var(--text-primary)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{value}</div>
+                </div>
+              ))}
+              <div style={{ gridColumn: "1 / -1", border: "1px solid var(--border-default)", borderRadius: 8, padding: "8px 10px", background: "var(--bg-1)" }}>
+                <div style={{ fontSize: 10, textTransform: "uppercase", letterSpacing: "0.08em", color: "var(--text-tertiary)" }}>Description</div>
+                <div style={{ marginTop: 3, fontSize: 12, lineHeight: 1.45, color: "var(--text-secondary)" }}>
+                  {selectedEntity.description || "No logical description yet. Select the entity and edit it in Details."}
+                </div>
+              </div>
+            </div>
+          ) : (
+            <PanelEmpty icon={Boxes} title="No logical entity selected" description="Select a logical entity on the canvas to review its structure here." />
+          )}
+        </PanelSection>
+
+        <PanelSection title="Logical Inventory" icon={<Boxes size={11} />}>
+          {entities.length ? (
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(180px, 1fr))", gap: 8 }}>
+              {entities.map((entity) => (
+                <button
+                  key={entity.name}
+                  type="button"
+                  onClick={() => selectEntity(entity.name)}
+                  style={{
+                    textAlign: "left",
+                    border: `1px solid ${selectedEntity?.name === entity.name ? "#06b6d4" : "var(--border-default)"}`,
+                    borderRadius: 8,
+                    padding: 10,
+                    background: selectedEntity?.name === entity.name ? "rgba(8,145,178,0.10)" : "var(--bg-1)",
+                    color: "var(--text-primary)",
+                    cursor: "pointer",
+                  }}
+                >
+                  <div style={{ fontSize: 12, fontWeight: 700 }}>{entity.logical_name || entity.name}</div>
+                  <div style={{ marginTop: 4, fontSize: 10.5, color: "var(--text-tertiary)" }}>
+                    {(entity.fields || []).length} attributes · {(entity.candidate_keys || []).length} key set(s)
+                  </div>
+                </button>
+              ))}
+            </div>
+          ) : (
+            <PanelEmpty icon={Boxes} title="No logical entities" description="Use Add Logical Entity to start shaping the logical model." />
+          )}
+        </PanelSection>
+      </PanelFrame>
+    );
+  }
+
   const handleCreateEntity = () => {
     if (!entityName.trim()) {
       addToast?.({ type: "error", message: "Entity name is required." });

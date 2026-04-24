@@ -53,6 +53,55 @@ export function conceptualRelationshipLabel(rel) {
   return "";
 }
 
+function humanizeEntityName(value) {
+  const text = normalizeText(value)
+    .replace(/[_-]+/g, " ")
+    .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
+    .trim()
+    .toLowerCase();
+  return text;
+}
+
+function pluralizeWord(word) {
+  const text = humanizeEntityName(word);
+  if (!text) return text;
+  if (text.endsWith("y") && !/[aeiou]y$/.test(text)) return `${text.slice(0, -1)}ies`;
+  if (/(s|x|z|ch|sh)$/.test(text)) return `${text}es`;
+  return `${text}s`;
+}
+
+function inferEndpointName(rel, side) {
+  const endpoint = side === "from" ? rel?.from : rel?.to;
+  const fallback = side === "from" ? rel?._fromEntityName : rel?._toEntityName;
+  return humanizeEntityName(fallback || endpoint?.table || endpoint?.entity || "");
+}
+
+export function conceptualRelationshipSentence(rel) {
+  if (!rel) return "";
+  const explicit = normalizeText(rel.description);
+  if (explicit) return explicit;
+
+  const from = inferEndpointName(rel, "from");
+  const to = inferEndpointName(rel, "to");
+  if (!from || !to) return "";
+
+  const verb = normalizeText(rel.verb).toLowerCase();
+  const cardinality = String(rel.cardinality || "").toLowerCase();
+  const oneFrom = rel?.from?.max === "1" || cardinality === "one_to_many" || cardinality === "one_to_one";
+  const oneTo = rel?.to?.max === "1" || cardinality === "many_to_one" || cardinality === "one_to_one";
+  const left = oneFrom ? `One ${from}` : `Many ${pluralizeWord(from)}`;
+  const right = oneTo ? `one ${to}` : `many ${pluralizeWord(to)}`;
+
+  if (verb) {
+    return `${left} ${verb} ${right}.`;
+  }
+  if (cardinality === "one_to_many") return `${left} can have ${right}.`;
+  if (cardinality === "many_to_one") return `${left} belong to ${right}.`;
+  if (cardinality === "one_to_one") return `${left} corresponds to ${right}.`;
+  if (cardinality === "many_to_many") return `${left} can relate to ${right}.`;
+  return `${left} relates to ${right}.`;
+}
+
 export function buildConceptualAreas(tables = [], declaredAreas = []) {
   const groups = new Map();
   (tables || []).forEach((table) => {

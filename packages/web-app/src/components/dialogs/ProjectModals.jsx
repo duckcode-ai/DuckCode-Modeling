@@ -106,12 +106,12 @@ function defaultPath(layer, artifact, name, dialect = "postgres", domain = "core
   const domainSlug = defaultDomain(domain);
   if (artifact === "diagram") {
     if (layer === "physical") {
-      return `DataLex/${domainSlug}/Physical/${slugifyName(dialect, "postgres")}/${slug}.diagram.yaml`;
+      return `diagrams/physical/${domainSlug}/${slug}.diagram.yaml`;
     }
-    return `DataLex/${domainSlug}/${layerFolder(layer)}/${slug}.diagram.yaml`;
+    return `diagrams/${layer}/${domainSlug}/${slug}.diagram.yaml`;
   }
-  if (layer === "physical") return `models/physical/${slugifyName(dialect, "postgres")}/${slug}.yaml`;
-  return `models/${layer}/${slug}.yaml`;
+  if (layer === "physical") return `models/physical/${slugifyName(dialect, "postgres")}/${domainSlug}/${slug}.yaml`;
+  return `models/${layer}/${domainSlug}/${slug}.yaml`;
 }
 
 function modelYaml(layer, name, dialect = "postgres") {

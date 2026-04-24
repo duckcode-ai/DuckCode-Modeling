@@ -17,6 +17,7 @@ import useWorkspaceStore from "../../stores/workspaceStore";
 import { addRelationship } from "../../lib/yamlRoundTrip";
 import { patchRelationship, addDiagramRelationship } from "../../design/yamlPatch";
 import { relationCardinalityValue } from "../../design/relationshipEditor";
+import { conceptualRelationshipSentence } from "../../lib/conceptualModeling";
 
 const CARDINALITIES = [
   { id: "one_to_one",   label: "One-to-one",   sub: "1 : 1" },
@@ -56,6 +57,21 @@ function endpointValue(entity, column, entityLevel) {
 function endpointPatchValue(entity, column, entityLevel) {
   if (entityLevel || !column) return { entity };
   return { entity, field: column };
+}
+
+function cardinalityEnds(cardinality) {
+  switch (String(cardinality || "").toLowerCase()) {
+    case "one_to_one":
+      return { from: { min: "1", max: "1" }, to: { min: "1", max: "1" } };
+    case "one_to_many":
+      return { from: { min: "1", max: "1" }, to: { min: "0", max: "N" } };
+    case "many_to_one":
+      return { from: { min: "0", max: "N" }, to: { min: "1", max: "1" } };
+    case "many_to_many":
+      return { from: { min: "0", max: "N" }, to: { min: "0", max: "N" } };
+    default:
+      return { from: {}, to: {} };
+  }
 }
 
 function optionValues(table) {
@@ -181,6 +197,20 @@ export default function NewRelationshipDialog() {
     );
   }, [fromEntity, toEntity, fromColumn, toColumn, validateEndpoint]);
 
+  const generatedMeaning = React.useMemo(() => (
+    conceptualLevel
+      ? (() => {
+          const ends = cardinalityEnds(cardinality);
+          return conceptualRelationshipSentence({
+            from: { entity: canonicalEntity(fromEntity), ...ends.from },
+            to: { entity: canonicalEntity(toEntity), ...ends.to },
+            cardinality,
+            verb,
+          });
+        })()
+      : ""
+  ), [canonicalEntity, cardinality, conceptualLevel, fromEntity, toEntity, verb]);
+
   const handleSubmit = (e) => {
     e.preventDefault();
     if (!canSubmit) return;
@@ -216,7 +246,7 @@ export default function NewRelationshipDialog() {
         identifying: conceptualLevel ? undefined : identifying,
         optional: conceptualLevel ? undefined : optional,
         on_delete: conceptualLevel ? undefined : (onDelete || undefined),
-        description: description.trim() || undefined,
+        description: (conceptualLevel ? (description.trim() || generatedMeaning) : description.trim()) || undefined,
         verb: verb.trim() || undefined,
         relationship_type: relationshipType.trim() || undefined,
         from_role: logicalLevel ? (fromRole.trim() || undefined) : undefined,
@@ -290,7 +320,7 @@ export default function NewRelationshipDialog() {
         cardinality,
         identifying: conceptualLevel ? undefined : identifying,
         label: "",
-        description: description.trim() || undefined,
+        description: (conceptualLevel ? (description.trim() || generatedMeaning) : description.trim()) || undefined,
         verb: verb.trim() || undefined,
         relationship_type: relationshipType.trim() || undefined,
         from_role: logicalLevel ? (fromRole.trim() || undefined) : undefined,
@@ -345,7 +375,7 @@ export default function NewRelationshipDialog() {
         identifying: conceptualLevel ? undefined : (identifying ? true : undefined),
         optional: conceptualLevel ? undefined : (optional ? true : undefined),
         on_delete: conceptualLevel ? undefined : (onDelete || undefined),
-        description: description.trim() || undefined,
+        description: (conceptualLevel ? (description.trim() || generatedMeaning) : description.trim()) || undefined,
         verb: verb.trim() || undefined,
         relationship_type: relationshipType.trim() || undefined,
         from_role: logicalLevel ? (fromRole.trim() || undefined) : undefined,
@@ -569,15 +599,20 @@ export default function NewRelationshipDialog() {
         </div>
 
         <div className="dlx-modal-section">
-          <label className="dlx-modal-field-label" htmlFor="rel-description">Description</label>
+          <label className="dlx-modal-field-label" htmlFor="rel-description">{conceptualLevel ? "Business meaning" : "Description"}</label>
           <textarea
             id="rel-description"
             className="panel-input"
             value={description}
             onChange={(e) => setDescription(e.target.value)}
-            placeholder={conceptualLevel ? "Explain the business relationship." : logicalLevel ? "Explain the business rule behind this relationship." : "Describe the physical FK/test/constraint intent."}
+            placeholder={conceptualLevel ? "One account can have many opportunities." : logicalLevel ? "Explain the business rule behind this relationship." : "Describe the physical FK/test/constraint intent."}
             rows={3}
           />
+          {conceptualLevel && generatedMeaning && description.trim() !== generatedMeaning && (
+            <div style={{ marginTop: 6, fontSize: 11, color: "var(--text-tertiary)" }}>
+              Suggested wording: <span style={{ color: "var(--text-secondary)" }}>{generatedMeaning}</span>
+            </div>
+          )}
         </div>
 
         {logicalLevel && (
@@ -686,6 +721,11 @@ export default function NewRelationshipDialog() {
               {conceptualLevel && relationshipType && <span className="status-pill tone-info">{relationshipType.replace(/_/g, " ")}</span>}
               {conceptualLevel && sourceOfTruth && <span className="status-pill tone-neutral">{sourceOfTruth}</span>}
             </div>
+            {conceptualLevel && (
+              <div style={{ fontSize: 12, color: "var(--text-secondary)", lineHeight: 1.5 }}>
+                {description.trim() || generatedMeaning || "Add business meaning for this relationship."}
+              </div>
+            )}
           </div>
         </div>
 

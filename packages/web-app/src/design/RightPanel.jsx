@@ -27,6 +27,7 @@ import InspectorTabs from "./inspector/InspectorTabs";
    others only load the first time the user clicks their tab. */
 const ColumnsView     = React.lazy(() => import("./inspector/ColumnsView"));
 const ConceptDetailsView = React.lazy(() => import("./inspector/ConceptDetailsView"));
+const LogicalDetailsView = React.lazy(() => import("./inspector/LogicalDetailsView"));
 const RelationsView   = React.lazy(() => import("./inspector/RelationsView"));
 const IndexesView     = React.lazy(() => import("./inspector/IndexesView"));
 const SqlView         = React.lazy(() => import("./inspector/SqlView"));
@@ -41,6 +42,12 @@ const BASE_TABS = [
 ];
 
 const CONCEPTUAL_TABS = [
+  { id: "DETAILS",   label: "Details" },
+  { id: "RELATIONS", label: "Relationships" },
+  { id: "YAML",      label: "YAML" },
+];
+
+const LOGICAL_TABS = [
   { id: "DETAILS",   label: "Details" },
   { id: "RELATIONS", label: "Relationships" },
   { id: "YAML",      label: "YAML" },
@@ -120,7 +127,7 @@ export default function RightPanel({
       return CONCEPTUAL_TABS;
     }
     if (modelKind === "logical") {
-      return BASE_TABS.filter((tabDef) => tabDef.id !== "SQL");
+      return LOGICAL_TABS;
     }
     return BASE_TABS;
   }, [modelKind]);
@@ -210,13 +217,15 @@ export default function RightPanel({
       />
     );
   } else if (tab === "DETAILS") {
-    body = (
-      <ConceptDetailsView
-        table={table}
-        schema={schema}
-        relationships={relationships}
-      />
-    );
+    body = modelKind === "logical"
+      ? <LogicalDetailsView table={table} />
+      : (
+        <ConceptDetailsView
+          table={table}
+          schema={schema}
+          relationships={relationships}
+        />
+      );
   } else if (tab === "COLUMNS") {
     const col = table
       ? (table.columns.find((c) => c.name === selectedCol) || table.columns[0])

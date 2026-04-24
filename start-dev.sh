@@ -2,6 +2,9 @@
 # Start both the API server and the web app dev server
 echo "Starting DataLex..."
 
+: "${DATALEX_CLI_MAX_BUFFER:=134217728}"
+export DATALEX_CLI_MAX_BUFFER
+
 # Start API server in background
 cd packages/api-server
 node index.js &
@@ -15,7 +18,7 @@ WEB_PID=$!
 echo "[datalex] Web app started (PID: $WEB_PID)"
 
 echo ""
-echo "  API server:  http://localhost:3001"
+echo "  API server:  http://localhost:3006"
 echo "  Web app:     http://localhost:5173"
 echo ""
 echo "Press Ctrl+C to stop both servers."
