@@ -235,6 +235,16 @@ entities:
     assert.equal(chats.status, 200);
     assert.ok(chats.body.chats.some((chat) => chat.id === ask.body.chatId && chat.messageCount >= 2));
 
+    const chat = await request(app)
+      .get(`/api/ai/chats/${ask.body.chatId}`)
+      .query({ projectId: project.id });
+    assert.equal(chat.status, 200);
+    const assistantMessage = chat.body.chat.messages.find((message) => message.role === "assistant");
+    assert.equal(assistantMessage.metadata.aiResult.chatId, ask.body.chatId);
+    assert.equal(assistantMessage.metadata.aiResult.answer, ask.body.answer);
+    assert.ok(Array.isArray(assistantMessage.metadata.aiResult.sources));
+    assert.ok(assistantMessage.metadata.aiResult.agent_run);
+
     const memory = await request(app)
       .get("/api/ai/memory")
       .query({ projectId: project.id });

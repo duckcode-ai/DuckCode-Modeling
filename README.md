@@ -63,7 +63,12 @@ original `.yml` files — `git status` shows real diffs.
    `schema.yml` / `.model.yaml` from the Explorer onto the canvas.
    Relationship handles on each card create business, logical, or
    physical relationships for the active layer.
-4. Drag to reposition → **Save All** → positions persist in the
+4. Open **Ask AI** from the right panel, canvas, Explorer, validation
+   row, or selected object when you want the agent to explain the model,
+   reverse-engineer business concepts, or propose YAML changes. AI
+   proposals are approval-gated; use **Review plan** to inspect the full
+   context and proposed YAML before applying.
+5. Drag to reposition → **Save All** → positions persist in the
    diagram file; `git commit` picks them up. Save All is merge-safe:
    multiple in-memory docs targeting the same `schema.yml` are merged
    through the core-engine `merge_models_preserving_docs` helper
@@ -147,6 +152,13 @@ streaming-safe for 10K+ entities), it gives you:
   resolution, on-disk parse cache for large projects.
 - **Visual studio** — React Flow UI for editing entities, relationships,
   and metadata; same YAML files as the CLI.
+- **Agentic modeling assistant** — local-first AI workflow for explaining
+  selected objects, reverse-engineering dbt repos into conceptual/logical
+  views, proposing focused YAML patches, and applying approved changes
+  through the same guarded save APIs as manual edits. Context comes from
+  structured dbt/DataLex facts, manifest/catalog metadata, BM25 lexical
+  search, validation output, project memory, and team skills under
+  `DataLex/Skills/*.md`; no vector search is used for code/YAML retrieval.
 
 ## Supported warehouses
 
@@ -186,6 +198,11 @@ Verify the installed package:
 ```bash
 datalex --version
 ```
+
+Configure AI providers in **Settings → AI**. DataLex supports local
+fallback responses plus OpenAI, Anthropic, Gemini, and Ollama-compatible
+endpoints. Provider keys are stored locally in the browser; generated YAML
+is never written until you approve an explicit proposal.
 
 For the local DuckDB-based example repo, install the matching driver too:
 
@@ -263,6 +280,8 @@ dbt parse
 - **[Pull a warehouse schema](docs/tutorials/warehouse-pull.md)** —
   7-minute live-connection flow with inferred PKs/FKs and streaming
   progress.
+- **[Agentic AI modeling](docs/ai-agentic-modeling.md)** — how Ask AI,
+  skills, memory, search/indexing, proposal review, and auto-refresh work.
 - **[CLI dbt-sync tutorial](docs/tutorial-dbt-sync.md)** — original
   CLI-only jaffle_shop walkthrough.
 

@@ -1,8 +1,15 @@
 import React from "react";
-import { AlertTriangle, Check, Send, Sparkles, Wand2 } from "lucide-react";
+import { AlertTriangle, Check, ClipboardList, Send, Sparkles, Wand2 } from "lucide-react";
 import { askAi, fetchAiChat, fetchAiChats, validateAiProposal } from "../../lib/api";
 import useUiStore from "../../stores/uiStore";
 import useWorkspaceStore from "../../stores/workspaceStore";
+
+const AI_WORK_STEPS = [
+  "Finding the most relevant dbt and DataLex context",
+  "Checking selected object, relationships, and validation signals",
+  "Applying modeling skills and project memory",
+  "Preparing a concise answer and reviewable YAML proposal",
+];
 
 function storageValue(key, fallback = "") {
   try {
@@ -24,6 +31,108 @@ function proposalTitle(change, index) {
   const type = change?.type || change?.operation || "change";
   const path = change?.path || change?.fullPath || change?.toPath || change?.name || "";
   return `${index + 1}. ${String(type).replace(/_/g, " ")}${path ? ` · ${path}` : ""}`;
+}
+
+function buildAiReviewDocument({ result, context, message }) {
+  const agentRun = result?.agent_run || {};
+  const agents = Array.isArray(agentRun.agents) ? agentRun.agents : [];
+  const skills = Array.isArray(agentRun.selected_skills) ? agentRun.selected_skills : [];
+  const sources = Array.isArray(result?.sources) ? result.sources : [];
+  const changes = Array.isArray(result?.proposed_changes) ? result.proposed_changes : [];
+  const questions = Array.isArray(result?.questions) ? result.questions : [];
+  const risks = Array.isArray(agentRun.risks) ? agentRun.risks : [];
+  const validationImpact = result?.validation_impact || agentRun.validation_impact || "";
+  const lines = [];
+
+  lines.push("# DataLex AI Review Plan");
+  lines.push("");
+  lines.push(`Generated: ${new Date().toLocaleString()}`);
+  if (context?.activeFilePath || context?.filePath) lines.push(`Active file: ${context.activeFilePath || context.filePath}`);
+  if (context?.entityName) lines.push(`Selected entity: ${context.entityName}`);
+  if (context?.relationshipName) lines.push(`Selected relationship: ${context.relationshipName}`);
+  if (message) {
+    lines.push("");
+    lines.push("## User Request");
+    lines.push(message);
+  }
+  lines.push("");
+  lines.push("## Answer");
+  lines.push(result?.answer || "No answer returned.");
+
+  if (agents.length > 0) {
+    lines.push("");
+    lines.push("## Agents");
+    agents.forEach((agent) => {
+      lines.push(`- ${agent.label || agent.id}${agent.id ? ` (${agent.id})` : ""}`);
+    });
+  }
+
+  if (skills.length > 0) {
+    lines.push("");
+    lines.push("## Skills Used");
+    skills.forEach((skill) => {
+      lines.push(`- ${skill.name || skill.path}${skill.path ? ` — ${skill.path}` : ""}`);
+    });
+  }
+
+  if (sources.length > 0) {
+    lines.push("");
+    lines.push("## Context Sources");
+    sources.slice(0, 20).forEach((source, index) => {
+      lines.push(`${index + 1}. ${source.kind || "source"}: ${source.name || source.path || "unnamed"}`);
+      if (source.path) lines.push(`   Path: ${source.path}`);
+      if (source.description) lines.push(`   Context: ${source.description}`);
+    });
+  }
+
+  if (questions.length > 0) {
+    lines.push("");
+    lines.push("## Follow-Up Questions");
+    questions.forEach((question) => lines.push(`- ${question}`));
+  }
+
+  if (risks.length > 0) {
+    lines.push("");
+    lines.push("## Risks");
+    risks.forEach((risk) => lines.push(`- ${risk}`));
+  }
+
+  if (validationImpact) {
+    lines.push("");
+    lines.push("## Validation Impact");
+    lines.push(typeof validationImpact === "string" ? validationImpact : compactJson(validationImpact));
+  }
+
+  lines.push("");
+  lines.push("## Proposed Changes");
+  if (changes.length === 0) {
+    lines.push("No YAML changes were proposed.");
+  } else {
+    changes.forEach((change, index) => {
+      lines.push("");
+      lines.push(`### ${proposalTitle(change, index)}`);
+      if (change.rationale) {
+        lines.push("");
+        lines.push("Rationale:");
+        lines.push(String(change.rationale));
+      }
+      if (change.validation_impact) {
+        lines.push("");
+        lines.push("Validation impact:");
+        lines.push(typeof change.validation_impact === "string" ? change.validation_impact : compactJson(change.validation_impact));
+      }
+      lines.push("");
+      lines.push("```json");
+      lines.push(compactJson(change));
+      lines.push("```");
+    });
+  }
+
+  return {
+    title: changes.length > 0 ? `AI proposal review · ${changes.length} change${changes.length === 1 ? "" : "s"}` : "AI answer review",
+    subtitle: context?.activeFilePath || context?.filePath || "Workspace context",
+    content: lines.join("\n"),
+  };
 }
 
 function renderInlineMarkdown(text, keyPrefix) {
@@ -142,6 +251,7 @@ export default function AiAssistantSurface({ payload = null, onClose, compact = 
   const activeFile = useWorkspaceStore((s) => s.activeFile);
   const activeFileContent = useWorkspaceStore((s) => s.activeFileContent);
   const applyAiProposalChanges = useWorkspaceStore((s) => s.applyAiProposalChanges);
+  const openAiReviewDocument = useUiStore((s) => s.openAiReviewDocument);
 
   const [message, setMessage] = React.useState("");
   const [result, setResult] = React.useState(null);
@@ -156,6 +266,8 @@ export default function AiAssistantSurface({ payload = null, onClose, compact = 
   const [error, setError] = React.useState("");
   const [chatHistory, setChatHistory] = React.useState([]);
   const [historyLoading, setHistoryLoading] = React.useState(false);
+  const [workStepIndex, setWorkStepIndex] = React.useState(0);
+  const [lastRequest, setLastRequest] = React.useState("");
   const scrollRef = React.useRef(null);
 
   React.useEffect(() => {
@@ -171,7 +283,18 @@ export default function AiAssistantSurface({ payload = null, onClose, compact = 
     const node = scrollRef.current;
     if (!node) return;
     node.scrollTop = node.scrollHeight;
-  }, [turns, result, loading, error]);
+  }, [turns, result, loading, error, workStepIndex]);
+
+  React.useEffect(() => {
+    if (!loading) {
+      setWorkStepIndex(0);
+      return undefined;
+    }
+    const timer = window.setInterval(() => {
+      setWorkStepIndex((index) => (index + 1) % AI_WORK_STEPS.length);
+    }, 1800);
+    return () => window.clearInterval(timer);
+  }, [loading]);
 
   const loadChatHistory = React.useCallback(async () => {
     if (!activeProjectId) {
@@ -211,6 +334,7 @@ export default function AiAssistantSurface({ payload = null, onClose, compact = 
     setError("");
     setResult(null);
     const userText = message.trim();
+    setLastRequest(userText);
     setMessage("");
     setTurns((items) => [...items, { role: "user", content: userText }]);
     try {
@@ -255,11 +379,24 @@ export default function AiAssistantSurface({ payload = null, onClose, compact = 
     try {
       const response = await fetchAiChat(activeProjectId, historyChatId);
       const chat = response?.chat;
+      const messages = Array.isArray(chat?.messages) ? chat.messages : [];
+      const latestAssistantWithResult = [...messages]
+        .reverse()
+        .find((message) => message?.role === "assistant" && message?.metadata?.aiResult);
+      const restoredResult = latestAssistantWithResult?.metadata?.aiResult || null;
+      const latestUserBeforeResult = latestAssistantWithResult
+        ? [...messages]
+          .slice(0, messages.indexOf(latestAssistantWithResult))
+          .reverse()
+          .find((message) => message?.role === "user")
+        : [...messages].reverse().find((message) => message?.role === "user");
       setChatId(chat?.id || historyChatId);
-      setTurns((chat?.messages || []).map((message) => ({
+      setTurns(messages.map((message) => ({
         role: message.role === "assistant" ? "assistant" : "user",
         content: message.content || "",
       })));
+      setResult(restoredResult);
+      setLastRequest(latestUserBeforeResult?.content || "");
     } catch (err) {
       setError(`Could not open chat history: ${err?.message || err}`);
     }
@@ -331,6 +468,12 @@ export default function AiAssistantSurface({ payload = null, onClose, compact = 
     setPinnedSkills((items) => items.filter((item) => item !== skillPath));
   };
   const hasSkillControls = pinnedSkills.length > 0 || disabledSkills.length > 0;
+  const currentWorkStep = AI_WORK_STEPS[workStepIndex] || AI_WORK_STEPS[0];
+  const reviewDocument = result ? buildAiReviewDocument({ result, context, message: lastRequest }) : null;
+  const openReviewPlan = () => {
+    if (!reviewDocument) return;
+    openAiReviewDocument(reviewDocument);
+  };
 
   return (
     <div className={`ai-assistant-layout ${compact ? "compact" : ""} ${hasSkillControls ? "" : "no-chat-header"}`}>
@@ -392,7 +535,14 @@ export default function AiAssistantSurface({ payload = null, onClose, compact = 
           {loading && (
             <div className="ai-message assistant">
               <div className="ai-message-role">DataLex AI</div>
-              <div className="ai-message-body ai-thinking">Thinking through the model context…</div>
+              <div className="ai-message-body ai-thinking">
+                <span className="ai-thinking-pulse" aria-hidden="true">
+                  <span />
+                  <span />
+                  <span />
+                </span>
+                <span>{currentWorkStep}</span>
+              </div>
             </div>
           )}
           </div>
@@ -455,7 +605,12 @@ export default function AiAssistantSurface({ payload = null, onClose, compact = 
             </details>
 
             <div className="panel-section ai-result-section ai-proposal-section">
-              <div className="panel-section-title">Proposed YAML Changes</div>
+              <div className="ai-proposal-title-row">
+                <div className="panel-section-title">Proposed YAML Changes</div>
+                <button className="panel-btn mini" type="button" onClick={openReviewPlan}>
+                  <ClipboardList size={12} /> Review plan
+                </button>
+              </div>
               {changes.length === 0 ? (
                 <div className="muted" style={{ display: "flex", alignItems: "center", gap: 8 }}>
                   <AlertTriangle size={14} /> No file changes proposed.
@@ -503,6 +658,12 @@ export default function AiAssistantSurface({ payload = null, onClose, compact = 
           rows={compact ? 3 : 4}
           placeholder="Ask something like: build a customer 360 conceptual model, explain missing relationships, or propose YAML fixes..."
           onKeyDown={(event) => {
+            if (event.key !== "Enter" || event.shiftKey || event.isComposing) return;
+            if (!event.metaKey && !event.ctrlKey && !event.altKey) {
+              event.preventDefault();
+              submit();
+              return;
+            }
             if ((event.metaKey || event.ctrlKey) && event.key === "Enter") {
               event.preventDefault();
               submit();
@@ -522,7 +683,7 @@ export default function AiAssistantSurface({ payload = null, onClose, compact = 
             {applying ? "Applying..." : `Apply ${changes.length}`}
           </button>
         )}
-        <span className="ai-composer-hint">⌘ Enter to ask</span>
+        <span className="ai-composer-hint">Enter to ask · Shift Enter for newline</span>
         {error && <span className="ai-inline-error">{error}</span>}
       </div>
     </div>

@@ -8,7 +8,7 @@
 import React, { useEffect, useState } from "react";
 import {
   Columns3, ShieldCheck, GitCompare, Clock, X,
-  BookOpen, ChevronUp, Wand2, KeyRound, GitBranch, Database, FileCode2, Braces,
+  BookOpen, ChevronUp, Wand2, KeyRound, GitBranch, Database, FileCode2, Braces, Copy,
 } from "lucide-react";
 
 import yaml from "js-yaml";
@@ -237,6 +237,39 @@ function LayerSupportPanel({ title, eyebrow, description, table, rel, relationsh
   );
 }
 
+function AiPlanReviewEditor({ document, onClose }) {
+  const content = String(document?.content || "");
+  const copy = React.useCallback(() => {
+    navigator.clipboard?.writeText(content).catch(() => {});
+  }, [content]);
+  if (!document) return null;
+  return (
+    <section className="ai-plan-editor-shell" aria-label="AI review plan">
+      <div className="ai-plan-editor-header">
+        <div className="ai-plan-editor-title">
+          <span>AI Review Plan</span>
+          <strong>{document.title || "Proposal review"}</strong>
+          {document.subtitle && <small>{document.subtitle}</small>}
+        </div>
+        <div className="ai-plan-editor-actions">
+          <button type="button" className="panel-btn" onClick={copy}>
+            <Copy size={12} /> Copy
+          </button>
+          <button type="button" className="panel-btn" onClick={onClose}>
+            <X size={12} /> Close
+          </button>
+        </div>
+      </div>
+      <textarea
+        className="ai-plan-editor-text"
+        readOnly
+        value={content}
+        spellCheck={false}
+      />
+    </section>
+  );
+}
+
 function BottomPanelContent({ tab, table, rel, relationships, schema, activeFile, isDiagramFile }) {
   let node;
   switch (tab) {
@@ -411,6 +444,8 @@ export default function Shell() {
     shellViewMode,
     openAiPanel,
     addToast,
+    aiReviewDocument,
+    closeAiReviewDocument,
   } = useUiStore();
 
   /* Keep the `--right-w` CSS var in sync with the store so the grid knows
@@ -1550,6 +1585,13 @@ export default function Shell() {
         <React.Suspense fallback={<div className="shell-view" style={{ padding: 20, color: "var(--text-tertiary)", fontSize: 12 }}>Loading enums…</div>}>
           <EnumsView />
         </React.Suspense>
+      )}
+
+      {aiReviewDocument && (
+        <AiPlanReviewEditor
+          document={aiReviewDocument}
+          onClose={closeAiReviewDocument}
+        />
       )}
 
       {rightPanelOpen && (

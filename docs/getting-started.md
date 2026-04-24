@@ -22,6 +22,12 @@ pip install 'datalex-cli[serve,postgres]'        # or snowflake, bigquery, datab
 pip install 'datalex-cli[serve,all]'             # every driver + Node
 ```
 
+Verify the installed package before opening a real repo:
+
+```bash
+datalex --version
+```
+
 ---
 
 ## Pick your path
@@ -94,6 +100,11 @@ project — no "Import" click needed to see the tree.
 The importer shells out to `dm dbt import` in the background. For
 projects with 200+ models, expect a few seconds. When it's done, the
 Explorer shows every model file at its real dbt path.
+DataLex also rebuilds the local AI modeling index automatically, using
+your dbt YAML, SQL files, `target/manifest.json`, `target/catalog.json`,
+semantic manifest, validation findings, and DataLex files. This is what
+lets Ask AI answer repo-wide questions instead of only reading the open
+diagram.
 
 **Then build your first ER diagram:**
 
@@ -149,6 +160,18 @@ prefer to keep them local.
   `relationships:` entry pointing at a missing entity or column
   renders as a red banner with a one-click **Remove dangling** action
   that prunes the offending entries from the active file.
+- **Ask AI with reviewable YAML proposals.** Use **Ask AI** from the
+  right panel, canvas, Explorer context menu, validation row, or selected
+  text. The agent can explain a model, reverse-engineer a conceptual view
+  from physical dbt models, suggest missing tests/descriptions, or propose
+  YAML changes. Proposed changes are not written immediately: click
+  **Review plan** to inspect the full answer, sources, agent/skill context,
+  and JSON proposal in the center editor, then validate/apply from the
+  chat panel.
+- **Team skills live in Git.** The Skills tab writes Markdown skill files
+  under `DataLex/Skills/*.md`. Each skill includes frontmatter such as
+  `use_when`, `tags`, `layers`, and `agent_modes`; the AI router selects
+  relevant skills per request instead of blindly applying all of them.
 
 📖 **Full walkthrough:** [tutorials/import-existing-dbt.md](tutorials/import-existing-dbt.md)
 
@@ -206,16 +229,19 @@ Then in the UI:
 
 ## What stays in your project, what doesn't
 
-Two files DataLex writes into `--project-dir`:
+DataLex writes these local runtime files into `--project-dir`:
 
 | File                    | What it is                                         | Commit it? |
 |-------------------------|----------------------------------------------------|------------|
 | `.dm-projects.json`     | Projects list the UI sees                          | Optional — safe to commit or gitignore |
 | `.dm-credentials.json`  | Warehouse credentials                              | **Never** — already in our gitignore template |
+| `.datalex/agent/`       | Local AI index, chat history, memory, and SQLite/JSON runtime cache | Usually no — local runtime state |
 | `dm`                    | Auto-written CLI shim for subprocess calls         | Gitignored |
 
-Everything else is your YAML. `git status` shows real diffs on every
-UI edit.
+Your DataLex modeling artifacts live under `DataLex/` and are meant to
+be reviewable YAML. Commit model/diagram YAML and `DataLex/Skills/*.md`
+when they represent team standards. `git status` shows real diffs on
+every UI edit.
 
 ---
 

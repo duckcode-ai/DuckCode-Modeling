@@ -3739,18 +3739,26 @@ app.post("/api/ai/ask", requireAdmin, async (req, res, next) => {
       : [];
     const extractedMemories = extractModelingMemories(message).map((memory) => ({ ...memory, sourceChatId: chat.id }));
     const addedMemories = await upsertAiMemories(project, extractedMemories);
-    await appendAiChatMessages(project, chat.id, [{
-      role: "assistant",
-      content: String(answer.answer || ""),
-      metadata: {
-        provider: config.provider || "local",
-        model: config.model || "",
-        proposedChangeCount: proposalChanges.length,
-        sourceCount: sources.length,
-        agents: contextPreview.agents.map((agent) => agent.id),
-      },
-    }]);
-    res.json({
+    const agentRun = {
+      agents: contextPreview.agents,
+      selected_skills: contextPreview.selected_skills,
+      retrieved_sources: sources,
+      lineage: contextPreview.lineage,
+      validation_findings: contextPreview.validation_findings,
+      retrieval_pipeline: contextPreview.retrieval_pipeline,
+      proposal_summary: proposalChanges.map((change, index) => ({
+        index,
+        type: change?.type || change?.operation || "change",
+        path: change?.path || change?.fullPath || change?.toPath || change?.name || "",
+        review_summary: change?.review_summary || "",
+      })),
+      validation_impact: proposalChanges.length ? "Validate proposals before applying." : "No YAML changes proposed.",
+    };
+    const memoryPayload = {
+      active: memories.slice(0, 20),
+      added: addedMemories,
+    };
+    const responsePayload = {
       ok: true,
       provider: config.provider || "local",
       model: config.model || "",
@@ -3763,26 +3771,22 @@ app.post("/api/ai/ask", requireAdmin, async (req, res, next) => {
       confidence: Number(answer.confidence || 0),
       requires_user_approval: answer.requires_user_approval !== false,
       sources,
-      agent_run: {
-        agents: contextPreview.agents,
-        selected_skills: contextPreview.selected_skills,
-        retrieved_sources: sources,
-        lineage: contextPreview.lineage,
-        validation_findings: contextPreview.validation_findings,
-        retrieval_pipeline: contextPreview.retrieval_pipeline,
-        proposal_summary: proposalChanges.map((change, index) => ({
-          index,
-          type: change?.type || change?.operation || "change",
-          path: change?.path || change?.fullPath || change?.toPath || change?.name || "",
-          review_summary: change?.review_summary || "",
-        })),
-        validation_impact: proposalChanges.length ? "Validate proposals before applying." : "No YAML changes proposed.",
+      agent_run: agentRun,
+      memory: memoryPayload,
+    };
+    await appendAiChatMessages(project, chat.id, [{
+      role: "assistant",
+      content: String(answer.answer || ""),
+      metadata: {
+        provider: config.provider || "local",
+        model: config.model || "",
+        proposedChangeCount: proposalChanges.length,
+        sourceCount: sources.length,
+        agents: contextPreview.agents.map((agent) => agent.id),
+        aiResult: responsePayload,
       },
-      memory: {
-        active: memories.slice(0, 20),
-        added: addedMemories,
-      },
-    });
+    }]);
+    res.json(responsePayload);
   } catch (err) {
     next(err);
   }
