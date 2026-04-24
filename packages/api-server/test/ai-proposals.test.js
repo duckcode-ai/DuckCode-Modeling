@@ -313,6 +313,30 @@ entities:
     assert.equal(existsSync(target), false);
   });
 
+  test("normalizes AI proposal aliases before validation", async () => {
+    const target = join(project.modelPath, "sales", "Conceptual", "alias_dry_run.diagram.yaml");
+    const res = await request(app)
+      .post("/api/ai/proposals/validate")
+      .send({
+        projectId: project.id,
+        changes: [{
+          action: "create",
+          artifact_type: "diagram",
+          domain: "sales",
+          layer: "conceptual",
+          name: "alias_dry_run",
+          entities: [{ entity: "Account", x: 100, y: 100 }],
+          relationships: [],
+        }],
+      });
+    assert.equal(res.status, 200);
+    assert.equal(res.body.ok, true);
+    assert.equal(res.body.valid, true);
+    assert.equal(res.body.results[0].type, "create_file");
+    assert.equal(res.body.results[0].path, "sales/Conceptual/alias_dry_run.diagram.yaml");
+    assert.equal(existsSync(target), false);
+  });
+
   test("proposal validation reports invalid YAML", async () => {
     const res = await request(app)
       .post("/api/ai/proposals/validate")

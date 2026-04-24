@@ -3,6 +3,7 @@ import { AlertTriangle, Check, ClipboardList, Send, Sparkles, Wand2 } from "luci
 import { askAi, fetchAiChat, fetchAiChats, validateAiProposal } from "../../lib/api";
 import useUiStore from "../../stores/uiStore";
 import useWorkspaceStore from "../../stores/workspaceStore";
+import AiProposalPreview from "./AiProposalPreview";
 
 const AI_WORK_STEPS = [
   "Finding the most relevant dbt and DataLex context",
@@ -132,6 +133,7 @@ function buildAiReviewDocument({ result, context, message }) {
     title: changes.length > 0 ? `AI proposal review · ${changes.length} change${changes.length === 1 ? "" : "s"}` : "AI answer review",
     subtitle: context?.activeFilePath || context?.filePath || "Workspace context",
     content: lines.join("\n"),
+    proposals: changes,
   };
 }
 
@@ -622,8 +624,12 @@ export default function AiAssistantSurface({ payload = null, onClose, compact = 
                       <summary style={{ cursor: "pointer", fontWeight: 700 }}>
                         <Check size={12} /> {proposalTitle(change, idx)}
                       </summary>
+                      <AiProposalPreview change={change} />
                       {change.rationale && <div className="muted ai-proposal-rationale"><MarkdownText text={change.rationale} /></div>}
-                      <pre style={{ maxHeight: 260, overflow: "auto", fontSize: 11, whiteSpace: "pre-wrap" }}>{compactJson(change)}</pre>
+                      <details className="ai-proposal-technical">
+                        <summary>YAML/change details</summary>
+                        <pre>{compactJson(change)}</pre>
+                      </details>
                     </details>
                   ))}
                 </div>

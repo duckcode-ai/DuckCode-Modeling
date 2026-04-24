@@ -2000,6 +2000,125 @@ body.drawer-resizing .bottom-drawer-resize-grip { opacity: 1; background: var(--
 .ai-proposal-rationale .ai-markdown {
   gap: 4px;
 }
+.ai-proposal-technical {
+  margin-top: 8px;
+  border-top: 1px solid var(--border-default);
+  padding-top: 8px;
+}
+.ai-proposal-technical summary {
+  cursor: pointer;
+  color: var(--text-tertiary);
+  font-size: 10px;
+  font-weight: 850;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.ai-proposal-technical pre {
+  max-height: 260px;
+  overflow: auto;
+  margin: 8px 0 0;
+  padding: 10px;
+  border: 1px solid var(--border-default);
+  border-radius: 10px;
+  background: var(--bg-0);
+  color: var(--text-secondary);
+  font-size: 11px;
+  line-height: 1.45;
+  white-space: pre-wrap;
+}
+.ai-proposal-preview {
+  display: grid;
+  gap: 9px;
+  margin-top: 8px;
+  padding: 10px;
+  border: 1px solid color-mix(in srgb, var(--status-success, #22c55e) 28%, var(--border-default));
+  border-radius: 14px;
+  background:
+    radial-gradient(circle at 0 0, color-mix(in srgb, var(--status-success, #22c55e) 10%, var(--bg-1)), var(--bg-1) 38%),
+    var(--bg-1);
+}
+.ai-proposal-preview-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+  min-width: 0;
+}
+.ai-proposal-preview-head > div:first-child {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+.ai-proposal-preview-head strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-primary);
+  font-size: 12px;
+}
+.ai-proposal-preview-head span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-tertiary);
+  font-size: 10.5px;
+}
+.ai-proposal-preview-pills {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 5px;
+  flex: 0 0 auto;
+}
+.ai-proposal-preview-canvas {
+  min-height: 190px;
+  overflow: hidden;
+  border: 1px solid var(--border-default);
+  border-radius: 12px;
+  background:
+    radial-gradient(circle, color-mix(in srgb, var(--border-default) 42%, transparent) 1px, transparent 1px),
+    var(--bg-0);
+  background-size: 18px 18px;
+}
+.ai-proposal-preview-canvas svg {
+  display: block;
+  width: 100%;
+  height: 240px;
+}
+.ai-proposal-preview-edge path {
+  fill: none;
+  stroke: color-mix(in srgb, var(--status-success, #22c55e) 72%, var(--text-secondary));
+  stroke-width: 2;
+}
+.ai-proposal-preview-edge marker path {
+  fill: color-mix(in srgb, var(--status-success, #22c55e) 72%, var(--text-secondary));
+}
+.ai-proposal-preview-edge text {
+  paint-order: stroke;
+  stroke: var(--bg-0);
+  stroke-width: 4px;
+  fill: var(--text-secondary);
+  font-size: 10px;
+  font-weight: 750;
+}
+.ai-proposal-preview-node rect {
+  fill: color-mix(in srgb, var(--bg-1) 92%, var(--status-success, #22c55e));
+  stroke: color-mix(in srgb, var(--status-success, #22c55e) 45%, var(--border-default));
+  stroke-width: 1.4;
+}
+.ai-proposal-preview-node text {
+  pointer-events: none;
+}
+.ai-proposal-preview-node .node-title {
+  fill: var(--text-primary);
+  font-size: 12px;
+  font-weight: 850;
+}
+.ai-proposal-preview-node .node-meta,
+.ai-proposal-preview-node .node-field {
+  fill: var(--text-tertiary);
+  font-size: 9.5px;
+}
 .ai-config-card {
   display: grid;
   align-content: start;
@@ -2254,19 +2373,27 @@ body.drawer-resizing .bottom-drawer-resize-grip { opacity: 1; background: var(--
 }
 .ai-plan-editor-shell {
   grid-area: canvas;
-  z-index: 8;
+  position: relative;
+  z-index: 120;
+  align-self: stretch;
+  justify-self: stretch;
   min-width: 0;
   min-height: 0;
   display: grid;
   grid-template-rows: auto minmax(0, 1fr);
-  margin: 14px;
-  border: 1px solid color-mix(in srgb, var(--status-success, #22c55e) 34%, var(--border-default));
-  border-radius: 18px;
+  margin: 0;
+  border: 0;
+  border-radius: 0;
   background:
-    linear-gradient(180deg, color-mix(in srgb, var(--bg-1) 96%, transparent), color-mix(in srgb, var(--bg-2) 98%, transparent)),
-    var(--bg-1);
-  box-shadow: 0 24px 70px rgba(0, 0, 0, 0.34);
+    radial-gradient(circle at 18% 0%, color-mix(in srgb, var(--status-success, #22c55e) 10%, var(--bg-0)), var(--bg-0) 30%),
+    linear-gradient(180deg, var(--bg-0), var(--bg-1));
+  box-shadow: inset 0 1px 0 var(--border-default);
   overflow: hidden;
+}
+.app.with-ai-review .canvas-wrap,
+.app.with-ai-review .shell-view {
+  visibility: hidden;
+  pointer-events: none;
 }
 .ai-plan-editor-header {
   display: flex;
@@ -2276,8 +2403,8 @@ body.drawer-resizing .bottom-drawer-resize-grip { opacity: 1; background: var(--
   padding: 14px 16px;
   border-bottom: 1px solid var(--border-default);
   background:
-    radial-gradient(circle at 20% 0%, color-mix(in srgb, var(--status-success, #22c55e) 12%, transparent), transparent 34%),
-    color-mix(in srgb, var(--bg-1) 92%, transparent);
+    radial-gradient(circle at 20% 0%, color-mix(in srgb, var(--status-success, #22c55e) 16%, var(--bg-1)), var(--bg-1) 36%),
+    var(--bg-1);
 }
 .ai-plan-editor-title {
   min-width: 0;
@@ -2313,6 +2440,30 @@ body.drawer-resizing .bottom-drawer-resize-grip { opacity: 1; background: var(--
   gap: 7px;
   flex-shrink: 0;
 }
+.ai-plan-editor-body {
+  min-width: 0;
+  min-height: 0;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  gap: 0;
+  overflow: hidden;
+}
+.ai-plan-preview-grid {
+  max-height: 310px;
+  overflow: auto;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(360px, 1fr));
+  gap: 10px;
+  padding: 14px;
+  border-bottom: 1px solid var(--border-default);
+  background: var(--bg-1);
+}
+.ai-plan-preview-grid .ai-proposal-preview {
+  margin: 0;
+}
+.ai-plan-preview-grid .ai-proposal-preview-canvas svg {
+  height: 190px;
+}
 .ai-plan-editor-text {
   width: 100%;
   height: 100%;
@@ -2322,9 +2473,7 @@ body.drawer-resizing .bottom-drawer-resize-grip { opacity: 1; background: var(--
   border: 0;
   outline: none;
   resize: none;
-  background:
-    linear-gradient(180deg, color-mix(in srgb, var(--bg-0) 92%, transparent), color-mix(in srgb, var(--bg-0) 96%, transparent)),
-    var(--bg-0);
+  background: var(--bg-0);
   color: var(--text-primary);
   font-family: var(--font-mono);
   font-size: 12px;

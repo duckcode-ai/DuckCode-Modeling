@@ -32,6 +32,7 @@ import {
   NewFileModal,
 } from "../components/dialogs/ProjectModals";
 import KeyboardShortcutsPanel from "../components/panels/KeyboardShortcutsPanel";
+import AiProposalPreview from "../components/ai/AiProposalPreview";
 
 // Heavy panels / dialogs are split into separate chunks — they only load when
 // the user actually opens them, which keeps the initial JS bundle small.
@@ -239,6 +240,7 @@ function LayerSupportPanel({ title, eyebrow, description, table, rel, relationsh
 
 function AiPlanReviewEditor({ document, onClose }) {
   const content = String(document?.content || "");
+  const proposals = Array.isArray(document?.proposals) ? document.proposals : [];
   const copy = React.useCallback(() => {
     navigator.clipboard?.writeText(content).catch(() => {});
   }, [content]);
@@ -260,12 +262,21 @@ function AiPlanReviewEditor({ document, onClose }) {
           </button>
         </div>
       </div>
-      <textarea
-        className="ai-plan-editor-text"
-        readOnly
-        value={content}
-        spellCheck={false}
-      />
+      <div className="ai-plan-editor-body">
+        {proposals.length > 0 && (
+          <div className="ai-plan-preview-grid">
+            {proposals.map((proposal, index) => (
+              <AiProposalPreview key={index} change={proposal} compact />
+            ))}
+          </div>
+        )}
+        <textarea
+          className="ai-plan-editor-text"
+          readOnly
+          value={content}
+          spellCheck={false}
+        />
+      </div>
     </section>
   );
 }
@@ -1434,7 +1445,7 @@ export default function Shell() {
   /* ── Shell render ──────────────────────────────────────────────── */
   return (
     <div
-      className={`app ${bottomPanelOpen ? "with-bottom" : ""} ${rightPanelOpen ? "" : "no-right"}`}
+      className={`app ${bottomPanelOpen ? "with-bottom" : ""} ${rightPanelOpen ? "" : "no-right"} ${aiReviewDocument ? "with-ai-review" : ""}`}
       style={{ "--left-w": `${leftPanelWidth}px` }}
     >
       <TopBar

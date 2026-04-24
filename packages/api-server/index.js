@@ -277,6 +277,8 @@ const DEFAULT_AI_SKILL_FILES = [
       "- Create concepts, not tables. Do not add columns, database datatypes, indexes, DDL, dbt tests, or warehouse constraints.",
       "- Each important concept should have name, description, owner, subject_area, domain, tags, and glossary terms when known.",
       "- Relationships should be entity-level with business verbs, for example: \"One account can have many opportunities.\"",
+      "- For any request containing words like flow, journey, lifecycle, process, adoption, funnel, or pipeline, include connected relationships by default unless the user explicitly asks for concepts only.",
+      "- Prefer relationship verbs that read as business sentences, for example Customer subscribes to Product, Subscription generates Usage Event, Usage Event contributes to Adoption Metric.",
       "- Cross-domain relationships need a description explaining business meaning and ownership.",
       "- Use follow-up questions when owner, domain, glossary meaning, or relationship verb is unclear.",
       "",
@@ -379,6 +381,7 @@ const DEFAULT_AI_SKILL_FILES = [
       "# Relationship Rules",
       "",
       "- Conceptual relationships are entity-level and should include business wording and optional cardinality.",
+      "- Do not return isolated boxes for flow requests. A flow diagram must have at least one relationship, and normally enough relationships to connect the main concepts into a readable business story.",
       "- Logical relationships clarify optionality, cardinality, and candidate key implications.",
       "- Physical relationships require field endpoints and should align with dbt relationships tests or explicit constraint metadata.",
       "- Keep relationship direction meaningful: `from` is the source/dependent side when field-level foreign keys exist; conceptual direction should read naturally as a business sentence.",
@@ -3263,8 +3266,84 @@ function detectDuplicateRelationships(doc) {
   return duplicates;
 }
 
+function normalizeAiProposalChange(rawChange) {
+  const source = rawChange?.change && typeof rawChange.change === "object"
+    ? { ...rawChange, ...rawChange.change }
+    : rawChange;
+  const change = source && typeof source === "object" ? { ...source } : {};
+  if (change.change) delete change.change;
+
+  const rawType = String(
+    change.type
+    || change.operation
+    || change.action
+    || change.change_type
+    || change.changeType
+    || change.op
+    || ""
+  ).trim();
+  const canonicalRaw = rawType.toLowerCase().replace(/[\s-]+/g, "_");
+  const aliasType = {
+    create: "create_file",
+    add: "create_file",
+    new: "create_file",
+    insert: "patch_yaml",
+    update: "update_file",
+    edit: "patch_yaml",
+    modify: "patch_yaml",
+    patch: "patch_yaml",
+    replace: "update_file",
+    delete: "delete_file",
+    remove: "delete_file",
+    rename: "rename_file",
+    move: "rename_file",
+    create_yaml: "create_file",
+    update_yaml: "update_file",
+    edit_yaml: "patch_yaml",
+    patch_file: "patch_yaml",
+    create_diagram: "create_diagram",
+    create_model: "create_model",
+  }[canonicalRaw] || canonicalRaw;
+
+  const artifactType = String(change.artifact_type || change.artifactType || change.asset_type || "").trim().toLowerCase();
+  if (!change.path) {
+    change.path = change.target_path || change.targetPath || change.file_path || change.filePath || change.file || change.filename || change.fileName;
+  }
+  if (!change.fullPath && change.full_path) change.fullPath = change.full_path;
+  if (!change.fromPath) change.fromPath = change.from_path || change.source_path || change.sourcePath || change.old_path || change.oldPath;
+  if (!change.toPath) change.toPath = change.to_path || change.target_path || change.targetPath || change.new_path || change.newPath;
+  if (change.content == null) {
+    change.content = change.yaml_content ?? change.yamlContent ?? change.new_content ?? change.newContent ?? change.body ?? change.yaml;
+  }
+  if (!change.patch && Array.isArray(change.operations)) change.patch = change.operations;
+  if (!change.patch && Array.isArray(change.patches)) change.patch = change.patches;
+
+  let type = aliasType;
+  if (!type) {
+    if (artifactType === "diagram" || change.diagram === true || (Array.isArray(change.relationships) && Array.isArray(change.entities) && !change.content)) {
+      type = "create_diagram";
+    } else if (artifactType === "model" || change.model === true || (Array.isArray(change.entities) && !change.content)) {
+      type = "create_model";
+    } else if (change.fromPath && change.toPath) {
+      type = "rename_file";
+    } else if (change.patch || Array.isArray(change.patch)) {
+      type = "patch_yaml";
+    } else if (change.path && change.content != null) {
+      type = "update_file";
+    }
+  }
+  if (type === "create_file" && (artifactType === "diagram" || /\.diagram\.ya?ml$/i.test(String(change.path || "")))) type = "create_diagram";
+  if (type === "create_file" && (artifactType === "model" || /\.model\.ya?ml$/i.test(String(change.path || "")))) type = "create_model";
+  if (["add_relationship", "edit_relationship", "delete_relationship", "add_attribute", "edit_attribute", "delete_attribute", "add_column", "edit_column", "delete_column"].includes(type)) {
+    type = change.patch || change.content != null ? "patch_yaml" : type;
+  }
+
+  change.type = type || "";
+  return change;
+}
+
 function validateAiProposalChangeDryRun(structure, rawChange) {
-  const change = rawChange && typeof rawChange === "object" ? { ...rawChange } : {};
+  const change = normalizeAiProposalChange(rawChange);
   const type = String(change?.type || change?.operation || "").trim();
   const errors = [];
   const warnings = [];
@@ -3423,6 +3502,79 @@ function defaultAiModelContent(change) {
   }, { lineWidth: 120, noRefs: true });
 }
 
+function aiYamlContractExamples() {
+  return [
+    "DataLex YAML proposal examples. Follow these shapes exactly when generating proposed_changes.",
+    "",
+    "Conceptual diagram example:",
+    "proposed_changes: [{",
+    "  type: \"create_diagram\",",
+    "  domain: \"product_adoption\",",
+    "  layer: \"conceptual\",",
+    "  name: \"product_adoption_flow\",",
+    "  title: \"Product Adoption Flow\",",
+    "  entities: [",
+    "    { entity: \"Customer\", type: \"concept\", x: 120, y: 120, description: \"Business customer adopting a product.\", owner: \"Growth\", subject_area: \"Adoption\", terms: [\"customer\"], tags: [\"core\"] },",
+    "    { entity: \"Product\", type: \"concept\", x: 360, y: 120, description: \"Product being adopted.\", owner: \"Product\", subject_area: \"Catalog\", terms: [\"product\"], tags: [\"core\"] },",
+    "    { entity: \"Subscription\", type: \"concept\", x: 600, y: 120, description: \"Commercial agreement granting access.\", owner: \"Revenue\", subject_area: \"Revenue\", terms: [\"subscription\"], tags: [\"commercial\"] },",
+    "    { entity: \"Usage Event\", type: \"concept\", x: 360, y: 280, description: \"Observed user interaction with the product.\", owner: \"Analytics\", subject_area: \"Adoption\", terms: [\"usage event\"], tags: [\"behavior\"] },",
+    "    { entity: \"Adoption Metric\", type: \"concept\", x: 600, y: 280, description: \"Measure of activation, engagement, or retained usage.\", owner: \"Growth\", subject_area: \"Adoption\", terms: [\"adoption metric\"], tags: [\"metric\"] }",
+    "  ],",
+    "  relationships: [",
+    "    { name: \"customer_subscribes_to_product\", from: { entity: \"Customer\" }, to: { entity: \"Product\" }, cardinality: \"many_to_many\", verb: \"subscribes to\", description: \"Customers can subscribe to products through commercial access.\" },",
+    "    { name: \"subscription_grants_product_access\", from: { entity: \"Subscription\" }, to: { entity: \"Product\" }, cardinality: \"many_to_one\", verb: \"grants access to\", description: \"Subscriptions define the product access being measured.\" },",
+    "    { name: \"customer_generates_usage_events\", from: { entity: \"Customer\" }, to: { entity: \"Usage Event\" }, cardinality: \"one_to_many\", verb: \"generates\", description: \"Customer behavior creates usage events.\" },",
+    "    { name: \"usage_event_contributes_to_adoption_metric\", from: { entity: \"Usage Event\" }, to: { entity: \"Adoption Metric\" }, cardinality: \"many_to_one\", verb: \"contributes to\", description: \"Usage events roll into adoption metrics.\" }",
+    "  ],",
+    "  rationale: \"Creates a connected business flow with entity-level relationships and verbs.\",",
+    "  validation_impact: \"Conceptual coverage improves when owners, descriptions, domains, terms, and relationships are reviewed.\"",
+    "}]",
+    "",
+    "Logical model example:",
+    "proposed_changes: [{",
+    "  type: \"create_model\",",
+    "  domain: \"product_adoption\",",
+    "  layer: \"logical\",",
+    "  name: \"adoption_event\",",
+    "  entities: [{",
+    "    name: \"Adoption Event\",",
+    "    type: \"logical_entity\",",
+    "    mapped_from: \"Usage Event\",",
+    "    description: \"Platform-neutral business event for product usage.\",",
+    "    candidate_keys: [[\"event_id\"]],",
+    "    fields: [",
+    "      { name: \"event_id\", type: \"string\", description: \"Stable identifier for the usage event.\", required: true },",
+    "      { name: \"customer_id\", type: \"string\", description: \"Customer associated with the event.\", required: true },",
+    "      { name: \"product_id\", type: \"string\", description: \"Product used in the event.\", required: true },",
+    "      { name: \"event_at\", type: \"timestamp\", description: \"Business event timestamp.\", required: true }",
+    "    ]",
+    "  }],",
+    "  relationships: []",
+    "}]",
+    "",
+    "Physical/dbt model example:",
+    "proposed_changes: [{",
+    "  type: \"create_model\",",
+    "  domain: \"product_adoption\",",
+    "  layer: \"physical\",",
+    "  name: \"fct_usage_events\",",
+    "  entities: [{",
+    "    name: \"fct_usage_events\",",
+    "    type: \"table\",",
+    "    mapped_from: \"Adoption Event\",",
+    "    description: \"Fact model for product usage events.\",",
+    "    fields: [",
+    "      { name: \"event_id\", type: \"varchar\", primary_key: true, required: true, tests: [\"unique\", \"not_null\"] },",
+    "      { name: \"customer_id\", type: \"varchar\", required: true, tests: [\"not_null\"], foreign_key: { entity: \"dim_customers\", field: \"customer_id\" } },",
+    "      { name: \"product_id\", type: \"varchar\", required: true, tests: [\"not_null\"], foreign_key: { entity: \"dim_products\", field: \"product_id\" } },",
+    "      { name: \"event_at\", type: \"timestamp\", required: true, tests: [\"not_null\"] }",
+    "    ]",
+    "  }],",
+    "  relationships: [{ name: \"usage_events_to_customers\", from: { entity: \"fct_usage_events\", field: \"customer_id\" }, to: { entity: \"dim_customers\", field: \"customer_id\" }, cardinality: \"many_to_one\" }]",
+    "}]",
+  ].join("\n");
+}
+
 function applyJsonPatch(doc, patchOps) {
   const root = doc && typeof doc === "object" ? doc : {};
   const clone = JSON.parse(JSON.stringify(root));
@@ -3456,6 +3608,7 @@ function applyJsonPatch(doc, patchOps) {
 }
 
 async function applyAiProposalChange(project, structure, change) {
+  change = normalizeAiProposalChange(change);
   const type = String(change?.type || change?.operation || "").trim();
   if (!type) throw new ApiError(400, "VALIDATION", "Each proposed change needs a type");
 
@@ -3705,11 +3858,14 @@ app.post("/api/ai/ask", requireAdmin, async (req, res, next) => {
         `Selected skills: ${contextPreview.selected_skills.map((skill) => `${skill.name} at ${skill.path}`).join(", ") || "none"}`,
         "Use change types exactly: create_file, update_file, patch_yaml, delete_file, rename_file, create_diagram, create_model.",
         "For create_diagram include domain, layer, name, entities, relationships, and relationship verbs when conceptual.",
+        "If the user asks for a flow, lifecycle, journey, funnel, process, or adoption model, the proposal must include meaningful relationships that connect the main objects into a readable business flow.",
+        "A visual diagram proposal with zero relationships is only acceptable when the user explicitly asks for isolated concepts or an inventory.",
         "For create_model include domain, layer, name, entities, relationships. Conceptual entities use type: concept and should include description, owner, subject_area, terms, tags when known.",
         "For patch_yaml prefer JSON patch operations when changing small sections; use full content only when necessary.",
         "Keep new DataLex paths domain-first, for example crm/Conceptual/customer_360.diagram.yaml or sales/physical/orders.diagram.yaml.",
         "Retrieved records with kind=skill are scoped instructions. Use a skill only when its use_when, tags, or content match the current request/context.",
         "If the request lacks required business meaning, ask questions instead of fabricating important facts.",
+        aiYamlContractExamples(),
         memoryContext,
       ].join(" ");
       const user = JSON.stringify({
@@ -3729,13 +3885,16 @@ app.post("/api/ai/ask", requireAdmin, async (req, res, next) => {
     }
     if (!answer) answer = localAiAnswer({ message, sources, memories });
     const proposalChanges = Array.isArray(answer.proposed_changes)
-      ? answer.proposed_changes.map((change) => ({
-        rationale: change?.rationale || "Proposed by the DataLex modeling agent from retrieved project context.",
-        source_context: change?.source_context || sources.slice(0, 5).map((source) => source.path || source.name).filter(Boolean),
-        validation_impact: change?.validation_impact || "Run proposal validation before applying.",
-        review_summary: change?.review_summary || `${String(change?.type || change?.operation || "change").replace(/_/g, " ")} requires user approval.`,
-        ...change,
-      }))
+      ? answer.proposed_changes.map((rawChange) => {
+        const change = normalizeAiProposalChange(rawChange);
+        return {
+          rationale: change?.rationale || "Proposed by the DataLex modeling agent from retrieved project context.",
+          source_context: change?.source_context || sources.slice(0, 5).map((source) => source.path || source.name).filter(Boolean),
+          validation_impact: change?.validation_impact || "Run proposal validation before applying.",
+          review_summary: change?.review_summary || `${String(change?.type || change?.operation || "change").replace(/_/g, " ")} requires user approval.`,
+          ...change,
+        };
+      })
       : [];
     const extractedMemories = extractModelingMemories(message).map((memory) => ({ ...memory, sourceChatId: chat.id }));
     const addedMemories = await upsertAiMemories(project, extractedMemories);
