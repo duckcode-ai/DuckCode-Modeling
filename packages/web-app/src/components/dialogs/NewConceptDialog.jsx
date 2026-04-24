@@ -15,6 +15,16 @@ function conceptSlug(value) {
     .replace(/^_+|_+$/g, "") || "concept";
 }
 
+function conceptualFolderForFile(filePath) {
+  const clean = String(filePath || "").replace(/^\/+/, "");
+  if (!clean) return "core/conceptual";
+  const parts = clean.split("/").filter(Boolean);
+  if (parts.length >= 2 && /^(conceptual|logical|physical)$/i.test(parts[1])) {
+    return `${parts[0]}/conceptual`;
+  }
+  return parts.slice(0, -1).join("/") || "core/conceptual";
+}
+
 function canonicalConceptYaml({ name, subjectArea, description }) {
   const slug = conceptSlug(name);
   const lines = [
@@ -134,7 +144,7 @@ export default function NewConceptDialog() {
     }
 
     const slug = conceptSlug(cleanName);
-    const filePath = `models/conceptual/${slug}.yaml`;
+    const filePath = `${conceptualFolderForFile(activeFile?.path || activeFile?.fullPath || "")}/${slug}.yaml`;
     const conceptYaml = canonicalConceptYaml({
       name: cleanName,
       subjectArea: String(subjectArea || "").trim(),

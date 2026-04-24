@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { Boxes, ArrowRightLeft, Shapes, Layers3, Wand2, Plus, Info, KeyRound, Database } from "lucide-react";
+import { Boxes, ArrowRightLeft, Shapes, Layers3, Wand2, Plus, Info, KeyRound, Database, Braces, FileCode2, Plug } from "lucide-react";
 import yaml from "js-yaml";
 import useWorkspaceStore from "../../stores/workspaceStore";
 import useDiagramStore from "../../stores/diagramStore";
@@ -49,7 +49,7 @@ function allowedTypes(viewMode) {
 }
 
 export default function ModelerPanel() {
-  const { activeFile, activeFileContent, updateContent, createNewFile } = useWorkspaceStore();
+  const { activeFile, activeFileContent, updateContent, createNewFile, projectFiles } = useWorkspaceStore();
   const {
     model,
     selectedEntity,
@@ -59,13 +59,17 @@ export default function ModelerPanel() {
     requestLayoutRefresh,
   } = useDiagramStore();
   const { addToast, openModal } = useUiStore();
+  const setBottomPanelTab = useUiStore((s) => s.setBottomPanelTab);
   const { canEdit: canEditFn } = useAuthStore();
   const canEdit = canEditFn();
 
   const modelKind = model?.model?.layer || model?.model?.kind || "physical";
+  const activeLayer = ["conceptual", "logical", "physical"].includes(String(modelKind || "").toLowerCase())
+    ? String(modelKind || "").toLowerCase()
+    : modelingViewMode;
   const entities = Array.isArray(model?.entities) ? model.entities : [];
   const subjectAreas = Array.isArray(model?.subject_areas) ? model.subject_areas : [];
-  const entityOptions = useMemo(() => allowedTypes(modelingViewMode), [modelingViewMode]);
+  const entityOptions = useMemo(() => allowedTypes(activeLayer), [activeLayer]);
 
   const [entityType, setEntityType] = useState(defaultEntityType(modelingViewMode, modelKind));
   const [entityName, setEntityName] = useState("");
@@ -83,9 +87,9 @@ export default function ModelerPanel() {
   const [logicSql, setLogicSql] = useState("select *\nfrom source_model");
 
   useEffect(() => {
-    const nextType = defaultEntityType(modelingViewMode, modelKind);
-    setEntityType((current) => (allowedTypes(modelingViewMode).includes(current) ? current : nextType));
-  }, [modelingViewMode, modelKind]);
+    const nextType = defaultEntityType(activeLayer, modelKind);
+    setEntityType((current) => (allowedTypes(activeLayer).includes(current) ? current : nextType));
+  }, [activeLayer, modelKind]);
 
   useEffect(() => {
     if (!entities.some((entity) => entity.name === fromEntity)) {
@@ -130,6 +134,7 @@ export default function ModelerPanel() {
   }
 
   const activeIsDiagram = /\.diagram\.ya?ml$/i.test(activeFile?.name || activeFile?.path || "");
+  const hasWorkspaceFiles = (projectFiles || []).length > 0;
 
   if (modelKind === "conceptual") {
     const relationshipCount = Array.isArray(model?.relationships) ? model.relationships.length : 0;
@@ -243,6 +248,289 @@ export default function ModelerPanel() {
             </div>
           ) : (
             <PanelEmpty icon={Boxes} title="No concepts" description="Use Add Concept to start the conceptual model." />
+          )}
+        </PanelSection>
+      </PanelFrame>
+    );
+  }
+
+  if (modelKind === "logical") {
+    const relationshipCount = Array.isArray(model?.relationships) ? model.relationships.length : 0;
+    return (
+      <PanelFrame
+        icon={<Wand2 size={14} />}
+        eyebrow="Logical Blueprint"
+        title="Logical Model"
+        subtitle={`${entities.length} ${entities.length === 1 ? "entity" : "entities"} · ${relationshipCount} relationships`}
+      >
+        <PanelSection title="Process" icon={<Layers3 size={11} />}>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 8 }}>
+            {[
+              ["1", "Shape", "Define logical entities, attributes, and naming before warehouse-specific modeling."],
+              ["2", "Key", "Capture candidate keys, business keys, and inheritance for reusable business structure."],
+              ["3", "Relate", "Connect entities with logical relationships, role names, and cardinality."],
+            ].map(([n, title, text]) => (
+              <div key={n} style={{ border: "1px solid var(--border-default)", borderRadius: 8, padding: 10, background: "var(--bg-1)" }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11, fontWeight: 700, color: "var(--text-primary)" }}>
+                  <span style={{ width: 18, height: 18, borderRadius: 999, display: "inline-grid", placeItems: "center", background: "rgba(8,145,178,0.14)", color: "#06b6d4", fontFamily: "var(--font-mono)" }}>{n}</span>
+                  {title}
+                </div>
+                <div style={{ marginTop: 6, fontSize: 10.5, lineHeight: 1.4, color: "var(--text-tertiary)" }}>{text}</div>
+              </div>
+            ))}
+          </div>
+        </PanelSection>
+
+        <PanelSection title="Actions" icon={<Plus size={11} />}>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            <button
+              className="panel-btn primary"
+              disabled={!canEdit}
+              onClick={() => openModal("newLogicalEntity")}
+            >
+              <Plus size={12} /> Add Logical Entity
+            </button>
+            <button
+              className="panel-btn"
+              disabled={!canEdit || entities.length < 2}
+              onClick={() => openModal("newRelationship", {
+                modelKind: "logical",
+                tables: entities.map((entity) => ({ id: entity.name, name: entity.name, columns: [] })),
+                fromEntity: entities[0]?.name || "",
+                toEntity: entities[1]?.name || "",
+              })}
+            >
+              <ArrowRightLeft size={12} /> Add Relationship
+            </button>
+          </div>
+        </PanelSection>
+
+        <PanelSection title="Selected Entity" icon={<Info size={11} />}>
+          {selectedEntity ? (
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(0, 1fr))", gap: 8 }}>
+              {[
+                ["Name", selectedEntity.logical_name || selectedEntity.name],
+                ["Subject area", selectedEntity.subject_area || selectedEntity.domain || "unassigned"],
+                ["Candidate keys", String(Array.isArray(selectedEntity.candidate_keys) ? selectedEntity.candidate_keys.length : 0)],
+                ["Business keys", String(Array.isArray(selectedEntity.business_keys) ? selectedEntity.business_keys.length : 0)],
+              ].map(([label, value]) => (
+                <div key={label} style={{ border: "1px solid var(--border-default)", borderRadius: 8, padding: "8px 10px", background: "var(--bg-1)", minWidth: 0 }}>
+                  <div style={{ fontSize: 10, textTransform: "uppercase", letterSpacing: "0.08em", color: "var(--text-tertiary)" }}>{label}</div>
+                  <div style={{ marginTop: 3, fontSize: 12, color: "var(--text-primary)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{value}</div>
+                </div>
+              ))}
+              <div style={{ gridColumn: "1 / -1", border: "1px solid var(--border-default)", borderRadius: 8, padding: "8px 10px", background: "var(--bg-1)" }}>
+                <div style={{ fontSize: 10, textTransform: "uppercase", letterSpacing: "0.08em", color: "var(--text-tertiary)" }}>Description</div>
+                <div style={{ marginTop: 3, fontSize: 12, lineHeight: 1.45, color: "var(--text-secondary)" }}>
+                  {selectedEntity.description || "No logical description yet. Select the entity and edit it in Details."}
+                </div>
+              </div>
+            </div>
+          ) : (
+            <PanelEmpty icon={Boxes} title="No logical entity selected" description="Select a logical entity on the canvas to review its structure here." />
+          )}
+        </PanelSection>
+
+        <PanelSection title="Logical Inventory" icon={<Boxes size={11} />}>
+          {entities.length ? (
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(180px, 1fr))", gap: 8 }}>
+              {entities.map((entity) => (
+                <button
+                  key={entity.name}
+                  type="button"
+                  onClick={() => selectEntity(entity.name)}
+                  style={{
+                    textAlign: "left",
+                    border: `1px solid ${selectedEntity?.name === entity.name ? "#06b6d4" : "var(--border-default)"}`,
+                    borderRadius: 8,
+                    padding: 10,
+                    background: selectedEntity?.name === entity.name ? "rgba(8,145,178,0.10)" : "var(--bg-1)",
+                    color: "var(--text-primary)",
+                    cursor: "pointer",
+                  }}
+                >
+                  <div style={{ fontSize: 12, fontWeight: 700 }}>{entity.logical_name || entity.name}</div>
+                  <div style={{ marginTop: 4, fontSize: 10.5, color: "var(--text-tertiary)" }}>
+                    {(entity.fields || []).length} attributes · {(entity.candidate_keys || []).length} key set(s)
+                  </div>
+                </button>
+              ))}
+            </div>
+          ) : (
+            <PanelEmpty icon={Boxes} title="No logical entities" description="Use Add Logical Entity to start shaping the logical model." />
+          )}
+        </PanelSection>
+      </PanelFrame>
+    );
+  }
+
+  if (modelKind === "physical") {
+    const relationshipCount = Array.isArray(model?.relationships) ? model.relationships.length : 0;
+    const selectedPhysical = selectedEntity || null;
+    const selectedPhysicalFields = Array.isArray(selectedPhysical?.fields)
+      ? selectedPhysical.fields
+      : Array.isArray(selectedPhysical?.columns)
+        ? selectedPhysical.columns
+        : [];
+    const selectedPkCount = selectedPhysicalFields.filter((field) => field?.pk || field?.primary_key).length;
+    const selectedFkCount = selectedPhysicalFields.filter((field) => field?.fk || field?.semanticFk || field?.foreign_key).length;
+    const dbtBackedCount = entities.filter((entity) => entity?._sourceFile).length;
+    return (
+      <PanelFrame
+        icon={<Wand2 size={14} />}
+        eyebrow="Physical Studio"
+        title="dbt-backed Physical Model"
+        subtitle={`${entities.length} ${entities.length === 1 ? "object" : "objects"} · ${relationshipCount} relationships`}
+      >
+        <PanelSection title="Process" icon={<Layers3 size={11} />}>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 8 }}>
+            {[
+              ["1", "Load", "Bring dbt model/source YAML into the diagram from Explorer or import a dbt repo first."],
+              ["2", "Relate", "Create physical relationships, constraint intent, and warehouse-facing structure."],
+              ["3", "Ship", "Review dbt YAML, inspect SQL preview, then export or apply forward-engineered SQL."],
+            ].map(([n, title, text]) => (
+              <div key={n} style={{ border: "1px solid var(--border-default)", borderRadius: 8, padding: 10, background: "var(--bg-1)" }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11, fontWeight: 700, color: "var(--text-primary)" }}>
+                  <span style={{ width: 18, height: 18, borderRadius: 999, display: "inline-grid", placeItems: "center", background: "rgba(79,70,229,0.14)", color: "#8b7fff", fontFamily: "var(--font-mono)" }}>{n}</span>
+                  {title}
+                </div>
+                <div style={{ marginTop: 6, fontSize: 10.5, lineHeight: 1.4, color: "var(--text-tertiary)" }}>{text}</div>
+              </div>
+            ))}
+          </div>
+        </PanelSection>
+
+        <PanelSection title="Actions" icon={<Plus size={11} />}>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            <button
+              className="panel-btn primary"
+              disabled={!canEdit}
+              onClick={() => openModal(activeIsDiagram && hasWorkspaceFiles ? "dbtYamlPicker" : "importDbtRepo")}
+            >
+              <Braces size={12} /> Add dbt YAML
+            </button>
+            <button
+              className="panel-btn"
+              disabled={!canEdit}
+              onClick={() => openModal("importDbtRepo")}
+            >
+              <Plus size={12} /> Import dbt repo
+            </button>
+            <button
+              className="panel-btn"
+              disabled={!canEdit}
+              onClick={() => openModal("connectors")}
+            >
+              <Plug size={12} /> Database Connections
+            </button>
+            <button
+              className="panel-btn"
+              disabled={!canEdit || entities.length < 2}
+              onClick={() => openModal("newRelationship", {
+                modelKind: "physical",
+                tables: entities.map((entity) => ({
+                  id: entity.name,
+                  name: entity.name,
+                  columns: Array.isArray(entity.fields) ? entity.fields : [],
+                })),
+                fromEntity: entities[0]?.name || "",
+                toEntity: entities[1]?.name || "",
+              })}
+            >
+              <ArrowRightLeft size={12} /> Add Relationship
+            </button>
+            <button
+              className="panel-btn"
+              onClick={() => setBottomPanelTab("dbt")}
+            >
+              <Braces size={12} /> Open dbt YAML
+            </button>
+            <button
+              className="panel-btn"
+              onClick={() => setBottomPanelTab("sql")}
+            >
+              <FileCode2 size={12} /> Open SQL Preview
+            </button>
+          </div>
+        </PanelSection>
+
+        <PanelSection title="Physical Readiness" icon={<Database size={11} />}>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(0, 1fr))", gap: 8 }}>
+            {[
+              ["Objects", String(entities.length)],
+              ["dbt-backed", String(dbtBackedCount)],
+              ["Relationships", String(relationshipCount)],
+              ["Diagram file", activeIsDiagram ? "yes" : "no"],
+            ].map(([label, value]) => (
+              <div key={label} style={{ border: "1px solid var(--border-default)", borderRadius: 8, padding: "8px 10px", background: "var(--bg-1)", minWidth: 0 }}>
+                <div style={{ fontSize: 10, textTransform: "uppercase", letterSpacing: "0.08em", color: "var(--text-tertiary)" }}>{label}</div>
+                <div style={{ marginTop: 3, fontSize: 12, color: "var(--text-primary)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{value}</div>
+              </div>
+            ))}
+          </div>
+          {activeIsDiagram && entities.length === 0 && (
+            <div style={{ marginTop: 10, border: "1px solid var(--border-default)", borderRadius: 8, padding: "10px 12px", background: "var(--bg-1)", fontSize: 11, lineHeight: 1.5, color: "var(--text-secondary)" }}>
+              This physical diagram is empty. Import a dbt repo or drag dbt model/source YAML from Explorer into the canvas to start building a true physical model.
+            </div>
+          )}
+        </PanelSection>
+
+        <PanelSection title="Selected Object" icon={<Info size={11} />}>
+          {selectedPhysical ? (
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(0, 1fr))", gap: 8 }}>
+              {[
+                ["Name", selectedPhysical.logical_name || selectedPhysical.name],
+                ["Source", selectedPhysical._sourceFile ? selectedPhysical._sourceFile.split("/").pop() : "diagram-only"],
+                ["Columns", String(selectedPhysicalFields.length)],
+                ["Relationships", String(relationshipCount)],
+              ].map(([label, value]) => (
+                <div key={label} style={{ border: "1px solid var(--border-default)", borderRadius: 8, padding: "8px 10px", background: "var(--bg-1)", minWidth: 0 }}>
+                  <div style={{ fontSize: 10, textTransform: "uppercase", letterSpacing: "0.08em", color: "var(--text-tertiary)" }}>{label}</div>
+                  <div style={{ marginTop: 3, fontSize: 12, color: "var(--text-primary)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{value}</div>
+                </div>
+              ))}
+              <div style={{ gridColumn: "1 / -1", display: "flex", gap: 8, flexWrap: "wrap" }}>
+                <span className="status-pill tone-accent">{selectedPkCount} PK</span>
+                <span className="status-pill tone-warning">{selectedFkCount} FK</span>
+                <span className="status-pill tone-info">{selectedPhysicalFields.filter((field) => field?.nn).length} NOT NULL</span>
+                <span className="status-pill tone-success">{selectedPhysicalFields.filter((field) => field?.unique).length} UNIQUE</span>
+              </div>
+            </div>
+          ) : (
+            <PanelEmpty icon={Boxes} title="No physical object selected" description="Select a dbt-backed table or view on the canvas to inspect its physical details here." />
+          )}
+        </PanelSection>
+
+        <PanelSection title="Diagram Inventory" icon={<Boxes size={11} />}>
+          {entities.length ? (
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(200px, 1fr))", gap: 8 }}>
+              {entities.map((entity) => {
+                const fieldCount = Array.isArray(entity.fields) ? entity.fields.length : 0;
+                return (
+                  <button
+                    key={entity.name}
+                    type="button"
+                    onClick={() => selectEntity(entity.name)}
+                    style={{
+                      textAlign: "left",
+                      border: `1px solid ${selectedPhysical?.name === entity.name ? "#8b7fff" : "var(--border-default)"}`,
+                      borderRadius: 8,
+                      padding: 10,
+                      background: selectedPhysical?.name === entity.name ? "rgba(79,70,229,0.10)" : "var(--bg-1)",
+                      color: "var(--text-primary)",
+                      cursor: "pointer",
+                    }}
+                  >
+                    <div style={{ fontSize: 12, fontWeight: 700 }}>{entity.logical_name || entity.name}</div>
+                    <div style={{ marginTop: 4, fontSize: 10.5, color: "var(--text-tertiary)" }}>
+                      {fieldCount} columns · {entity._sourceFile ? entity._sourceFile.split("/").pop() : "diagram-only"}
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+          ) : (
+            <PanelEmpty icon={Boxes} title="No physical objects" description="Import dbt YAML or drag dbt files from Explorer onto the canvas to populate this physical diagram." />
           )}
         </PanelSection>
       </PanelFrame>
@@ -385,7 +673,7 @@ export default function ModelerPanel() {
       logicSql.trim() || "select *\nfrom source_model",
       "",
     ].join("\n");
-    const base = `DataLex/Generated/dbt/${domainSlug}`;
+    const base = `DataLex/${domainSlug}/Generated/dbt`;
     try {
       await createNewFile(`${base}/${modelSlug}.sql`, sqlText);
       await createNewFile(`${base}/${modelSlug}.yml`, yaml.dump(schemaDoc, { lineWidth: 120, noRefs: true, sortKeys: false }));
@@ -407,12 +695,22 @@ export default function ModelerPanel() {
           {VIEW_MODES.map((view) => (
             <button
               key={view.id}
-              onClick={() => setModelingViewMode(view.id)}
+              onClick={() => {
+                setModelingViewMode(view.id);
+                if (view.id !== activeLayer) {
+                  openModal("newFile", {
+                    layerHint: view.id,
+                    artifact: "diagram",
+                    domainHint: model?.domain || "core",
+                  });
+                }
+              }}
               className={`rounded-lg border px-2 py-2 text-left transition-colors ${
-                modelingViewMode === view.id
+                activeLayer === view.id
                   ? "border-accent-blue bg-accent-blue/10 text-text-primary"
                   : "border-border-primary bg-bg-primary text-text-secondary hover:bg-bg-hover"
               }`}
+              title={activeLayer === view.id ? `Current ${view.label.toLowerCase()} diagram` : `Create or open a ${view.label.toLowerCase()} diagram`}
             >
               <div className="text-[11px] font-semibold">{view.label}</div>
               <div className="text-[10px] text-text-muted mt-1 leading-snug">{view.description}</div>
@@ -420,7 +718,7 @@ export default function ModelerPanel() {
           ))}
         </div>
         <div className="text-[11px] text-text-muted mt-2">
-          Model kind: <span className="font-medium text-text-secondary">{modelKind}</span>
+          Active layer: <span className="font-medium text-text-secondary">{activeLayer}</span>
         </div>
       </PanelSection>
 
@@ -488,7 +786,7 @@ export default function ModelerPanel() {
               Generate dbt SQL/YAML
             </button>
             <div className="rounded-lg bg-bg-primary border border-border-primary px-2 py-2 text-[10px] text-text-muted leading-snug">
-              Output path: DataLex/Generated/dbt/{targetDomain || "core"}/{targetModelName || "model"}.sql and .yml
+              Output path: DataLex/{targetDomain || "core"}/Generated/dbt/{targetModelName || "model"}.sql and .yml
             </div>
           </div>
         </PanelSection>

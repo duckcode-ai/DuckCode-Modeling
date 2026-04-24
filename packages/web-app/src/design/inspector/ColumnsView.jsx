@@ -14,6 +14,7 @@ import React from "react";
 import { Key, Link2, AlertTriangle, Replace, Plus, Trash2 } from "lucide-react";
 import yaml from "js-yaml";
 import { PanelSection, StatusPill } from "../../components/panels/PanelFrame";
+import ConstraintBadges from "../../components/shared/ConstraintBadges";
 import useWorkspaceStore from "../../stores/workspaceStore";
 import useUiStore from "../../stores/uiStore";
 import { patchField, appendField, deleteField } from "../yamlPatch";
@@ -402,8 +403,10 @@ export default function ColumnsView({ table, col, setSelectedCol, entityName, on
                         : c.type;
                     })()}
                   </td>
-                  <td style={{ textAlign: "right", color: "var(--text-tertiary)", fontSize: 10 }}>
-                    {[c.pk && "PK", c.nn && "NN", c.unique && "UQ", (c.fk || c.semanticFk) && "FK", c.generated && "GN", c.default != null && "DF", c.check && "CK"].filter(Boolean).join(" ") || "—"}
+                  <td style={{ textAlign: "right" }}>
+                    <div style={{ display: "flex", justifyContent: "flex-end" }}>
+                      <ConstraintBadges column={c} size={10} showEmpty />
+                    </div>
                   </td>
                 </tr>
               );

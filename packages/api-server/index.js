@@ -3,7 +3,7 @@ import cors from "cors";
 import { readdir, readFile, writeFile, mkdir, stat, rename, copyFile, unlink as unlinkFile } from "fs/promises";
 import { join, relative, extname, basename, resolve, isAbsolute, dirname } from "path";
 import { existsSync, mkdirSync, readFileSync, writeFileSync, unlinkSync, rmdirSync, rmSync, realpathSync } from "fs";
-import { execFileSync, spawn } from "child_process";
+import { execFileSync as rawExecFileSync, spawn } from "child_process";
 import { tmpdir } from "os";
 import { createRequire } from "module";
 import { randomBytes } from "crypto";
@@ -76,6 +76,14 @@ const VENV_PYTHON = join(REPO_ROOT, ".venv", "bin", "python3");
 const PYTHON =
   (process.env.DM_PYTHON && existsSync(process.env.DM_PYTHON) && process.env.DM_PYTHON) ||
   (existsSync(VENV_PYTHON) ? VENV_PYTHON : "python3");
+const CLI_MAX_BUFFER = Number(process.env.DATALEX_CLI_MAX_BUFFER || 64 * 1024 * 1024);
+
+function execFileSync(cmd, argv, options = {}) {
+  return rawExecFileSync(cmd, argv, {
+    maxBuffer: CLI_MAX_BUFFER,
+    ...options,
+  });
+}
 
 // Resolve the CLI entry point. `dm` at the repo root is the dev-clone
 // path; when the api-server is shipped in a pip wheel, that script
@@ -415,7 +423,12 @@ async function bootstrapProjectStructure(projectPath, { initializeGit = false } 
 
   const dirs = [
     DATALEX_WORKSPACE_ROOT,
-    join(DATALEX_WORKSPACE_ROOT, "diagrams"),
+    join(DATALEX_WORKSPACE_ROOT, "core", "conceptual"),
+    join(DATALEX_WORKSPACE_ROOT, "core", "logical"),
+    join(DATALEX_WORKSPACE_ROOT, "core", "physical"),
+    join(DATALEX_WORKSPACE_ROOT, "imported", "physical"),
+    join(DATALEX_WORKSPACE_ROOT, "generated-sql", "ddl"),
+    join(DATALEX_WORKSPACE_ROOT, "generated-sql", "migrations"),
     join(DATALEX_WORKSPACE_ROOT, "domains"),
     join(DATALEX_WORKSPACE_ROOT, "projects"),
     "migrations/snowflake",
@@ -2124,7 +2137,16 @@ async function resolveProjectAndModelPath(projectId) {
 // through git. Silent on errors (callers are project-open hooks, not actionable).
 function ensureWorkspaceFolders(rootPath) {
   try {
-    for (const rel of ["diagrams", "domains", "projects"]) {
+    for (const rel of [
+      "core/conceptual",
+      "core/logical",
+      "core/physical",
+      "imported/physical",
+      "generated-sql/ddl",
+      "generated-sql/migrations",
+      "domains",
+      "projects",
+    ]) {
       const fullDir = join(rootPath, rel);
       if (!existsSync(fullDir)) {
         mkdirSync(fullDir, { recursive: true });
@@ -2730,6 +2752,7 @@ app.post("/api/import", requireAdmin, express.json({ limit: "10mb" }), async (re
         encoding: "utf-8",
         timeout: 30000,
         cwd: REPO_ROOT,
+        maxBuffer: CLI_MAX_BUFFER,
       });
     } catch (err) {
       hadCliIssues = true;
@@ -3263,6 +3286,7 @@ app.post("/api/dbt/import", requireAdmin, express.json({ limit: "2mb" }), async 
         encoding: "utf-8",
         timeout: 180000, // 3 min — git + dbt parse can be slow on first run
         stdio: ["ignore", "pipe", "pipe"],
+        maxBuffer: CLI_MAX_BUFFER,
       });
       // Our CLI prints `[dbt-import] ...` progress lines plus a trailing JSON blob
       // (with --json). Find the last line that parses as JSON to decode the report.
@@ -3311,24 +3335,6 @@ app.post("/api/dbt/import", requireAdmin, express.json({ limit: "2mb" }), async 
       }
     };
     walk(outDir);
-
-    // Seed an empty overview diagram so the post-import landing state is
-    // "blank canvas to build on" rather than "whichever source file
-    // happens to parse first". Only added if the import didn't already
-    // emit a .diagram.yaml of its own. The same doc flows through both
-    // the offline and edit-in-place frontend paths via the `tree`
-    // response, and is persisted to disk below in edit-in-place mode.
-    const hasDiagram = tree.some((e) => /\.diagram\.ya?ml$/i.test(e.path));
-    if (!hasDiagram) {
-      tree.push({
-        path: "diagrams/overview.diagram.yaml",
-        content:
-          "kind: diagram\n" +
-          "name: overview\n" +
-          "title: Overview\n" +
-          "entities: []\n",
-      });
-    }
 
     // Edit-in-place mode: materialise the imported YAMLs inside the user's
     // dbt folder so clicking a file in the Explorer can read it from disk.
@@ -3390,7 +3396,7 @@ app.post("/api/dbt/import", requireAdmin, express.json({ limit: "2mb" }), async 
       const seed = ensureWorkspaceFolders(workspaceRoot);
       if (!seed.ok) {
         writeFailures.push({
-          path: `${DATALEX_WORKSPACE_ROOT}/diagrams/.gitkeep`,
+          path: `${DATALEX_WORKSPACE_ROOT}/core/conceptual/.gitkeep`,
           code: "INTERNAL",
           error: seed.error,
         });
@@ -3862,7 +3868,12 @@ app.post("/api/connectors/pull", express.json(), async (req, res) => {
       if (tableList.length) { args.push("--tables", ...tableList); }
     }
 
-    const output = execFileSync(PYTHON, args, { encoding: "utf-8", timeout: 60000, cwd: REPO_ROOT });
+    const output = execFileSync(PYTHON, args, {
+      encoding: "utf-8",
+      timeout: 60000,
+      cwd: REPO_ROOT,
+      maxBuffer: CLI_MAX_BUFFER,
+    });
 
     // Parse YAML output
     const yamlStart = output.indexOf("model:");
@@ -3952,7 +3963,12 @@ app.post("/api/connectors/pull-multi", express.json(), async (req, res) => {
           args.push("--tables", ...tablesToPull);
         }
 
-        const output = execFileSync(PYTHON, args, { encoding: "utf-8", timeout: 120000, cwd: REPO_ROOT });
+        const output = execFileSync(PYTHON, args, {
+          encoding: "utf-8",
+          timeout: 120000,
+          cwd: REPO_ROOT,
+          maxBuffer: CLI_MAX_BUFFER,
+        });
 
         const yamlStart = output.indexOf("model:");
         const yamlText = yamlStart >= 0 ? output.substring(yamlStart) : output;

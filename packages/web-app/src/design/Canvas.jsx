@@ -3,9 +3,11 @@ import React from "react";
 import Icon from "./icons";
 import { NOTATION, FK_COLOR_MAP } from "./notation";
 import useUiStore from "../stores/uiStore";
+import useWorkspaceStore from "../stores/workspaceStore";
 import NodeErrorBoundary from "../components/shared/NodeErrorBoundary";
 import { openRelationshipEditor } from "./relationshipEditor";
-import { buildConceptualAreas, conceptualRelationshipLabel } from "../lib/conceptualModeling";
+import { buildConceptualAreas, conceptualRelationshipLabel, conceptualRelationshipSentence } from "../lib/conceptualModeling";
+import ConstraintBadges, { getConstraintSpecs } from "../components/shared/ConstraintBadges";
 
 // Visual lexicon for the git-diff overlay (v0.4.2). Kept as a module
 // constant so Legend / tests / future tooltip work can import the same
@@ -19,14 +21,27 @@ const DIFF_COLORS = {
 const DEFAULT_WORLD_WIDTH = 2400;
 const DEFAULT_WORLD_HEIGHT = 1600;
 const WORLD_PADDING = 180;
-const MIN_ZOOM = 0.5;
+const MIN_ZOOM = 0.25;
 const MAX_ZOOM = 2.25;
+const CONCEPT_CARD_WIDTH = 220;
+const CONCEPT_CARD_HEIGHT = 128;
 
-function estimateTableBounds(table) {
-  const width = Number.isFinite(Number(table?.width)) ? Number(table.width) : 240;
-  if (String(table?.modelKind || "").toLowerCase() === "conceptual") {
-    return { width, height: 164 };
+function isConceptTable(table, modelKind = "") {
+  return String(modelKind || table?.modelKind || "").toLowerCase() === "conceptual"
+    || String(table?.type || "").toLowerCase() === "concept";
+}
+
+function conceptualCardWidth(table) {
+  const storedWidth = Number(table?.width);
+  if (!Number.isFinite(storedWidth)) return CONCEPT_CARD_WIDTH;
+  return Math.min(Math.max(storedWidth, 190), CONCEPT_CARD_WIDTH);
+}
+
+function estimateTableBounds(table, modelKind = "") {
+  if (isConceptTable(table, modelKind)) {
+    return { width: conceptualCardWidth(table), height: CONCEPT_CARD_HEIGHT };
   }
+  const width = Number.isFinite(Number(table?.width)) ? Number(table.width) : 240;
   const rowCount = Array.isArray(table?.columns) ? table.columns.length : 0;
   const bodyHeight = Math.max(1, rowCount) * 26;
   const footerHeight = table?.kind === "ENUM" ? 0 : 28;
@@ -36,7 +51,7 @@ function estimateTableBounds(table) {
   };
 }
 
-function getWorldBounds(tables) {
+function getWorldBounds(tables, modelKind = "") {
   if (!Array.isArray(tables) || tables.length === 0) {
     return {
       minX: 0,
@@ -54,7 +69,7 @@ function getWorldBounds(tables) {
   tables.forEach((table) => {
     const x = Number.isFinite(Number(table?.x)) ? Number(table.x) : 0;
     const y = Number.isFinite(Number(table?.y)) ? Number(table.y) : 0;
-    const bounds = estimateTableBounds(table);
+    const bounds = estimateTableBounds(table, modelKind);
     minX = Math.min(minX, x);
     minY = Math.min(minY, y);
     maxX = Math.max(maxX, x + bounds.width);
@@ -76,25 +91,23 @@ function TableCard({ table, selected, onSelect, onMove, onMoveEnd, onStartConnec
   const I = Icon;
   const cardRef = React.useRef(null);
   const drag = React.useRef(null);
-  const conceptual = String(modelKind || table?.modelKind || "").toLowerCase() === "conceptual";
+  const conceptual = isConceptTable(table, modelKind);
   const logical = String(modelKind || table?.modelKind || "").toLowerCase() === "logical";
 
-  const hasValue = (value) => value != null && String(value).trim() !== "";
-
   const onMouseDown = (e) => {
-    // Dragging from a column's key dot starts a relationship draw instead
-    // of a table move. The row click-target is still the card; only the
-    // tc-key glyph triggers the connect gesture.
+    // Dragging from a column key dot or the card-level relationship handle
+    // starts a relationship draw instead of a table move. Conceptual and
+    // logical diagrams often need entity-level relationships, so the card
+    // handle intentionally does not require a column endpoint.
     const keyEl = e.target.closest(".tc-key");
-    if (keyEl && onStartConnect) {
-      const row = keyEl.closest(".tc-row");
+    const connectHandle = e.target.closest(".tc-connect-handle");
+    if ((keyEl || connectHandle) && onStartConnect) {
+      const row = keyEl?.closest(".tc-row");
       const colName = row?.getAttribute("data-col");
-      if (colName) {
-        e.preventDefault();
-        e.stopPropagation();
-        onStartConnect({ fromTable: table.id, fromColumn: colName }, e);
-        return;
-      }
+      e.preventDefault();
+      e.stopPropagation();
+      onStartConnect({ fromTable: table.id, fromColumn: colName || "" }, e);
+      return;
     }
     if (e.target.closest(".tc-badges, button, .tc-colflags")) return;
     const rect = cardRef.current.getBoundingClientRect();
@@ -122,18 +135,6 @@ function TableCard({ table, selected, onSelect, onMove, onMoveEnd, onStartConnec
     window.addEventListener("mouseup", onUp);
   };
 
-  const colFlags = (c) => {
-    const flags = [];
-    if (c.pk) flags.push({ k: "PK", I: I.Key, title: "PRIMARY KEY" });
-    if (c.fk) flags.push({ k: "FK", I: I.Link, title: `FOREIGN KEY${c.fk ? ` → ${c.fk}` : ""}` });
-    if (c.nn) flags.push({ k: "NN", I: I.NotNull, title: "NOT NULL" });
-    if (c.unique && !c.pk) flags.push({ k: "UQ", I: I.Unique, title: "UNIQUE" });
-    if (c.check) flags.push({ k: "CK", I: I.Check2, title: "CHECK: " + c.check });
-    if (hasValue(c.default)) flags.push({ k: "DF", I: I.Default, title: "DEFAULT " + c.default });
-    if (c.generated) flags.push({ k: "GN", I: I.Generated, title: "GENERATED" });
-    return flags;
-  };
-
   const diffTheme = diffStatus ? DIFF_COLORS[diffStatus] : null;
   // Apply the diff outline via inline style rather than a CSS class — the
   // overlay is dynamic and we don't want to ship a new stylesheet just for
@@ -143,16 +144,20 @@ function TableCard({ table, selected, onSelect, onMove, onMoveEnd, onStartConnec
     outline: `2px solid ${diffTheme.stroke}`,
     outlineOffset: 2,
   } : null;
-  const summaryBadges = [
-    table?.type || table?.kind || (conceptual ? "concept" : logical ? "logical" : "table"),
-    table?.subject_area || table?.subject || "",
-    table?.domain || "",
-  ].filter(Boolean);
+  const conceptDomain = table?.domain || table?.subject_area || table?.subject || "";
+  const summaryBadges = conceptual
+    ? [
+        conceptDomain,
+        table?.owner ? `owner ${table.owner}` : "",
+      ].filter(Boolean)
+    : [
+        table?.type || table?.kind || (logical ? "logical" : "table"),
+        table?.subject_area || table?.subject || "",
+        table?.domain || "",
+      ].filter(Boolean);
   const conceptPreview = [
     table?.description || "",
-    table?.owner ? `Owner: ${table.owner}` : "",
     Array.isArray(table?.terms) && table.terms.length ? `Terms: ${table.terms.slice(0, 2).join(", ")}` : "",
-    Array.isArray(table?.tags) && table.tags.length ? `Tags: ${table.tags.slice(0, 3).join(", ")}` : "",
   ].filter(Boolean);
   const keySetCount = (value) => Array.isArray(value) ? value.length : 0;
   const keyBadges = logical ? [
@@ -172,15 +177,36 @@ function TableCard({ table, selected, onSelect, onMove, onMoveEnd, onStartConnec
   return (
     <div
       ref={cardRef}
-      className={`table-card cat-${table.cat} ${selected ? "selected" : ""} ${table.junction ? "junction" : ""}`}
+      className={`table-card cat-${table.cat} ${conceptual ? "concept-card" : ""} ${selected ? "selected" : ""} ${table.junction ? "junction" : ""}`}
       id={`tc-${table.id}`}
-      style={{ left: table.x, top: table.y, ...(diffStyle || {}) }}
+      style={{ left: table.x, top: table.y, ...(conceptual ? { width: conceptualCardWidth(table) } : {}), ...(diffStyle || {}) }}
       onMouseDown={onMouseDown}
     >
       <div className="tc-header">
         {conceptual ? <I.Layers /> : table.kind === "ENUM" ? <I.Enum /> : table.junction ? <I.Junction /> : <I.Table />}
         <span className="tc-name">{table.name}</span>
         <span className="tc-schema">{conceptual ? "business" : logical ? "logical" : (table.schema || "dbt")}</span>
+        <button
+          type="button"
+          className="tc-connect-handle"
+          title={conceptual ? "Drag to another concept to define a business relationship" : logical ? "Drag to another entity to define a logical relationship" : "Drag to another table or column to define a physical relationship"}
+          aria-label="Create relationship"
+          style={{
+            display: "inline-flex",
+            alignItems: "center",
+            justifyContent: "center",
+            width: 20,
+            height: 20,
+            borderRadius: 6,
+            border: "1px solid var(--border-default)",
+            background: "var(--bg-1)",
+            color: "var(--text-tertiary)",
+            cursor: "crosshair",
+            flexShrink: 0,
+          }}
+        >
+          <I.Relation />
+        </button>
         <div className="tc-badges">
           {diffTheme && (
             <span
@@ -195,44 +221,32 @@ function TableCard({ table, selected, onSelect, onMove, onMoveEnd, onStartConnec
               }}
             >{diffTheme.label}</span>
           )}
-          {(table.badges || []).map((b) => (
+          {!conceptual && (table.badges || []).map((b) => (
             <span key={b} className={`tc-badge ${b.toLowerCase()}`}>{b}</span>
           ))}
         </div>
       </div>
       {conceptual ? (
         <>
-          <div style={{ padding: "10px 12px 8px", display: "flex", flexWrap: "wrap", gap: 6 }}>
-            {summaryBadges.map((badge) => (
-              <span
-                key={badge}
-                style={{
-                  fontSize: 10,
-                  padding: "2px 6px",
-                  borderRadius: 999,
-                  background: "rgba(148,163,184,0.12)",
-                  border: "1px solid var(--border-default)",
-                  color: "var(--text-secondary)",
-                }}
-              >
-                {badge}
-              </span>
+          <div className="concept-card-tags">
+            {summaryBadges.slice(0, 2).map((badge) => (
+              <span key={badge} className="concept-card-tag" title={badge}>{badge}</span>
             ))}
           </div>
-          <div style={{ padding: "0 12px 12px", display: "grid", gap: 6 }}>
-            {conceptPreview.length ? conceptPreview.slice(0, 3).map((line) => (
-              <div key={line} style={{ fontSize: 11, color: "var(--text-secondary)", lineHeight: 1.4 }}>
+          <div className="concept-card-body">
+            {conceptPreview.length ? conceptPreview.slice(0, 2).map((line) => (
+              <div key={line} className="concept-card-line" title={line}>
                 {line}
               </div>
             )) : (
-              <div style={{ fontSize: 11, color: "var(--text-tertiary)", lineHeight: 1.4 }}>
-                Business concept card. Add description, owner, terms, and domain context in the inspector.
+              <div className="concept-card-line muted">
+                Add definition, owner, and terms in Details.
               </div>
             )}
           </div>
           <div className="tc-footer">
-            <span>business concept</span>
-            <span>{table.domain || table.subject_area || "unassigned"}</span>
+            <span>concept</span>
+            <span>{conceptDomain || "unassigned"}</span>
           </div>
         </>
       ) : (
@@ -261,7 +275,7 @@ function TableCard({ table, selected, onSelect, onMove, onMoveEnd, onStartConnec
             {table.columns.map((c) => {
               const isPk = c.pk;
               const isFk = !!c.fk || !!c.semanticFk;
-              const flags = colFlags(c);
+              const flags = getConstraintSpecs(c);
               return (
                 <div key={c.name} className={`tc-row ${isPk ? "pk" : ""}`} data-col={c.name}>
                   <div className={`tc-key ${isPk ? "pk" : ""} ${isFk ? "fk" : ""}`}>
@@ -272,16 +286,7 @@ function TableCard({ table, selected, onSelect, onMove, onMoveEnd, onStartConnec
                   <div className="tc-col">{c.name}</div>
                   <div className="tc-type">{c.type}</div>
                   <div className="tc-colflags">
-                    {flags.map((f) => (
-                      <span key={f.k} className={`tc-cf tc-cf-${f.k.toLowerCase()}`} title={f.title}>
-                        <f.I />
-                      </span>
-                    ))}
-                    {flags.length === 0 && (
-                      <span className="tc-nn" title="No constraints">
-                        ·
-                      </span>
-                    )}
+                    <ConstraintBadges column={c} size={11} showEmpty />
                   </div>
                 </div>
               );
@@ -357,7 +362,7 @@ function drawEnd(x, y, side, spec, idPrefix, active, dimmed) {
   );
 }
 
-function Relationships({ tables, relationships, selected, onSelect, hovered, setHovered, width, height, zoom, stageRef }) {
+function Relationships({ tables, relationships, selected, onSelect, hovered, setHovered, width, height, zoom, stageRef, modelKind }) {
   const [anchors, setAnchors] = React.useState({});
   const openModal = useUiStore((s) => s.openModal);
 
@@ -468,6 +473,8 @@ function Relationships({ tables, relationships, selected, onSelect, hovered, set
         const fkColor = r.onDelete ? FK_COLOR_MAP[r.onDelete] : null;
         const conceptual = !r?.from?.col && !r?.to?.col;
         const relLabel = conceptualRelationshipLabel(r);
+        const relSentence = conceptual ? conceptualRelationshipSentence(r) : "";
+        const relCardinality = `${NOTATION.cardinalityLabel(r.from.min, r.from.max)} : ${NOTATION.cardinalityLabel(r.to.min, r.to.max)}`;
         const strokeCls = `rel-line ${r.dashed ? "" : "strong"} ${emphasize ? "active" : ""} ${r.identifying ? "identifying" : ""} ${dimmed ? "dimmed" : ""}`;
         return (
           <g key={r.id}
@@ -475,7 +482,7 @@ function Relationships({ tables, relationships, selected, onSelect, hovered, set
              onDoubleClick={(e) => {
                e.stopPropagation();
                onSelect({ type: "rel", id: r.id });
-               openRelationshipEditor(openModal, r, tables);
+               openRelationshipEditor(openModal, r, tables, modelKind);
              }}
              onMouseEnter={() => setHovered(r.id)}
              onMouseLeave={() => setHovered(null)}
@@ -490,11 +497,16 @@ function Relationships({ tables, relationships, selected, onSelect, hovered, set
                     textAnchor="middle">
                 {conceptual && relLabel ? (
                   <>
-                    <tspan x={(a.x + b.x) / 2} dy="0">{relLabel}</tspan>
-                    <tspan x={(a.x + b.x) / 2} dy="12">{NOTATION.cardinalityLabel(r.from.min, r.from.max)} : {NOTATION.cardinalityLabel(r.to.min, r.to.max)}</tspan>
+                    <tspan x={(a.x + b.x) / 2} dy="0">{relSentence || relLabel}</tspan>
+                    <tspan x={(a.x + b.x) / 2} dy="12">{relLabel !== relSentence && relLabel ? relLabel : relCardinality}</tspan>
+                  </>
+                ) : conceptual && relSentence ? (
+                  <>
+                    <tspan x={(a.x + b.x) / 2} dy="0">{relSentence}</tspan>
+                    <tspan x={(a.x + b.x) / 2} dy="12">{relCardinality}</tspan>
                   </>
                 ) : (
-                  `${NOTATION.cardinalityLabel(r.from.min, r.from.max)} : ${NOTATION.cardinalityLabel(r.to.min, r.to.max)}`
+                  relCardinality
                 )}
               </text>
             )}
@@ -508,11 +520,83 @@ function Relationships({ tables, relationships, selected, onSelect, hovered, set
   );
 }
 
-function SubjectAreas({ areas }) {
+function SubjectAreas({ areas, tables, setTables, onMoveGroupEnd, zoom }) {
+  const drag = React.useRef(null);
+
+  const matchingTableIds = React.useCallback((area) => {
+    const label = String(area?.label || "").trim();
+    if (!label) return [];
+    const wanted = label.toLowerCase();
+    return (tables || [])
+      .filter((table) => {
+        const candidates = [
+          table?.subject_area,
+          table?.domain,
+          table?.subject,
+        ].map((value) => String(value || "").trim().toLowerCase()).filter(Boolean);
+        return candidates.includes(wanted);
+      })
+      .map((table) => table.id);
+  }, [tables]);
+
+  const onMouseDown = React.useCallback((area, event) => {
+    if (!setTables) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const tableIds = matchingTableIds(area);
+    if (tableIds.length === 0) return;
+    drag.current = {
+      startX: event.clientX,
+      startY: event.clientY,
+      tableIds,
+      moved: false,
+      deltaX: 0,
+      deltaY: 0,
+    };
+    const onMove = (moveEvent) => {
+      if (!drag.current) return;
+      const dx = (moveEvent.clientX - drag.current.startX) / zoom;
+      const dy = (moveEvent.clientY - drag.current.startY) / zoom;
+      drag.current.deltaX = dx;
+      drag.current.deltaY = dy;
+      drag.current.moved = Math.abs(dx) > 0 || Math.abs(dy) > 0;
+      setTables((prev) => prev.map((table) => (
+        drag.current.tableIds.includes(table.id)
+          ? { ...table, x: Math.max(0, Math.round(table.x + dx - (drag.current.appliedDx || 0))), y: Math.max(0, Math.round(table.y + dy - (drag.current.appliedDy || 0))) }
+          : table
+      )));
+      drag.current.appliedDx = dx;
+      drag.current.appliedDy = dy;
+    };
+    const onUp = () => {
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", onUp);
+      const snapshot = drag.current;
+      drag.current = null;
+      if (!snapshot?.moved || !onMoveGroupEnd) return;
+      const movedTables = (tables || [])
+        .filter((table) => snapshot.tableIds.includes(table.id))
+        .map((table) => ({
+          ...table,
+          x: Math.max(0, Math.round(table.x + (snapshot.appliedDx || 0))),
+          y: Math.max(0, Math.round(table.y + (snapshot.appliedDy || 0))),
+        }));
+      onMoveGroupEnd(movedTables);
+    };
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
+  }, [matchingTableIds, onMoveGroupEnd, setTables, tables, zoom]);
+
   return (
     <>
       {areas.map((a) => (
-        <div key={a.id} className={`subject-area cat-${a.cat}`} style={{ left: a.x, top: a.y, width: a.w, height: a.h }}>
+        <div
+          key={a.id}
+          className={`subject-area cat-${a.cat}`}
+          style={{ left: a.x, top: a.y, width: a.w, height: a.h }}
+          onMouseDown={(event) => onMouseDown(a, event)}
+          title="Drag to move this conceptual group"
+        >
           <span className={`subject-area-label cat-${a.cat}`}>{a.label}{typeof a.count === "number" ? ` · ${a.count}` : ""}</span>
         </div>
       ))}
@@ -617,7 +701,7 @@ function Legend({ open, onToggle }) {
   );
 }
 
-export default function Canvas({ tables, setTables, relationships, areas, selected, onSelect, onMoveEnd, onConnect, onDropYamlSource, onDeleteEntity, onDeleteRelationship, onAutoLayout, onFit, onExport, title, engine, modelKind = "physical", legendOpen, setLegendOpen }) {
+export default function Canvas({ tables, setTables, relationships, areas, selected, onSelect, onMoveEnd, onMoveGroupEnd, onConnect, onDropYamlSource, onDeleteEntity, onDeleteRelationship, onAutoLayout, onFit, onExport, title, engine, modelKind = "physical", legendOpen, setLegendOpen }) {
   // Git-diff overlay (v0.4.2). Subscribe to the entity→status map so each
   // TableCard can render an ADD/MOD/DEL decoration. Pulled here at the
   // Canvas level (not individual TableCards) so every card reads the same
@@ -628,14 +712,22 @@ export default function Canvas({ tables, setTables, relationships, areas, select
   const setRightPanelOpen = useUiStore((s) => s.setRightPanelOpen);
   const setRightPanelTab = useUiStore((s) => s.setRightPanelTab);
   const openModal = useUiStore((s) => s.openModal);
+  const activeFile = useWorkspaceStore((s) => s.activeFile);
+  const projectFiles = useWorkspaceStore((s) => s.projectFiles);
   const I = Icon;
   const [hovered, setHovered] = React.useState(null);
+  const [yamlDropActive, setYamlDropActive] = React.useState(false);
   const viewportRef = React.useRef(null);
   const stageRef = React.useRef(null);
+  const panDragRef = React.useRef(null);
+  const panFrameRef = React.useRef(0);
   const [zoom, setZoom] = React.useState(1);
+  const [isPanning, setIsPanning] = React.useState(false);
   const [viewportState, setViewportState] = React.useState({ left: 0, top: 0, width: 1, height: 1 });
-  const world = React.useMemo(() => getWorldBounds(tables), [tables]);
+  const world = React.useMemo(() => getWorldBounds(tables, modelKind), [tables, modelKind]);
   const conceptualMode = String(modelKind || "").toLowerCase() === "conceptual";
+  const logicalMode = String(modelKind || "").toLowerCase() === "logical";
+  const physicalMode = String(modelKind || "").toLowerCase() === "physical";
   const renderedAreas = React.useMemo(
     () => conceptualMode
       ? buildConceptualAreas(tables, areas)
@@ -679,22 +771,23 @@ export default function Canvas({ tables, setTables, relationships, areas, select
     const onUp = (ev) => {
       window.removeEventListener("mousemove", onMove);
       window.removeEventListener("mouseup", onUp);
-      // Pick the element under the cursor and walk up for a .tc-key ancestor.
+      // Pick the element under the cursor. Column key hits create column-level
+      // relationships; card hits create entity-level relationships.
       const hit = document.elementFromPoint(ev.clientX, ev.clientY);
       const keyHit = hit?.closest?.(".tc-key");
       const rowHit = keyHit?.closest?.(".tc-row");
-      const cardHit = keyHit?.closest?.(".table-card");
+      const cardHit = (keyHit?.closest?.(".table-card")) || hit?.closest?.(".table-card");
       const toTableId = cardHit?.id?.replace(/^tc-/, "") || null;
-      const toColName = rowHit?.getAttribute("data-col") || null;
+      const toColName = rowHit?.getAttribute("data-col") || "";
       setConnectDrag(null);
       if (
-        toTableId && toColName &&
-        (toTableId !== seed.fromTable || toColName !== seed.fromColumn) &&
+        toTableId &&
+        (toTableId !== seed.fromTable || toColName !== (seed.fromColumn || "")) &&
         onConnect
       ) {
         onConnect({
           fromEntity: seed.fromTable,
-          fromColumn: seed.fromColumn,
+          fromColumn: seed.fromColumn || "",
           toEntity: toTableId,
           toColumn: toColName,
         });
@@ -727,12 +820,56 @@ export default function Canvas({ tables, setTables, relationships, areas, select
     };
   }, [syncViewport]);
 
-  const applyZoom = React.useCallback((nextZoom) => {
+  const handleStartPan = React.useCallback((event) => {
+    if (event.button !== 0) return;
+    const viewport = viewportRef.current;
+    if (!viewport) return;
+    const blocked = event.target?.closest?.(".table-card, .subject-area, .legend, .legend-toggle, .canvas-chrome, .minimap, .zoom-bar, .canvas-btn, .icon-btn");
+    if (blocked) return;
+    panDragRef.current = {
+      startX: event.clientX,
+      startY: event.clientY,
+      scrollLeft: viewport.scrollLeft,
+      scrollTop: viewport.scrollTop,
+      moved: false,
+    };
+    document.body.style.userSelect = "none";
+    const onMove = (moveEvent) => {
+      if (!panDragRef.current || !viewportRef.current) return;
+      moveEvent.preventDefault();
+      const dx = moveEvent.clientX - panDragRef.current.startX;
+      const dy = moveEvent.clientY - panDragRef.current.startY;
+      if (!panDragRef.current.moved && (Math.abs(dx) > 2 || Math.abs(dy) > 2)) {
+        panDragRef.current.moved = true;
+        setIsPanning(true);
+      }
+      if (panFrameRef.current) cancelAnimationFrame(panFrameRef.current);
+      panFrameRef.current = requestAnimationFrame(() => {
+        if (!panDragRef.current || !viewportRef.current) return;
+        viewportRef.current.scrollLeft = panDragRef.current.scrollLeft - dx;
+        viewportRef.current.scrollTop = panDragRef.current.scrollTop - dy;
+      });
+    };
+    const onUp = () => {
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", onUp);
+      document.body.style.userSelect = "";
+      if (panFrameRef.current) cancelAnimationFrame(panFrameRef.current);
+      panFrameRef.current = 0;
+      panDragRef.current = null;
+      setIsPanning(false);
+    };
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
+  }, []);
+
+  const applyZoomAtPoint = React.useCallback((nextZoom, clientX, clientY) => {
     const viewport = viewportRef.current;
     if (!viewport) return;
     const clamped = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, nextZoom));
-    const focusX = viewport.clientWidth / 2;
-    const focusY = viewport.clientHeight / 2;
+    const rect = viewport.getBoundingClientRect();
+    const focusX = clientX - rect.left;
+    const focusY = clientY - rect.top;
     const worldX = (viewport.scrollLeft + focusX) / zoom;
     const worldY = (viewport.scrollTop + focusY) / zoom;
     setZoom(clamped);
@@ -742,6 +879,23 @@ export default function Canvas({ tables, setTables, relationships, areas, select
       syncViewport();
     });
   }, [syncViewport, zoom]);
+
+  const applyZoom = React.useCallback((nextZoom) => {
+    const viewport = viewportRef.current;
+    if (!viewport) return;
+    const focusX = viewport.clientWidth / 2;
+    const focusY = viewport.clientHeight / 2;
+    const rect = viewport.getBoundingClientRect();
+    applyZoomAtPoint(nextZoom, rect.left + focusX, rect.top + focusY);
+  }, [applyZoomAtPoint]);
+
+  const handleWheel = React.useCallback((event) => {
+    const blocked = event.target?.closest?.(".table-card, .legend, .legend-toggle, .canvas-chrome, .minimap, .zoom-bar, .canvas-btn, .icon-btn");
+    if (blocked) return;
+    event.preventDefault();
+    const factor = Math.exp(-event.deltaY * 0.0015);
+    applyZoomAtPoint(zoom * factor, event.clientX, event.clientY);
+  }, [applyZoomAtPoint, zoom]);
 
   // Fit: scroll the .canvas viewport so the bounding box of all tables is in
   // view. The legacy canvas used to only scroll to the top-left; now it
@@ -782,13 +936,33 @@ export default function Canvas({ tables, setTables, relationships, areas, select
     [selected, tables]
   );
 
-  const openConceptStudio = React.useCallback(() => {
+  const openStudio = React.useCallback(() => {
     setBottomPanelOpen(true);
     setBottomPanelTab("modeler");
   }, [setBottomPanelOpen, setBottomPanelTab]);
 
+  const openPhysicalFlow = React.useCallback(() => {
+    if (!tables.length) {
+      const isDiagram = /\.diagram\.ya?ml$/i.test(String(activeFile?.name || activeFile?.path || ""));
+      if (isDiagram && (projectFiles || []).length > 0) {
+        openModal("dbtYamlPicker");
+      } else {
+        openModal("importDbtRepo");
+      }
+      return;
+    }
+    openStudio();
+  }, [activeFile, openModal, openStudio, projectFiles, tables.length]);
+
   const openNewConceptDialog = React.useCallback((point = {}) => {
     openModal("newConcept", {
+      x: Number.isFinite(Number(point.x)) ? Number(point.x) : undefined,
+      y: Number.isFinite(Number(point.y)) ? Number(point.y) : undefined,
+    });
+  }, [openModal]);
+
+  const openNewLogicalEntityDialog = React.useCallback((point = {}) => {
+    openModal("newLogicalEntity", {
       x: Number.isFinite(Number(point.x)) ? Number(point.x) : undefined,
       y: Number.isFinite(Number(point.y)) ? Number(point.y) : undefined,
     });
@@ -799,22 +973,34 @@ export default function Canvas({ tables, setTables, relationships, areas, select
     setRightPanelTab("DETAILS");
   }, [setRightPanelOpen, setRightPanelTab]);
 
-  const openConceptRelationshipDialog = React.useCallback(() => {
+  const openRelationshipDialog = React.useCallback(() => {
     const orderedTables = Array.isArray(tables) ? tables : [];
     const first = selectedTable || orderedTables[0] || null;
     const second = orderedTables.find((table) => table.id !== first?.id) || orderedTables[1] || null;
+    const normalizedKind = String(modelKind || "physical").toLowerCase();
+    const defaultColumn = (table) => {
+      const cols = Array.isArray(table?.columns) ? table.columns : [];
+      return (
+        cols.find((col) => col?.pk)?.name ||
+        cols.find((col) => String(col?.name || "").toLowerCase() === "id")?.name ||
+        cols[0]?.name ||
+        ""
+      );
+    };
     openModal("newRelationship", {
-      modelKind: "conceptual",
-      conceptualLevel: true,
+      modelKind: normalizedKind,
+      conceptualLevel: normalizedKind === "conceptual",
       tables: orderedTables.map((table) => ({
         id: table.name || table.id,
         name: table.name || table.id,
-        columns: [],
+        columns: normalizedKind === "conceptual" ? [] : (table.columns || []),
       })),
       fromEntity: first?.name || first?.id || "",
       toEntity: second?.name || second?.id || "",
+      fromColumn: normalizedKind === "physical" ? defaultColumn(first) : "",
+      toColumn: normalizedKind === "physical" ? defaultColumn(second) : "",
     });
-  }, [openModal, selectedTable, tables]);
+  }, [modelKind, openModal, selectedTable, tables]);
 
   // Keyboard Delete / Backspace → delete the currently selected entity or
   // relationship. Ignored while the user is typing in an input/textarea or a
@@ -856,15 +1042,16 @@ export default function Canvas({ tables, setTables, relationships, areas, select
             <span>{relationships.length} relationships</span>
           </p>
         </div>
-        <div className="canvas-actions">
+        <div className="canvas-actions" data-tour="workbench-studio">
           {conceptualMode && (
             <>
-              <button className="canvas-btn" onClick={() => openNewConceptDialog()} title="Create a business concept box in this diagram">
+              <button data-tour="add-entities" className="canvas-btn" onClick={() => openNewConceptDialog()} title="Create a business concept box in this diagram">
                 <I.Plus />Add Concept
               </button>
               <button
+                data-tour="add-relationship"
                 className="canvas-btn"
-                onClick={openConceptRelationshipDialog}
+                onClick={openRelationshipDialog}
                 title="Create a business relationship between concept boxes"
                 disabled={tables.length < 2}
               >
@@ -880,13 +1067,55 @@ export default function Canvas({ tables, setTables, relationships, areas, select
               </button>
             </>
           )}
+          {!conceptualMode && logicalMode && (
+            <>
+              <button data-tour="add-entities" className="canvas-btn" onClick={() => openNewLogicalEntityDialog()} title="Create a logical entity with starter attributes and keys">
+                <I.Plus />Add Entity
+              </button>
+              <button
+                data-tour="add-relationship"
+                className="canvas-btn"
+                onClick={openRelationshipDialog}
+                title="Create a logical relationship with roles, cardinality, and optionality"
+                disabled={tables.length < 2}
+              >
+                <I.Relation />Add Relationship
+              </button>
+            </>
+          )}
+          {!conceptualMode && physicalMode && (
+            <>
+              <button
+                data-tour="add-entities"
+                className="canvas-btn"
+                onClick={openPhysicalFlow}
+                title={tables.length ? "Open the physical dbt workflow panel" : "Import dbt YAML into this physical diagram"}
+              >
+                <I.Plus />{tables.length ? "Physical Studio" : "Import dbt YAML"}
+              </button>
+              <button
+                data-tour="add-relationship"
+                className="canvas-btn"
+                onClick={openRelationshipDialog}
+                title="Create a physical dbt/database relationship"
+                disabled={tables.length < 2}
+              >
+                <I.Relation />Add Relationship
+              </button>
+            </>
+          )}
           <button className="canvas-btn" onClick={() => handleFit()} title="Fit all entities into view"><I.Fit />Fit</button>
           <button className="canvas-btn" onClick={() => handleAutoLayoutClick()} title="Auto-layout (ELK)"><I.Grid />Auto-layout</button>
           {onExport && <button className="canvas-btn" onClick={() => onExport()} title="Export DDL / SQL"><I.Download />Export</button>}
         </div>
       </div>
 
-      <div className="canvas" ref={viewportRef}>
+      <div
+        className={`canvas ${isPanning ? "panning" : "can-pan"}`}
+        ref={viewportRef}
+        onMouseDown={handleStartPan}
+        onWheel={handleWheel}
+      >
         <div
           className="canvas-inner"
           style={{ width: scaledWidth, height: scaledHeight }}
@@ -894,12 +1123,14 @@ export default function Canvas({ tables, setTables, relationships, areas, select
             if (e.target === e.currentTarget) onSelect(null);
           }}
           onDoubleClick={(e) => {
-            if (conceptualMode && e.target === e.currentTarget) {
+            if ((conceptualMode || logicalMode) && e.target === e.currentTarget) {
               const rect = stageRef.current?.getBoundingClientRect();
-              openNewConceptDialog({
+              const point = {
                 x: rect ? Math.max(0, (e.clientX - rect.left) / zoom) : undefined,
                 y: rect ? Math.max(0, (e.clientY - rect.top) / zoom) : undefined,
-              });
+              };
+              if (conceptualMode) openNewConceptDialog(point);
+              else openNewLogicalEntityDialog(point);
             }
           }}
         >
@@ -911,29 +1142,42 @@ export default function Canvas({ tables, setTables, relationships, areas, select
               if (e.target === e.currentTarget) onSelect(null);
             }}
             onDoubleClick={(e) => {
-              if (conceptualMode && e.target === e.currentTarget) {
+              if ((conceptualMode || logicalMode) && e.target === e.currentTarget) {
                 const rect = stageRef.current?.getBoundingClientRect();
-                openNewConceptDialog({
+                const point = {
                   x: rect ? Math.max(0, (e.clientX - rect.left) / zoom) : undefined,
                   y: rect ? Math.max(0, (e.clientY - rect.top) / zoom) : undefined,
-                });
+                };
+                if (conceptualMode) openNewConceptDialog(point);
+                else openNewLogicalEntityDialog(point);
               }
             }}
             onDragOver={onDropYamlSource ? (e) => {
               // Accept the drag only if it advertises a YAML source payload —
               // plain file-path drags (folder moves) fall through.
-              if (Array.from(e.dataTransfer.types || []).includes("application/x-datalex-yaml-source")) {
+              const types = Array.from(e.dataTransfer.types || []);
+              if (types.includes("application/x-datalex-yaml-source") || types.includes("application/x-datalex-file-path") || types.includes("text/plain")) {
                 e.preventDefault();
                 e.dataTransfer.dropEffect = "copy";
+                if (physicalMode) setYamlDropActive(true);
               }
+            } : undefined}
+            onDragLeave={onDropYamlSource ? (e) => {
+              if (e.target === e.currentTarget) setYamlDropActive(false);
             } : undefined}
             onDrop={onDropYamlSource ? (e) => {
               const raw = e.dataTransfer.getData("application/x-datalex-yaml-source");
-              if (!raw) return;
-              e.preventDefault();
+              const fallbackPath = e.dataTransfer.getData("application/x-datalex-file-path") || e.dataTransfer.getData("text/plain");
+              setYamlDropActive(false);
               let payload;
-              try { payload = JSON.parse(raw); } catch (_err) { return; }
+              if (raw) {
+                try { payload = JSON.parse(raw); } catch (_err) { payload = null; }
+              }
+              if ((!payload || !payload.path) && fallbackPath && /\.ya?ml$/i.test(String(fallbackPath).trim())) {
+                payload = { path: String(fallbackPath).trim() };
+              }
               if (!payload || !payload.path) return;
+              e.preventDefault();
               const stage = stageRef.current;
               const rect = stage?.getBoundingClientRect();
               const x = rect ? Math.max(0, (e.clientX - rect.left) / zoom) : 60;
@@ -941,6 +1185,42 @@ export default function Canvas({ tables, setTables, relationships, areas, select
               onDropYamlSource({ path: payload.path, x, y });
             } : undefined}
           >
+            {physicalMode && (yamlDropActive || tables.length === 0) && (
+              <div
+                style={{
+                  position: "absolute",
+                  left: 48,
+                  top: 72,
+                  zIndex: 2,
+                  width: 390,
+                  padding: 18,
+                  borderRadius: 14,
+                  border: yamlDropActive ? "1px solid var(--accent)" : "1px solid var(--border-strong)",
+                  background: yamlDropActive
+                    ? "color-mix(in srgb, var(--accent-dim) 55%, var(--bg-2))"
+                    : "color-mix(in srgb, var(--bg-2) 92%, transparent)",
+                  boxShadow: "var(--shadow-pop)",
+                  display: "grid",
+                  gap: 10,
+                  pointerEvents: "none",
+                }}
+              >
+                <div style={{ fontSize: 11, letterSpacing: "0.12em", textTransform: "uppercase", color: "var(--text-tertiary)" }}>
+                  Physical Flow
+                </div>
+                <div style={{ fontSize: 16, fontWeight: 700, color: "var(--text-primary)" }}>
+                  {yamlDropActive ? "Drop dbt YAML onto the diagram" : "Drag dbt YAML from Explorer"}
+                </div>
+                <div style={{ fontSize: 12, lineHeight: 1.5, color: "var(--text-secondary)" }}>
+                  Build the physical diagram from real dbt model or source YAML. Drag a dbt YAML file from the left Explorer into this canvas to add its objects, then define relationships and constraints on top.
+                </div>
+                <div style={{ display: "flex", gap: 8, flexWrap: "wrap", fontSize: 11, color: "var(--text-tertiary)" }}>
+                  <span className="status-pill tone-neutral">Explorer → Canvas</span>
+                  <span className="status-pill tone-neutral">dbt YAML only</span>
+                  <span className="status-pill tone-neutral">Diagram references, not copies</span>
+                </div>
+              </div>
+            )}
             {conceptualMode && tables.length === 0 && (
               <div
                 style={{
@@ -977,12 +1257,19 @@ export default function Canvas({ tables, setTables, relationships, areas, select
                 </div>
               </div>
             )}
-            <SubjectAreas areas={renderedAreas} />
+            <SubjectAreas
+              areas={renderedAreas}
+              tables={tables}
+              setTables={setTables}
+              onMoveGroupEnd={onMoveGroupEnd}
+              zoom={zoom}
+            />
             <Relationships tables={tables} relationships={relationships}
                            selected={selected} onSelect={onSelect}
                            hovered={hovered} setHovered={setHovered}
                            width={world.width} height={world.height}
-                           zoom={zoom} stageRef={stageRef} />
+                           zoom={zoom} stageRef={stageRef}
+                           modelKind={modelKind} />
             {tables.map((t) => (
               <NodeErrorBoundary
                 key={t.id}

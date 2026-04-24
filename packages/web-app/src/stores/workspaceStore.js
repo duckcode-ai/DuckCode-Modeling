@@ -442,6 +442,26 @@ function normalizeWorkspacePath(path) {
   return String(path || "").replace(/\\/g, "/").replace(/^[/\\]+/, "");
 }
 
+function normalizeDiagramTargetFolder(folder, layer = "physical") {
+  const clean = normalizeWorkspacePath(folder).replace(/^DataLex\//i, "").replace(/\/+$/g, "");
+  if (!clean) return `core/${layer}`;
+  if (/^[^/]+\/(conceptual|logical|physical)$/i.test(clean)) return clean;
+
+  const legacy = clean.match(/^([^/]+)\/(Conceptual|Logical|Physical)(?:\/[^/]+)?$/i);
+  if (legacy) {
+    const [, domain, legacyLayer] = legacy;
+    return `${domain}/${legacyLayer.toLowerCase()}`;
+  }
+
+  const artifactFirst = clean.match(/^(?:diagrams|models)\/(conceptual|logical|physical)(?:\/([^/]+))?$/i);
+  if (artifactFirst) {
+    const [, normalizedLayer, domain] = artifactFirst;
+    return `${domain || "core"}/${normalizedLayer.toLowerCase()}`;
+  }
+
+  return clean;
+}
+
 function fileRefMatches(fileInfo, fileRef) {
   const target = normalizeWorkspacePath(fileRef);
   if (!target) return false;
@@ -885,11 +905,9 @@ const useWorkspaceStore = create((set, get) => ({
       };
     });
 
-    // Prefer an empty `.diagram.yaml` overview as the landing tab so the
-    // user sees a blank "build your first diagram" canvas instead of
-    // whichever source file happens to parse first. The api-server
-    // seeds `diagrams/overview.diagram.yaml` when none exists.
-    // Falls back to the previous staging → marts → anything ordering.
+    // Prefer an existing diagram when the import already produced one.
+    // Otherwise land on the first imported dbt/model YAML instead of
+    // silently creating a synthetic overview diagram.
     const firstModel =
       docs.find((d) => /\.diagram\.ya?ml$/i.test(d.fullPath)) ||
       docs.find((d) => /models\/staging\/.*\.ya?ml$/i.test(d.fullPath)) ||
@@ -983,9 +1001,8 @@ const useWorkspaceStore = create((set, get) => ({
 
     const collisions = Array.from(destCounts.entries()).filter(([, n]) => n > 1);
 
-    // Prefer an empty `.diagram.yaml` overview (seeded by the api-server
-    // when the import didn't produce one) so the user lands on a blank
-    // canvas to build, not on whichever source file parses first.
+    // Prefer an existing diagram if the import already included one;
+    // otherwise land on the first imported model YAML.
     const firstModel =
       docs.find((d) => /\.diagram\.ya?ml$/i.test(d.fullPath)) ||
       docs.find((d) => /models\/staging\/.*\.ya?ml$/i.test(d.fullPath)) ||
@@ -1715,27 +1732,28 @@ const useWorkspaceStore = create((set, get) => ({
     }
   },
 
-  /* Create a new .diagram.yaml file. Defaults to `diagrams/` inside the
-     dedicated DataLex workspace to match the conventional layout, but accepts `targetFolder` so the
-     Explorer context-menu "New diagram here" can land it in the clicked
-     folder instead. Target folder is a POSIX subpath relative to the
-     project model root — same shape as Explorer node `path` values. */
+  /* Create a new .diagram.yaml file. Defaults to the canonical
+     domain-first physical folder inside the DataLex workspace, but accepts
+     `targetFolder` so the Explorer context-menu "New diagram here" can land
+     it in the clicked folder instead. Target folder is a POSIX subpath
+     relative to the project model root — same shape as Explorer node
+     `path` values. */
   createNewDiagram: async (slug, targetFolder = "") => {
     const clean = String(slug || "untitled")
       .trim()
       .toLowerCase()
       .replace(/[^a-z0-9_]+/g, "_")
       .replace(/^_+|_+$/g, "") || "untitled";
-    const folder = String(targetFolder || "").replace(/^\/+|\/+$/g, "");
+    const folder = normalizeDiagramTargetFolder(targetFolder, "physical");
     const subpath = folder
       ? `${folder}/${clean}.diagram.yaml`
-      : `DataLex/Diagrams/Physical/core/postgres/${clean}.diagram.yaml`;
+      : `core/physical/${clean}.diagram.yaml`;
     const content =
       `kind: diagram\n` +
       `name: ${clean}\n` +
       `title: ${clean.replace(/_/g, " ")}\n` +
       `layer: physical\n` +
-      `domain: core\n` +
+      `domain: shared\n` +
       `entities: []\n`;
     await get().createNewFile(subpath, content);
     return subpath;

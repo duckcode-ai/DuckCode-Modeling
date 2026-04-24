@@ -71,7 +71,7 @@ export function TopBar({
       </div>
       <div className="toolbar">
         <div className="tool-group">
-          <button className="tool-btn" title="New modeling asset" onClick={onNewFile}><I.Plus /></button>
+          <button data-tour="new-modeling-asset" className="tool-btn" title="New modeling asset" onClick={onNewFile}><I.Plus /></button>
           <button className="tool-btn" title="Open project" onClick={onOpenFile}><I.Folder /></button>
           <button className="tool-btn" title="Import schema (dbt / SQL / DBML)" onClick={onImport}><I.Download style={{ transform: "rotate(180deg)" }} /></button>
           {onImportDbt && (

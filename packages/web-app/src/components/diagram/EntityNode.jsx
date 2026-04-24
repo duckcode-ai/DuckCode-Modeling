@@ -362,6 +362,8 @@ export default function EntityNode({ data }) {
   const clusterBy = Array.isArray(data.cluster_by) ? data.cluster_by : [];
   const distribution = data.distribution || "";
   const storage = data.storage || "";
+  const interfaceMeta = data.interface && typeof data.interface === "object" ? data.interface : null;
+  const isInterface = Boolean(interfaceMeta?.enabled) || ["shared", "contracted"].includes(String(interfaceMeta?.stability || "").toLowerCase());
 
   const schemaColor = getSchemaColor(data.schemaColorIndex);
   const schemaName = data.subject_area || data.schema || null;
@@ -404,6 +406,18 @@ export default function EntityNode({ data }) {
     modelingBadges.push(
       <span key="mapping" className="px-1.5 py-0 rounded text-[9px] font-bold bg-amber-100 text-amber-700 border border-amber-200">
         MAP
+      </span>
+    );
+  }
+  if (isInterface) {
+    modelingBadges.push(
+      <span
+        key="interface"
+        className="inline-flex items-center gap-0.5 px-1.5 py-0 rounded text-[9px] font-bold bg-emerald-100 text-emerald-700 border border-emerald-300"
+        title={`Interface ${interfaceMeta?.status || "draft"} · ${interfaceMeta?.stability || "shared"}`}
+      >
+        <Shield size={8} />
+        IFACE
       </span>
     );
   }
@@ -516,6 +530,11 @@ export default function EntityNode({ data }) {
             {relCount > 0 && (
               <span className="flex items-center gap-0.5 text-[9px] text-slate-400">
                 <ArrowRightLeft size={7} />{relCount}
+              </span>
+            )}
+            {isInterface && (
+              <span className="flex items-center gap-0.5 text-[9px] font-bold text-emerald-700" title="Governed Interface">
+                <Shield size={7} />IF
               </span>
             )}
           </div>

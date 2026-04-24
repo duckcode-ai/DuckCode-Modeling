@@ -1,6 +1,7 @@
 import React from "react";
 import { ArrowRight, Boxes, FileText, GitBranch, Layers3, TableProperties } from "lucide-react";
 import { PanelFrame, PanelSection, PanelCard, PanelEmpty, StatusPill, KeyValueGrid } from "./PanelFrame";
+import ConstraintBadges from "../shared/ConstraintBadges";
 
 function endpointLabel(endpoint) {
   const table = endpoint?.table || endpoint?.entity || "—";
@@ -121,15 +122,7 @@ export default function SelectionSummaryPanel({
                 subtitle={column.description || undefined}
                 actions={<StatusPill tone={column.pk ? "accent" : (column.fk || column.semanticFk) ? "warning" : "neutral"}>{column.type || "—"}</StatusPill>}
               >
-                <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-                  {column.pk && <StatusPill tone="accent">PK</StatusPill>}
-                  {(column.fk || column.semanticFk) && <StatusPill tone="warning">FK</StatusPill>}
-                  {column.nn && <StatusPill tone="info">NOT NULL</StatusPill>}
-                  {column.unique && <StatusPill tone="success">UNIQUE</StatusPill>}
-                  {column.generated && <StatusPill tone="neutral">GENERATED</StatusPill>}
-                  {column.default != null && String(column.default).trim() !== "" && <StatusPill tone="neutral">DEFAULT</StatusPill>}
-                  {column.check != null && String(column.check).trim() !== "" && <StatusPill tone="warning">CHECK</StatusPill>}
-                </div>
+                <ConstraintBadges column={column} withLabels showEmpty />
               </PanelCard>
             ))}
             {columns.length > 12 && (

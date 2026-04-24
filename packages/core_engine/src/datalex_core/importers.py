@@ -706,6 +706,7 @@ def import_dbt_schema_yml(
         tags: Optional[List[str]] = None,
         schema_name: str = "",
         subject_area: str = "",
+        interface: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         entity_name = _to_pascal(raw_name)
         if entity_name in entities_by_name:
@@ -720,6 +721,8 @@ def import_dbt_schema_yml(
                 merged = set(existing.get("tags", []))
                 merged.update(str(t) for t in tags if t)
                 existing["tags"] = sorted(merged)
+            if interface and not existing.get("interface"):
+                existing["interface"] = interface
             return existing
 
         entity: Dict[str, Any] = {
@@ -734,6 +737,8 @@ def import_dbt_schema_yml(
             entity["subject_area"] = subject_area
         if tags:
             entity["tags"] = sorted({str(t) for t in tags if t})
+        if interface:
+            entity["interface"] = interface
         entities_by_name[entity_name] = entity
         return entity
 
@@ -873,13 +878,16 @@ def import_dbt_schema_yml(
             continue
         dbt_tags = dbt_model.get("tags") if isinstance(dbt_model.get("tags"), list) else []
         dbt_meta = dbt_model.get("meta") if isinstance(dbt_model.get("meta"), dict) else {}
+        datalex_meta = dbt_meta.get("datalex") if isinstance(dbt_meta.get("datalex"), dict) else {}
+        interface_meta = datalex_meta.get("interface") if isinstance(datalex_meta.get("interface"), dict) else None
         entity = get_or_create_entity(
             raw_name=model_raw_name,
             entity_type="view",
             description=str(dbt_model.get("description", "")).strip(),
             tags=dbt_tags,
             schema_name=str(dbt_model.get("schema", "")).strip(),
-            subject_area=str(dbt_meta.get("subject_area", "")).strip(),
+            subject_area=str(dbt_meta.get("subject_area") or datalex_meta.get("domain") or "").strip(),
+            interface=interface_meta,
         )
         process_columns(dbt_model.get("columns"), entity)
 
@@ -1132,6 +1140,12 @@ def sync_dbt_schema_yml(
             dbt_meta["owner"] = entity["owner"]
         if not dbt_meta.get("subject_area") and entity.get("subject_area"):
             dbt_meta["subject_area"] = entity["subject_area"]
+        if entity.get("interface"):
+            datalex_meta = dbt_meta.setdefault("datalex", {})
+            if not isinstance(datalex_meta, dict):
+                datalex_meta = {}
+                dbt_meta["datalex"] = datalex_meta
+            datalex_meta.setdefault("interface", entity["interface"])
 
         # Dimensional metadata
         entity_type = str(entity.get("type", "table"))

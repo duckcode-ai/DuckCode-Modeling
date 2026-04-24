@@ -321,6 +321,45 @@ relationships:
   assert.equal(adapted.relationships[0].toRole, "placed orders");
 });
 
+test("adaptDiagramYaml preserves logical entity-level relationships from card drags", () => {
+  const diagramYaml = `
+kind: diagram
+name: sales_logical
+layer: logical
+entities:
+  - name: Customer
+    type: logical_entity
+    fields:
+      - { name: customer_key, type: number, primary_key: true }
+  - name: Sales Order
+    type: logical_entity
+    fields:
+      - { name: order_key, type: number, primary_key: true }
+relationships:
+  - name: customer_to_sales_order
+    from: { entity: Customer }
+    to: { entity: Sales Order }
+    cardinality: one_to_many
+    from_role: account holder
+    to_role: placed orders
+`;
+  const adapted = adaptDiagramYaml(diagramYaml, []);
+  assert.ok(adapted);
+  assert.equal(adapted.modelKind, "logical");
+  assert.equal(adapted.relationships.length, 1);
+  const customer = adapted.tables.find((table) => table.name === "Customer");
+  const order = adapted.tables.find((table) => table.name === "Sales Order");
+  assert.ok(customer);
+  assert.ok(order);
+  assert.equal(adapted.relationships[0].from.table, customer.id);
+  assert.equal(adapted.relationships[0].from.col, undefined);
+  assert.equal(adapted.relationships[0].to.table, order.id);
+  assert.equal(adapted.relationships[0].to.col, undefined);
+  assert.equal(adapted.relationships[0]._conceptualLevel, true);
+  assert.equal(adapted.relationships[0].fromRole, "account holder");
+  assert.equal(adapted.relationships[0].toRole, "placed orders");
+});
+
 test("adaptDiagramYaml keeps same-named entities from different files as distinct nodes", () => {
   const diagramYaml = `
 kind: diagram

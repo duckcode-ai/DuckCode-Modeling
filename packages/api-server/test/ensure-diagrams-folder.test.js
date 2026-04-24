@@ -1,6 +1,6 @@
-// Phase 3.1 — GET /projects/:id/files is a project-open hook: calling it
-// must idempotently seed `datalex/diagrams/` so the Explorer shows the
-// conventional diagrams location for projects that were not created via
+// GET /projects/:id/files is a project-open hook: calling it must
+// idempotently seed the conventional DataLex folders so the Explorer
+// shows a clean domain-first workspace layout for projects not created via
 // dbt import.
 
 import { test, describe, before, after } from "node:test";
@@ -10,7 +10,7 @@ import { join } from "path";
 import request from "supertest";
 import { getApp, createProject } from "./helpers/harness.js";
 
-describe("GET /api/projects/:id/files — ensureDiagramsFolder hook", () => {
+describe("GET /api/projects/:id/files — ensureWorkspaceFolders hook", () => {
   let app;
   let project;
 
@@ -20,20 +20,24 @@ describe("GET /api/projects/:id/files — ensureDiagramsFolder hook", () => {
   });
   after(() => project.cleanup());
 
-  test("seeds datalex/diagrams/.gitkeep on first open", async () => {
-    assert.equal(existsSync(join(project.modelPath, "datalex", "diagrams")), false, "fixture starts without a diagrams folder");
+  test("seeds domain-first DataLex workspace folders on first open", async () => {
+    assert.equal(existsSync(join(project.modelPath, "core", "conceptual")), false, "fixture starts without a conceptual folder");
     const res = await request(app).get(`/api/projects/${project.id}/files`);
     assert.equal(res.status, 200);
-    assert.equal(existsSync(join(project.modelPath, "datalex", "diagrams")), true);
-    assert.equal(existsSync(join(project.modelPath, "datalex", "diagrams", ".gitkeep")), true);
+    assert.equal(existsSync(join(project.modelPath, "core", "conceptual")), true);
+    assert.equal(existsSync(join(project.modelPath, "core", "logical")), true);
+    assert.equal(existsSync(join(project.modelPath, "core", "physical")), true);
+    assert.equal(existsSync(join(project.modelPath, "imported", "physical")), true);
+    assert.equal(existsSync(join(project.modelPath, "generated-sql", "ddl")), true);
+    assert.equal(existsSync(join(project.modelPath, "core", "conceptual", ".gitkeep")), true);
   });
 
   test("is idempotent — does not overwrite existing files in the folder", async () => {
-    const userFile = join(project.modelPath, "datalex", "diagrams", "overview.diagram.yaml");
+    const userFile = join(project.modelPath, "core", "conceptual", "overview.diagram.yaml");
     writeFileSync(userFile, "kind: diagram\nname: overview\nentities: []\n");
     const res = await request(app).get(`/api/projects/${project.id}/files`);
     assert.equal(res.status, 200);
-    const entries = readdirSync(join(project.modelPath, "datalex", "diagrams"));
+    const entries = readdirSync(join(project.modelPath, "core", "conceptual"));
     assert.ok(entries.includes("overview.diagram.yaml"), "user's diagram file is preserved");
   });
 });

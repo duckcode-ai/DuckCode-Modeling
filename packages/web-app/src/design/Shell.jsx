@@ -49,8 +49,10 @@ const ApplyDdlDialog      = React.lazy(() => import("../components/dialogs/Apply
 const PanelDialog         = React.lazy(() => import("../components/dialogs/PanelDialog"));
 const GitBranchDialog     = React.lazy(() => import("../components/dialogs/GitBranchDialog"));
 const ImportDbtRepoDialog = React.lazy(() => import("../components/dialogs/ImportDbtRepoDialog"));
+const DbtYamlPickerDialog = React.lazy(() => import("../components/dialogs/DbtYamlPickerDialog"));
 const NewRelationshipDialog = React.lazy(() => import("../components/dialogs/NewRelationshipDialog"));
 const NewConceptDialog    = React.lazy(() => import("../components/dialogs/NewConceptDialog"));
+const NewLogicalEntityDialog = React.lazy(() => import("../components/dialogs/NewLogicalEntityDialog"));
 const EntityPickerDialog  = React.lazy(() => import("../components/dialogs/EntityPickerDialog"));
 const BulkRenameColumnDialog = React.lazy(() => import("../components/dialogs/BulkRenameColumnDialog"));
 const ShareBundleDialog   = React.lazy(() => import("../components/dialogs/ShareBundleDialog"));
@@ -138,14 +140,15 @@ import "../styles/datalex-integration.css";
 
 const THEME_STORAGE = "datalex.theme";
 const DENSITY_STORAGE = "datalex.density";
+const LEFT_PANEL_WIDTH_STORAGE = "datalex.leftPanelWidth";
+const LEFT_PANEL_MIN = 220;
+const LEFT_PANEL_MAX = 520;
 
 const LOGICAL_BOTTOM_TABS = [
-  { id: "modeler",       label: "Studio",        icon: Wand2 },
-  { id: "attributes",    label: "Attributes",    icon: Columns3 },
-  { id: "keys",          label: "Keys",          icon: KeyRound },
-  { id: "relationships", label: "Relationships", icon: GitBranch },
+  { id: "modeler",       label: "Blueprint",     icon: Wand2 },
   { id: "validation",    label: "Validation",    icon: ShieldCheck },
   { id: "diff",          label: "Diff",          icon: GitCompare },
+  { id: "history",       label: "History",       icon: Clock },
 ];
 
 const PHYSICAL_BOTTOM_TABS = [
@@ -250,7 +253,7 @@ function BottomPanelContent({ tab, table, rel, relationships, schema, activeFile
       node = <LayerSupportPanel title="dbt YAML" eyebrow="Physical" description="Physical diagrams are composed from dbt model/source YAML. Drag dbt YAML files from Explorer into this diagram and model constraints here." table={table} rel={rel} relationships={relationships} schema={schema} activeFile={activeFile} isDiagramFile={isDiagramFile} />;
       break;
     case "sql":
-      node = <LayerSupportPanel title="SQL Preview" eyebrow="Physical" description="Generate or export SQL from physical dbt-backed diagrams. Logical diagrams can stage generated dbt SQL/YAML under DataLex/Generated/dbt." table={table} rel={rel} relationships={relationships} schema={schema} activeFile={activeFile} isDiagramFile={isDiagramFile} />;
+      node = <LayerSupportPanel title="SQL Preview" eyebrow="Physical" description="Generate or export SQL from physical dbt-backed diagrams. Logical diagrams can stage generated dbt SQL/YAML under generated-sql/ and the active domain folder." table={table} rel={rel} relationships={relationships} schema={schema} activeFile={activeFile} isDiagramFile={isDiagramFile} />;
       break;
     case "constraints":
       node = <LayerSupportPanel title="Constraints" eyebrow="Physical" description="Review physical names, dialect data types, PK/FK/AK flags, relationship tests, nullability, and generated constraint readiness." table={table} rel={rel} relationships={relationships} schema={schema} activeFile={activeFile} isDiagramFile={isDiagramFile} />;
@@ -718,21 +721,41 @@ export default function Shell() {
 
   const handleSelect = (sel) => {
     if (sel == null) { setSelected(null); return; }
+    const ui = useUiStore.getState();
+    const logicalMode = String(activeModelKind || "").toLowerCase() === "logical";
     if (typeof sel === "string") {
       setSelected({ type: "table", id: sel });
       const t = tables.find((x) => x.id === sel);
       if (t) setSelectedCol(t.columns[0]?.name);
+      if (logicalMode) {
+        ui.setRightPanelOpen(true);
+        ui.setRightPanelTab("DETAILS");
+      }
     } else {
       setSelected(sel);
       if (sel.type === "table") {
         const t = tables.find((x) => x.id === sel.id);
         if (t) setSelectedCol(t.columns[0]?.name);
+        if (logicalMode) {
+          ui.setRightPanelOpen(true);
+          ui.setRightPanelTab("DETAILS");
+        }
+      } else if (sel.type === "rel" && logicalMode) {
+        ui.setRightPanelOpen(true);
+        ui.setRightPanelTab("RELATIONS");
       }
     }
   };
 
   /* ── Legend ────────────────────────────────────────────────────── */
   const [legendOpen, setLegendOpen] = React.useState(false);
+  const [leftPanelWidth, setLeftPanelWidth] = React.useState(() => {
+    try {
+      const raw = Number(window.localStorage.getItem(LEFT_PANEL_WIDTH_STORAGE));
+      if (Number.isFinite(raw)) return Math.min(LEFT_PANEL_MAX, Math.max(LEFT_PANEL_MIN, raw));
+    } catch (_err) {}
+    return 280;
+  });
 
   /* ── Project tabs: derive from workspace openProjects ─────────── */
   const projectTabs = React.useMemo(() => {
@@ -1108,6 +1131,56 @@ export default function Shell() {
     }
   }, [tables]);
 
+  const handleStartLeftResize = React.useCallback((event) => {
+    event.preventDefault();
+    const startX = event.clientX;
+    const startWidth = leftPanelWidth;
+    const onMove = (moveEvent) => {
+      const next = Math.min(
+        LEFT_PANEL_MAX,
+        Math.max(LEFT_PANEL_MIN, startWidth + (moveEvent.clientX - startX)),
+      );
+      setLeftPanelWidth(next);
+    };
+    const onUp = () => {
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", onUp);
+    };
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
+  }, [leftPanelWidth]);
+
+  React.useEffect(() => {
+    try {
+      window.localStorage.setItem(LEFT_PANEL_WIDTH_STORAGE, String(leftPanelWidth));
+    } catch (_err) {}
+  }, [leftPanelWidth]);
+
+  const handleGroupMoveEnd = React.useCallback((movedTables) => {
+    const moved = Array.isArray(movedTables) ? movedTables.filter(Boolean) : [];
+    if (moved.length === 0) return;
+    const s = useWorkspaceStore.getState();
+    if (!s.activeFileContent) return;
+    const activeName = s.activeFile?.name || "";
+    const activeIsDiagram = /\.diagram\.ya?ml$/i.test(activeName);
+    let next = s.activeFileContent;
+    moved.forEach((table) => {
+      if (!next) return;
+      if (activeIsDiagram) {
+        const sourceFile = table._sourceFile || "";
+        next = sourceFile
+          ? setDiagramEntityDisplay(next, sourceFile, table.name || table._entityName || table.id, { x: table.x, y: table.y })
+          : setInlineDiagramEntityDisplay(next, table.name || table._entityName || table.id, { x: table.x, y: table.y });
+      } else {
+        next = setEntityDisplay(next, table.name || table.id, { x: table.x, y: table.y });
+      }
+    });
+    if (next && next !== s.activeFileContent) {
+      s.updateContent(next);
+      s.flushAutosave?.().catch(() => {});
+    }
+  }, []);
+
   /* ── Drag-to-connect: create the relationship directly when the active
      file can safely accept it, and only fall back to the dialog for
      ambiguous/manual cases. */
@@ -1121,8 +1194,51 @@ export default function Shell() {
     const toEntityName = String(toTable?.name || payload?.toEntity || "").trim();
     const fromColumn = String(payload?.fromColumn || "").trim();
     const toColumn = String(payload?.toColumn || "").trim();
-    const dialogPayload = { ...payload, modelKind: activeModelKind };
-    if (!fromEntityName || !toEntityName || !fromColumn || !toColumn) {
+    const normalizedKind = String(activeModelKind || "").toLowerCase();
+    const entityLevelRelationship = normalizedKind === "conceptual" || normalizedKind === "logical";
+    const dialogPayload = {
+      ...payload,
+      modelKind: activeModelKind,
+      fromEntity: fromEntityName,
+      toEntity: toEntityName,
+      fromColumn,
+      toColumn,
+      tables: (tables || []).map((table) => ({
+        id: table.name || table.id,
+        name: table.name || table.id,
+        columns: entityLevelRelationship ? [] : (table.columns || []),
+      })),
+    };
+
+    if (!fromEntityName || !toEntityName) {
+      openModal("newRelationship", dialogPayload);
+      return;
+    }
+
+    if (isDiagramFile && entityLevelRelationship && (!fromColumn || !toColumn)) {
+      const next = addDiagramRelationship(s.activeFileContent, {
+        name: defaultRelationshipName(fromEntityName, toEntityName),
+        from: { entity: fromEntityName },
+        to: { entity: toEntityName },
+        cardinality: normalizedKind === "conceptual" ? "many_to_many" : "many_to_one",
+        verb: normalizedKind === "conceptual" ? "relates to" : undefined,
+      });
+      if (!next) {
+        openModal("newRelationship", dialogPayload);
+        return;
+      }
+      if (next === s.activeFileContent) {
+        addToast({ type: "info", message: `Relationship ${fromEntityName} → ${toEntityName} already exists.` });
+        return;
+      }
+      s.updateContent(next);
+      s.flushAutosave?.().catch(() => {});
+      s.bumpModelGraphVersion?.();
+      addToast({ type: "success", message: `Linked ${fromEntityName} → ${toEntityName}.` });
+      return;
+    }
+
+    if (!fromColumn || !toColumn) {
       openModal("newRelationship", dialogPayload);
       return;
     }
@@ -1150,6 +1266,7 @@ export default function Shell() {
       }
       s.updateContent(next);
       s.flushAutosave?.().catch(() => {});
+      s.bumpModelGraphVersion?.();
       addToast({ type: "success", message: `Linked ${fromEntityName}.${fromColumn} → ${toEntityName}.${toColumn}.` });
       return;
     }
@@ -1167,6 +1284,7 @@ export default function Shell() {
     }
     s.updateContent(result.yaml);
     s.flushAutosave?.().catch(() => {});
+    s.bumpModelGraphVersion?.();
     addToast({ type: "success", message: `Linked ${fromEntityName}.${fromColumn} → ${toEntityName}.${toColumn}.` });
   }, [activeModelKind, addToast, isDiagramFile, openModal, tables]);
 
@@ -1209,14 +1327,17 @@ export default function Shell() {
 
   /* ── Shell render ──────────────────────────────────────────────── */
   return (
-    <div className={`app ${bottomPanelOpen ? "with-bottom" : ""} ${rightPanelOpen ? "" : "no-right"}`}>
+    <div
+      className={`app ${bottomPanelOpen ? "with-bottom" : ""} ${rightPanelOpen ? "" : "no-right"}`}
+      style={{ "--left-w": `${leftPanelWidth}px` }}
+    >
       <TopBar
         onOpenCmd={() => setCommandPaletteOpen(true)}
         theme={theme}
         setTheme={setTheme}
         onNewTable={handleNewTable}
         onNewFile={() => (
-          activeProjectId
+          activeFile
             ? openModal("newFile", { layerHint: activeModelKind, domainHint: schema?.domain || "" })
             : openModal("addProject")
         )}
@@ -1300,6 +1421,14 @@ export default function Shell() {
         onOpenConnectors={() => openModal("connectors")}
         onManageConnections={() => openModal("connectionsManager")}
       />
+      <div
+        className="left-resizer"
+        onMouseDown={handleStartLeftResize}
+        title="Drag to resize sidebar"
+        role="separator"
+        aria-orientation="vertical"
+        aria-label="Resize left sidebar"
+      />
 
       {/* Main canvas cell swaps based on the top-bar ViewSwitcher.
           Only one surface mounts at a time; the others lazy-load on first
@@ -1313,6 +1442,7 @@ export default function Shell() {
           selected={selected}
           onSelect={handleSelect}
           onMoveEnd={handleTableMoveEnd}
+          onMoveGroupEnd={handleGroupMoveEnd}
           onConnect={handleCanvasConnect}
           onDropYamlSource={handleCanvasDropYamlSource}
           onDeleteEntity={handleDeleteEntity}
@@ -1461,7 +1591,9 @@ export default function Shell() {
         {activeModal === "importDialog"       && <PanelDialog kind="import" />}
         {activeModal === "connectors"         && <PanelDialog kind="connectors" />}
         {activeModal === "importDbtRepo"      && <ImportDbtRepoDialog />}
+        {activeModal === "dbtYamlPicker"      && <DbtYamlPickerDialog />}
         {activeModal === "newConcept"         && <NewConceptDialog />}
+        {activeModal === "newLogicalEntity"   && <NewLogicalEntityDialog />}
         {activeModal === "newRelationship"    && <NewRelationshipDialog />}
         {activeModal === "entityPicker"       && <EntityPickerDialog />}
         {activeModal === "bulkRenameColumn"   && <BulkRenameColumnDialog />}

@@ -408,9 +408,10 @@ input { font: inherit; color: inherit; }
    App shell grid
    ============================================================ */
 .app {
+  --left-w: 280px;
   display: grid;
   grid-template-rows: 44px 36px 1fr 26px;
-  grid-template-columns: 260px 1fr var(--right-w, 320px);
+  grid-template-columns: var(--left-w, 280px) 1fr var(--right-w, 320px);
   grid-template-areas:
     "topbar topbar topbar"
     "tabs   tabs   tabs"
@@ -418,12 +419,38 @@ input { font: inherit; color: inherit; }
     "status status status";
   height: 100vh;
   background: var(--bg-0);
+  position: relative;
 }
 /* When the right panel is closed the shell collapses the slot entirely,
    giving the canvas the extra horizontal room. The JSX sets this class on
    `.app` via `!rightPanelOpen`. */
 .app.no-right {
-  grid-template-columns: 260px 1fr 0;
+  grid-template-columns: var(--left-w, 280px) 1fr 0;
+}
+
+.left-resizer {
+  position: absolute;
+  top: 80px;
+  bottom: 26px;
+  left: calc(var(--left-w, 280px) - 3px);
+  width: 7px;
+  cursor: col-resize;
+  z-index: 30;
+  background: transparent;
+}
+.left-resizer::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 3px;
+  width: 1px;
+  background: var(--border-default);
+  transition: background 120ms var(--ease);
+}
+.left-resizer:hover::before,
+.left-resizer:active::before {
+  background: var(--accent);
 }
 
 /* ============================================================
@@ -1124,6 +1151,10 @@ input { font: inherit; color: inherit; }
   position: absolute;
   inset: 0;
   overflow: auto;
+  cursor: grab;
+}
+.canvas.panning {
+  cursor: grabbing;
 }
 .canvas-inner {
   position: relative;
@@ -1136,15 +1167,17 @@ input { font: inherit; color: inherit; }
 .subject-area {
   position: absolute;
   border: 1.5px dashed;
-  border-radius: 16px;
-  background: color-mix(in srgb, var(--text-primary) 2%, transparent);
-  pointer-events: none;
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--text-primary) 1.4%, transparent);
+  pointer-events: auto;
+  cursor: grab;
 }
+.subject-area:active { cursor: grabbing; }
 .subject-area-label {
   position: absolute;
-  top: -11px; left: 18px;
-  padding: 2px 10px;
-  font-size: 10px;
+  top: -10px; left: 14px;
+  padding: 2px 8px;
+  font-size: 9.5px;
   font-weight: 600;
   letter-spacing: 0.08em;
   text-transform: uppercase;
@@ -1177,6 +1210,74 @@ input { font: inherit; color: inherit; }
     0 0 0 1px var(--accent),
     0 0 0 4px var(--accent-dim),
     var(--shadow-pop);
+}
+.table-card.concept-card {
+  border-radius: 7px;
+  box-shadow: 0 1px 0 rgba(255,255,255,0.04) inset, 0 6px 18px rgba(0,0,0,0.18);
+}
+.table-card.concept-card:hover {
+  box-shadow: 0 10px 26px rgba(0,0,0,0.22);
+}
+.table-card.concept-card .tc-header {
+  gap: 6px;
+  height: 28px;
+  padding-inline: 8px;
+}
+.table-card.concept-card .tc-header > svg {
+  width: 13px;
+  height: 13px;
+}
+.table-card.concept-card .tc-name {
+  font-size: 12px;
+}
+.table-card.concept-card .tc-schema {
+  font-size: 9px;
+}
+.table-card.concept-card .tc-connect-handle {
+  width: 18px !important;
+  height: 18px !important;
+  border-radius: 5px !important;
+}
+.concept-card-tags {
+  padding: 8px 10px 5px;
+  display: flex;
+  flex-wrap: nowrap;
+  gap: 5px;
+  min-width: 0;
+}
+.concept-card-tag {
+  min-width: 0;
+  max-width: 96px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 9.5px;
+  padding: 2px 6px;
+  border-radius: 999px;
+  background: rgba(148,163,184,0.11);
+  border: 1px solid var(--border-default);
+  color: var(--text-secondary);
+}
+.concept-card-body {
+  padding: 0 10px 9px;
+  display: grid;
+  gap: 4px;
+}
+.concept-card-line {
+  font-size: 10.5px;
+  color: var(--text-secondary);
+  line-height: 1.35;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+}
+.concept-card-line.muted {
+  color: var(--text-tertiary);
+}
+.table-card.concept-card .tc-footer {
+  padding: 4px 9px;
+  font-size: 9px;
 }
 
 .tc-header {
@@ -1876,17 +1977,18 @@ input { font: inherit; color: inherit; }
 .rel-line.active { stroke: var(--rel-line-active); stroke-width: 2; }
 .rel-line.identifying { stroke-width: 1.8; }
 .rel-label {
-  font-family: var(--font-mono);
-  font-size: 9.5px;
-  font-weight: 600;
-  fill: var(--text-secondary);
+  font-family: var(--font-ui);
+  font-size: 10.5px;
+  font-weight: 500;
+  letter-spacing: 0.01em;
+  fill: color-mix(in srgb, var(--text-secondary) 88%, var(--text-primary) 12%);
   paint-order: stroke;
-  stroke: var(--bg-canvas);
-  stroke-width: 3.5;
+  stroke: color-mix(in srgb, var(--bg-canvas) 82%, transparent);
+  stroke-width: 2.4;
   stroke-linejoin: round;
 }
-.rel-label.active { fill: var(--rel-line-active); }
-.rel-label.dimmed { fill: var(--text-muted); opacity: 0.5; stroke-width: 2; }
+.rel-label.active { fill: color-mix(in srgb, var(--rel-line-active) 82%, var(--text-primary) 18%); }
+.rel-label.dimmed { fill: var(--text-muted); opacity: 0.58; stroke-width: 1.8; }
 
 /* Tooltip */
 .tooltip {
@@ -1922,13 +2024,45 @@ input { font: inherit; color: inherit; }
 .subject-area.cat-audit .subject-area-label    { color: var(--cat-audit); }
 \n
 /* ============== Relationship additions ============== */
-.tc-colflags { display: flex; align-items: center; gap: 3px; }
-.tc-cf { display: inline-grid; place-items: center; width: 12px; height: 12px; color: var(--text-muted); opacity: 0.7; }
-.tc-cf:hover { opacity: 1; color: var(--text-secondary); }
-.tc-cf-uq { color: var(--fk); }
-.tc-cf-ck { color: var(--idx); }
-.tc-cf-df { color: var(--cat-product); }
-.tc-cf-gn { color: var(--cat-access); }
+.tc-colflags { display: flex; align-items: center; justify-content: flex-end; min-width: 46px; }
+.constraint-badges {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+.constraint-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  min-width: 14px;
+  min-height: 14px;
+  color: var(--text-muted);
+  opacity: 0.92;
+}
+.constraint-badge-label {
+  font-size: 10px;
+  line-height: 1;
+  letter-spacing: 0.02em;
+  color: inherit;
+}
+.constraint-badge:hover {
+  opacity: 1;
+}
+.constraint-badge-accent { color: var(--pk); }
+.constraint-badge-warning { color: var(--fk); }
+.constraint-badge-info { color: var(--accent); }
+.constraint-badge-success { color: var(--status-success); }
+.constraint-badge-neutral { color: var(--text-secondary); }
+.constraint-badge-ck { color: var(--idx); }
+.constraint-badge-df { color: var(--cat-product); }
+.constraint-badge-gn { color: var(--cat-access); }
+.constraint-badge-empty {
+  color: var(--text-muted);
+  opacity: 0.7;
+  font-size: 12px;
+}
 
 .table-card.junction { border-style: dashed; }
 .tc-badge.junction { background: var(--cat-access-soft); color: var(--cat-access); }

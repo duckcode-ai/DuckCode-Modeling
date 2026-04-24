@@ -1041,7 +1041,7 @@ export default function ConnectorsPanel() {
 
     try {
       const outputRoot = targetRel || "DataLex";
-      const generatedRoot = joinPath(outputRoot, "Generated/dbt/imported");
+      const generatedRoot = joinPath(outputRoot, "imported/physical");
       let targetProject = (projects || []).find(
         (p) => normalizePath(p.path) === normalizePath(repoPath)
       );
@@ -1128,11 +1128,11 @@ export default function ConnectorsPanel() {
       }
 
       const diagramSlug = sanitizeModelStem(projectName || dbtScan.repoName || "dbt_physical", "dbt_physical");
-      const diagramPathBase = joinPath(outputRoot, `Diagrams/Physical/imported/postgres/${diagramSlug}.diagram.yaml`);
+      const diagramPathBase = joinPath(outputRoot, `imported/physical/${diagramSlug}.diagram.yaml`);
       let diagramPath = diagramPathBase;
       let diagramSuffix = 1;
       while (reservedNames.has(diagramPath) || (!dbtOverwrite && existingPaths.has(normalizePath(diagramPath)))) {
-        diagramPath = joinPath(outputRoot, `Diagrams/Physical/imported/postgres/${diagramSlug}_${diagramSuffix}.diagram.yaml`);
+        diagramPath = joinPath(outputRoot, `imported/physical/${diagramSlug}_${diagramSuffix}.diagram.yaml`);
         diagramSuffix += 1;
       }
       const diagramEntities = generatedFiles.map((file, index) => {
@@ -2114,7 +2114,7 @@ export default function ConnectorsPanel() {
                     className="w-full px-2 py-1 text-[11px] rounded border border-border-primary bg-bg-primary text-text-primary focus:outline-none focus:border-accent-blue"
                   />
                   <div className="text-[9px] text-text-muted mt-1">
-                  Output names use folder + file path, e.g. <code>DataLex/Generated/dbt/imported/models_src_schema.model.yaml</code>, plus a physical diagram under <code>DataLex/Diagrams/Physical</code>.
+                  Output names use the domain-first DataLex workspace structure, e.g. <code>DataLex/imported/physical/models_src_schema.model.yaml</code>, with the matching physical diagram stored in the same <code>DataLex/imported/physical</code> folder.
                   </div>
                 </div>
               </div>

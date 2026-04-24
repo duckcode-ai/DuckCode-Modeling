@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import {
   buildConceptualAreas,
   conceptualRelationshipLabel,
+  conceptualRelationshipSentence,
   findConceptImplementations,
 } from "../src/lib/conceptualModeling.js";
 
@@ -26,6 +27,36 @@ test("buildConceptualAreas groups concepts by domain", () => {
 test("conceptualRelationshipLabel prefers verb, then relationship type", () => {
   assert.equal(conceptualRelationshipLabel({ verb: "places", relationshipType: "ownership" }), "places");
   assert.equal(conceptualRelationshipLabel({ relationshipType: "source_of_truth" }), "source of truth");
+});
+
+test("conceptualRelationshipSentence turns cardinality into business wording", () => {
+  assert.equal(
+    conceptualRelationshipSentence({
+      from: { entity: "Account", max: "1" },
+      to: { entity: "Opportunity", max: "N" },
+      cardinality: "one_to_many",
+    }),
+    "One account can have many opportunities.",
+  );
+  assert.equal(
+    conceptualRelationshipSentence({
+      from: { entity: "Account", max: "1" },
+      to: { entity: "Opportunity", max: "N" },
+      cardinality: "one_to_many",
+      verb: "owns",
+    }),
+    "One account owns many opportunities.",
+  );
+  assert.equal(
+    conceptualRelationshipSentence({
+      from: { entity: "Account", max: "1" },
+      to: { entity: "Opportunity", max: "N" },
+      cardinality: "one_to_many",
+      description: "One account can have many opportunities.",
+      verb: "owns",
+    }),
+    "One account can have many opportunities.",
+  );
 });
 
 test("findConceptImplementations discovers logical and physical descendants", () => {

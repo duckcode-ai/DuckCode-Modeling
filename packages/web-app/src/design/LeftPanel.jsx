@@ -15,33 +15,66 @@ import useWorkspaceStore from "../stores/workspaceStore";
 import useUiStore from "../stores/uiStore";
 import ExplorerContextMenu from "../components/panels/ExplorerContextMenu";
 
+function filterTreeNodes(nodes, query) {
+  const needle = String(query || "").trim().toLowerCase();
+  if (!needle) return nodes || [];
+  const visit = (items) => {
+    const out = [];
+    for (const node of items || []) {
+      if (node.kind === "folder") {
+        const children = visit(node.children || []);
+        const selfMatch = String(node.name || "").toLowerCase().includes(needle)
+          || String(node.path || "").toLowerCase().includes(needle);
+        if (selfMatch || children.length > 0) {
+          out.push({ ...node, children });
+        }
+      } else {
+        const haystack = `${node.name || ""} ${node.path || ""}`.toLowerCase();
+        if (haystack.includes(needle)) out.push(node);
+      }
+    }
+    return out;
+  };
+  return visit(nodes || []);
+}
+
 function artifactMeta(path, name, kind = "file") {
   const p = String(path || "").toLowerCase();
   const n = String(name || "").toLowerCase();
+  const isDiagramConceptual = /^diagrams\/conceptual(\/|$)/.test(p);
+  const isDiagramLogical = /^diagrams\/logical(\/|$)/.test(p);
+  const isDiagramPhysical = /^diagrams\/physical(\/|$)/.test(p);
+  const isModelConceptual = /^models\/conceptual(\/|$)/.test(p);
+  const isModelLogical = /^models\/logical(\/|$)/.test(p);
+  const isModelPhysical = /^models\/physical(\/|$)/.test(p);
+  const isGeneratedDbt = /^generated-sql\//.test(p) || /^datalex\/generated\/dbt(\/|$)/.test(p);
   if (kind === "folder") {
-    if (p.includes("datalex/diagrams/conceptual")) return { tone: "conceptual", label: "conceptual", icon: "diagram" };
-    if (p.includes("datalex/diagrams/logical")) return { tone: "logical", label: "logical", icon: "diagram" };
-    if (p.includes("datalex/diagrams/physical")) return { tone: "physical", label: "physical", icon: "diagram" };
-    if (p.includes("datalex/generated/dbt")) return { tone: "dbt", label: "generated", icon: "dbt" };
+    if (isDiagramConceptual) return { tone: "conceptual", label: "conceptual", icon: "diagram" };
+    if (isDiagramLogical) return { tone: "logical", label: "logical", icon: "diagram" };
+    if (isDiagramPhysical) return { tone: "physical", label: "physical", icon: "diagram" };
+    if (isModelConceptual) return { tone: "conceptual", label: "conceptual", icon: "folder" };
+    if (isModelLogical) return { tone: "logical", label: "logical", icon: "folder" };
+    if (isModelPhysical) return { tone: "physical", label: "physical", icon: "folder" };
+    if (isGeneratedDbt) return { tone: "dbt", label: "generated", icon: "dbt" };
     if (p === "datalex" || p.startsWith("datalex/")) return { tone: "diagram", label: "DataLex", icon: "folder" };
     if (p.includes("conceptual")) return { tone: "conceptual", label: "conceptual", icon: "folder" };
     if (p.includes("logical")) return { tone: "logical", label: "logical", icon: "folder" };
     if (p.includes("physical")) return { tone: "physical", label: "physical", icon: "folder" };
     if (p === "models" || p.startsWith("models/")) return { tone: "models", label: "models", icon: "folder" };
-    if (p.startsWith("datalex/diagrams") || p.endsWith("diagrams")) return { tone: "diagram", label: "diagrams", icon: "diagram" };
+    if (p === "diagrams" || p.startsWith("diagrams/") || p.endsWith("diagrams")) return { tone: "diagram", label: "diagrams", icon: "diagram" };
     if (p.startsWith("semantic")) return { tone: "semantic", label: "semantic", icon: "semantic" };
     if (p.startsWith("relationships")) return { tone: "relationship", label: "relationships", icon: "relationship" };
     if (p.startsWith("data_types")) return { tone: "datatype", label: "types", icon: "datatype" };
     return { tone: "folder", label: "", icon: "folder" };
   }
   if (/\.diagram\.ya?ml$/i.test(n)) {
-    if (p.includes("datalex/diagrams/conceptual")) return { tone: "conceptual", label: "diagram", icon: "diagram" };
-    if (p.includes("datalex/diagrams/logical")) return { tone: "logical", label: "diagram", icon: "diagram" };
-    if (p.includes("datalex/diagrams/physical")) return { tone: "physical", label: "diagram", icon: "diagram" };
+    if (isDiagramConceptual) return { tone: "conceptual", label: "diagram", icon: "diagram" };
+    if (isDiagramLogical) return { tone: "logical", label: "diagram", icon: "diagram" };
+    if (isDiagramPhysical) return { tone: "physical", label: "diagram", icon: "diagram" };
     return { tone: "diagram", label: "diagram", icon: "diagram" };
   }
-  if (p.includes("datalex/generated/dbt") && /\.sql$/i.test(n)) return { tone: "dbt", label: "sql", icon: "dbt" };
-  if (p.includes("datalex/generated/dbt") && /\.ya?ml$/i.test(n)) return { tone: "dbt", label: "dbt", icon: "dbt" };
+  if (isGeneratedDbt && /\.sql$/i.test(n)) return { tone: "dbt", label: "sql", icon: "dbt" };
+  if (isGeneratedDbt && /\.ya?ml$/i.test(n)) return { tone: "dbt", label: "dbt", icon: "dbt" };
   if (p.includes("/conceptual/")) return { tone: "conceptual", label: "concept", icon: "entity" };
   if (p.includes("/logical/")) return { tone: "logical", label: "logical", icon: "entity" };
   if (p.includes("/physical/")) return { tone: "physical", label: "physical", icon: "entity" };
@@ -72,6 +105,7 @@ export default function LeftPanel({ activeTable, onSelectTable, tables, theme, s
   const I = Icon;
   const [tab, setTab] = React.useState("OBJECTS");
   const [query, setQuery] = React.useState("");
+  const [explorerQuery, setExplorerQuery] = React.useState("");
   const [collapsed, setCollapsed] = React.useState({});
   const toggle = (k) => setCollapsed((s) => ({ ...s, [k]: !s[k] }));
 
@@ -101,12 +135,17 @@ export default function LeftPanel({ activeTable, onSelectTable, tables, theme, s
     () => buildFileTree(projectFiles || [], optimisticFolders || []),
     [projectFiles, optimisticFolders]
   );
+  const filteredFileTree = React.useMemo(
+    () => filterTreeNodes(fileTree, explorerQuery),
+    [fileTree, explorerQuery]
+  );
 
   const [folded, setFolded] = React.useState({});
   const toggleFolder = (path) => setFolded((s) => ({ ...s, [path]: !s[path] }));
 
   // Context menu + drag state. `ctxMenu` is `{x, y, target, path}` or null.
   const [ctxMenu, setCtxMenu] = React.useState(null);
+  const dragStateRef = React.useRef({ path: "", at: 0 });
   const explorerReady = !offlineMode && !!activeProjectId;
 
   const openCtxMenu = React.useCallback((e, target, path) => {
@@ -320,6 +359,26 @@ export default function LeftPanel({ activeTable, onSelectTable, tables, theme, s
             setCtxMenu({ x: e.clientX, y: e.clientY, target: "root", path: "" });
           }}
         >
+          <div className="left-search" style={{ padding: 0, marginBottom: 12 }}>
+            <div className="search-field">
+              <I.Search />
+              <input
+                placeholder="Find YAML or model file…"
+                value={explorerQuery}
+                onChange={(e) => setExplorerQuery(e.target.value)}
+              />
+            </div>
+            {explorerQuery ? (
+              <button className="icon-btn" title="Clear search" onClick={() => setExplorerQuery("")}>
+                <I.X />
+              </button>
+            ) : (
+              <button className="icon-btn" title="Search workspace files">
+                <I.Filter />
+              </button>
+            )}
+          </div>
+
           <div style={{ fontSize: 11, color: "var(--text-tertiary)", marginBottom: 10, letterSpacing: "0.06em", textTransform: "uppercase" }}>Workspace</div>
           <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "10px 12px", background: "var(--bg-2)", border: "1px solid var(--border-default)", borderRadius: 6, marginBottom: 12 }}>
             <I.Db />
@@ -392,9 +451,13 @@ export default function LeftPanel({ activeTable, onSelectTable, tables, theme, s
             <div style={{ fontSize: 11, color: "var(--text-tertiary)", padding: "8px 2px", lineHeight: 1.5 }}>
               No files yet. Open a project or import a dbt repo.
             </div>
+          ) : (explorerQuery && filteredFileTree.length === 0) ? (
+            <div style={{ fontSize: 11, color: "var(--text-tertiary)", padding: "8px 2px", lineHeight: 1.5 }}>
+              No matching files for “{explorerQuery}”.
+            </div>
           ) : (
             <TreeRender
-              nodes={fileTree}
+              nodes={filteredFileTree}
               folded={folded}
               toggleFolder={toggleFolder}
               activeFullPath={activeFullPath}
@@ -403,6 +466,7 @@ export default function LeftPanel({ activeTable, onSelectTable, tables, theme, s
               depth={0}
               onContextMenu={explorerReady ? openCtxMenu : null}
               onDropOnFolder={explorerReady ? handleDropOnFolder : null}
+              dragStateRef={dragStateRef}
             />
           )}
 
@@ -478,6 +542,7 @@ function TreeRender({
   depth,
   onContextMenu = null,
   onDropOnFolder = null,
+  dragStateRef = null,
 }) {
   if (!nodes || nodes.length === 0) return null;
   // `dragOver` toggles a visual highlight on folder rows while a file is
@@ -547,6 +612,7 @@ function TreeRender({
                   depth={depth + 1}
                   onContextMenu={onContextMenu}
                   onDropOnFolder={onDropOnFolder}
+                  dragStateRef={dragStateRef}
                 />
               )}
             </div>
@@ -561,10 +627,25 @@ function TreeRender({
           <div
             key={`l:${n.path}`}
             className={`tree-item tree-artifact tree-artifact-${meta.tone} ${isActive ? "active" : ""}`}
-            onClick={() => onOpenFile && fd && onOpenFile(fd)}
+            onClick={() => {
+              const dragState = dragStateRef?.current;
+              if (
+                dragState &&
+                dragState.path === n.path &&
+                Date.now() - dragState.at < 500
+              ) {
+                dragState.path = "";
+                return;
+              }
+              if (onOpenFile && fd) onOpenFile(fd);
+            }}
             onContextMenu={onContextMenu ? (e) => onContextMenu(e, "file", n.path) : undefined}
             draggable={!!onDropOnFolder}
             onDragStart={onDropOnFolder ? (e) => {
+              if (dragStateRef?.current) {
+                dragStateRef.current.path = n.path;
+                dragStateRef.current.at = Date.now();
+              }
               // Carry the source file's subpath through the drag payload.
               // The drop target is a folder row that knows how to move it.
               e.dataTransfer.setData("application/x-datalex-file-path", n.path);
@@ -578,8 +659,16 @@ function TreeRender({
                   "application/x-datalex-yaml-source",
                   JSON.stringify({ path: fullPath })
                 );
+                e.dataTransfer.setData("text/plain", fullPath);
               }
               e.dataTransfer.effectAllowed = "copyMove";
+            } : undefined}
+            onDragEnd={onDropOnFolder ? () => {
+              if (!dragStateRef?.current) return;
+              window.setTimeout(() => {
+                dragStateRef.current.path = "";
+                dragStateRef.current.at = 0;
+              }, 0);
             } : undefined}
             title={fullPath || n.path}
             style={{ paddingLeft: indent + 10, cursor: onDropOnFolder ? "grab" : undefined }}
