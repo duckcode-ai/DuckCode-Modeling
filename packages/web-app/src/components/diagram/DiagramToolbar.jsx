@@ -74,7 +74,7 @@ function ToolbarSelect({ value, onChange, options, label, width = "w-auto" }) {
     <select
       value={value}
       onChange={(e) => onChange(e.target.value)}
-      className={`bg-white border border-slate-200 rounded-md px-1.5 py-1 text-[11px] text-slate-600 outline-none hover:border-slate-300 focus:border-blue-300 focus:ring-1 focus:ring-blue-100 cursor-pointer ${width}`}
+      className={`diagram-toolbar-select text-[11px] cursor-pointer ${width}`}
       title={label}
     >
       {options.map((opt) => (
@@ -207,7 +207,7 @@ export default function DiagramToolbar() {
         )}
         {schemaOptions.length > 1 && viewMode !== "overview" && (
           <select value={activeSchemaFilter || ""} onChange={(e) => setActiveSchemaFilter(e.target.value || null)}
-            className="bg-white border border-slate-200 rounded-md px-1 py-0.5 text-[10px] text-slate-600 outline-none hover:border-slate-300 cursor-pointer max-w-[110px]"
+            className="diagram-toolbar-select text-[10px] cursor-pointer max-w-[110px]"
             title="Filter by schema">
             <option value="">All Schemas</option>
             {schemaOptions.map((s) => (<option key={s.name} value={s.name}>{s.name} ({s.entityCount})</option>))}
@@ -365,7 +365,7 @@ export default function DiagramToolbar() {
 
       {/* Schema color legend */}
       {showSchemaLegend && schemaOptions.length > 0 && (
-        <div className="absolute top-full left-2 mt-1 z-20 bg-white border border-slate-200 rounded-lg shadow-lg p-3 min-w-[180px] max-w-[260px]">
+        <div className="diagram-toolbar-popover absolute top-full left-2 mt-1 z-20 rounded-lg p-3 min-w-[180px] max-w-[260px]">
           <div className="text-[10px] text-slate-400 uppercase tracking-wider font-semibold mb-2">
             Schema / Domain Colors
           </div>
@@ -400,7 +400,7 @@ export default function DiagramToolbar() {
 
       {/* Relationship legend dropdown */}
       {showLegend && (
-        <div className="absolute top-full right-2 mt-1 z-20 bg-white border border-slate-200 rounded-lg shadow-lg p-3 min-w-[220px]">
+        <div className="diagram-toolbar-popover absolute top-full right-2 mt-1 z-20 rounded-lg p-3 min-w-[220px]">
           <div className="text-[10px] text-slate-400 uppercase tracking-wider font-semibold mb-2">
             Relationship Colors
           </div>

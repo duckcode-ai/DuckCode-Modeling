@@ -114,6 +114,8 @@ const useUiStore = create((set, get) => ({
   rightPanelOpen: true,
   rightPanelTab: initialShell.rightTab, // "COLUMNS" | "RELATIONS" | "INDEXES" | "SQL" | "YAML"
   rightPanelWidth: initialShell.rightWidth, // px; persisted across reloads
+  aiPanelPayload: null,
+  aiReviewDocument: null,
 
   // ── Shell view mode (swaps the main canvas surface) ──
   shellViewMode: initialShell.viewMode, // "diagram" | "table" | "views" | "enums"
@@ -225,6 +227,13 @@ const useUiStore = create((set, get) => ({
     set({ rightPanelTab: tab });
     saveShell(get());
   },
+  openAiPanel: (payload = null) => {
+    set({ rightPanelOpen: true, rightPanelTab: "AI", aiPanelPayload: payload });
+    saveShell(get());
+  },
+  setAiPanelPayload: (payload = null) => set({ aiPanelPayload: payload }),
+  openAiReviewDocument: (document = null) => set({ aiReviewDocument: document }),
+  closeAiReviewDocument: () => set({ aiReviewDocument: null }),
   setRightPanelWidth: (w) => {
     set({ rightPanelWidth: clampRightWidth(w) });
     saveShell(get());

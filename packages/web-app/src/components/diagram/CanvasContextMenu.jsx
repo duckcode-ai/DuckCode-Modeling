@@ -1,5 +1,5 @@
 import React, { useEffect, useRef } from "react";
-import { Edit3, Trash2, Copy, Crosshair, Plus, LayoutDashboard } from "lucide-react";
+import { Edit3, Trash2, Copy, Crosshair, Plus, LayoutDashboard, Wand2 } from "lucide-react";
 
 export default function CanvasContextMenu({ menu, onClose, onAction }) {
   const ref = useRef(null);
@@ -24,6 +24,7 @@ export default function CanvasContextMenu({ menu, onClose, onAction }) {
 
   const items = menu.target === "entity"
     ? [
+        { id: "ask-ai", label: "Ask AI about entity", icon: Wand2 },
         { id: "edit", label: "Edit entity", icon: Edit3 },
         { id: "duplicate", label: "Duplicate", icon: Copy },
         { id: "locate", label: "Locate in tree", icon: Crosshair },
@@ -31,10 +32,12 @@ export default function CanvasContextMenu({ menu, onClose, onAction }) {
       ]
     : menu.target === "relationship"
     ? [
+        { id: "ask-ai", label: "Ask AI about relationship", icon: Wand2 },
         { id: "edit", label: "Edit relationship", icon: Edit3 },
         { id: "delete", label: "Delete relationship", icon: Trash2, danger: true },
       ]
     : [
+        { id: "ask-ai", label: "Generate with AI…", icon: Wand2 },
         { id: "add-entity", label: "New entity…", icon: Plus },
         ...(menu.isDiagram ? [{ id: "add-entities", label: "Add entities to diagram…", icon: LayoutDashboard }] : []),
         { id: "fit", label: "Fit diagram", icon: Crosshair },

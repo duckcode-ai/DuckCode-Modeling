@@ -18,15 +18,18 @@ import {
   Trash2,
   Scissors,
   LayoutDashboard,
+  Wand2,
 } from "lucide-react";
 
 const ITEMS_BY_TARGET = {
   file: [
+    { id: "ask-ai", label: "Ask AI about file…", icon: Wand2 },
     { id: "rename", label: "Rename…", icon: Edit3 },
     { id: "move", label: "Move to folder…", icon: Scissors },
     { id: "delete", label: "Delete file", icon: Trash2, danger: true },
   ],
   folder: [
+    { id: "ask-ai", label: "Ask AI about folder…", icon: Wand2 },
     { id: "new-file", label: "New modeling asset…", icon: FilePlus },
     { id: "new-folder", label: "New folder…", icon: FolderPlus },
     { id: "new-diagram", label: "New diagram here…", icon: LayoutDashboard },
@@ -34,6 +37,7 @@ const ITEMS_BY_TARGET = {
     { id: "delete", label: "Delete folder", icon: Trash2, danger: true },
   ],
   root: [
+    { id: "ask-ai", label: "Ask AI about workspace…", icon: Wand2 },
     { id: "new-file", label: "New modeling asset…", icon: FilePlus },
     { id: "new-folder", label: "New folder…", icon: FolderPlus },
     { id: "new-diagram", label: "New diagram…", icon: LayoutDashboard },

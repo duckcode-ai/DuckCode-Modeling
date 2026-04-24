@@ -8,13 +8,17 @@ import React from "react";
 import {
   Sun, Moon, Sparkles, Snowflake,
   Keyboard, Info, SlidersHorizontal, Plug, Check, Compass,
+  Bot, KeyRound, RefreshCw, Save, BookOpen,
 } from "lucide-react";
 import useUiStore from "../../stores/uiStore";
+import useWorkspaceStore from "../../stores/workspaceStore";
 import { THEMES } from "../../design/notation";
 import { startOnboardingTour, resetOnboardingSeen } from "../../lib/onboardingTour";
+import { testAiSettings, rebuildAiIndex } from "../../lib/api";
 import Modal from "./Modal";
 
 const TABS = [
+  { id: "ai",          label: "AI Agent",    icon: Bot },
   { id: "appearance",  label: "Appearance",  icon: SlidersHorizontal },
   { id: "keyboard",    label: "Keyboard",    icon: Keyboard },
   { id: "connections", label: "Connections", icon: Plug },
@@ -32,8 +36,8 @@ const THEME_ICONS = {
 };
 
 export default function SettingsDialog() {
-  const { closeModal } = useUiStore();
-  const [active, setActive] = React.useState("appearance");
+  const { closeModal, modalPayload } = useUiStore();
+  const [active, setActive] = React.useState(modalPayload?.initialTab || "ai");
   const [currentTheme, setCurrentTheme] = React.useState(
     () => localStorage.getItem(THEME_STORAGE) || "midnight"
   );
@@ -50,8 +54,8 @@ export default function SettingsDialog() {
   return (
     <Modal
       title="Settings"
-      subtitle="Personalize the workspace — appearance, shortcuts, connections."
-      size="lg"
+      subtitle="Configure provider access, appearance, shortcuts, and connections."
+      size="xl"
       onClose={closeModal}
       bodyClassName="pad-0"
       cardClassName="dlx-settings-card"
@@ -80,6 +84,7 @@ export default function SettingsDialog() {
 
         {/* Content */}
         <div className="dlx-settings-content">
+          {active === "ai"          && <AiAgentPane />}
           {active === "appearance"  && <AppearancePane currentTheme={currentTheme} onPickTheme={pickTheme} />}
           {active === "keyboard"    && <KeyboardPane />}
           {active === "connections" && <ConnectionsPane />}
@@ -88,6 +93,161 @@ export default function SettingsDialog() {
         </div>
       </div>
     </Modal>
+  );
+}
+
+/* ─────────────────────────── AI Agent ─────────────────────────── */
+function readStorage(key, fallback = "") {
+  try {
+    return localStorage.getItem(key) || fallback;
+  } catch (_err) {
+    return fallback;
+  }
+}
+
+function writeStorage(key, value) {
+  try {
+    if (value == null || value === "") localStorage.removeItem(key);
+    else localStorage.setItem(key, value);
+  } catch (_err) {
+    // Browser storage can be unavailable in private profiles.
+  }
+}
+
+function AiAgentPane() {
+  const activeProjectId = useWorkspaceStore((s) => s.activeProjectId);
+  const closeModal = useUiStore((s) => s.closeModal);
+  const [provider, setProvider] = React.useState(() => readStorage("datalex.ai.provider", "local"));
+  const [model, setModel] = React.useState(() => readStorage("datalex.ai.model", ""));
+  const [baseUrl, setBaseUrl] = React.useState(() => readStorage("datalex.ai.baseUrl", ""));
+  const [apiKey, setApiKey] = React.useState(() => readStorage("datalex.ai.apiKey", ""));
+  const [saveKey, setSaveKey] = React.useState(() => Boolean(readStorage("datalex.ai.apiKey", "")));
+  const [status, setStatus] = React.useState("");
+  const [busy, setBusy] = React.useState(false);
+
+  const saveSettings = () => {
+    writeStorage("datalex.ai.provider", provider);
+    writeStorage("datalex.ai.model", model);
+    writeStorage("datalex.ai.baseUrl", baseUrl);
+    if (saveKey) writeStorage("datalex.ai.apiKey", apiKey);
+    else writeStorage("datalex.ai.apiKey", "");
+    setStatus(saveKey ? "Saved AI defaults in this browser." : "Saved AI defaults. API key remains session-only.");
+  };
+
+  const testProvider = async () => {
+    setBusy(true);
+    setStatus("");
+    try {
+      saveSettings();
+      const res = await testAiSettings({
+        provider,
+        model: model || undefined,
+        baseUrl: baseUrl || undefined,
+        apiKey: apiKey || undefined,
+      });
+      setStatus(res?.ok ? `Provider ready: ${res.provider || provider}` : "Provider test returned no status.");
+    } catch (err) {
+      setStatus(`Provider test failed: ${err?.message || err}`);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const rebuildIndex = async () => {
+    if (!activeProjectId) {
+      setStatus("Open a project before rebuilding the AI index.");
+      return;
+    }
+    setBusy(true);
+    setStatus("");
+    try {
+      const res = await rebuildAiIndex(activeProjectId);
+      setStatus(`Indexed ${res?.recordCount ?? res?.count ?? 0} modeling records, dbt facts, and skills.`);
+    } catch (err) {
+      setStatus(`Index rebuild failed: ${err?.message || err}`);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="dlx-settings-pane ai-settings-pane">
+      <header>
+        <h3 className="dlx-settings-pane-title">AI Agent</h3>
+        <p className="dlx-settings-pane-sub">
+          Configure provider access and refresh the local modeling index. Skills now live in the left sidebar for faster authoring.
+        </p>
+      </header>
+
+      <section className="ai-settings-card ai-provider-settings-card">
+        <div className="ai-settings-card-title"><KeyRound size={13} /> Provider defaults</div>
+        <div className="panel-form-grid">
+          <label className="panel-form-row">
+            <span className="panel-form-label">Provider</span>
+            <select className="panel-select" value={provider} onChange={(e) => setProvider(e.target.value)}>
+              <option value="local">Local search only</option>
+              <option value="openai">OpenAI</option>
+              <option value="anthropic">Anthropic Claude</option>
+              <option value="gemini">Google Gemini</option>
+              <option value="ollama">Ollama</option>
+            </select>
+          </label>
+          <label className="panel-form-row">
+            <span className="panel-form-label">Model</span>
+            <input className="panel-input" value={model} onChange={(e) => setModel(e.target.value)} placeholder="default or model id" />
+          </label>
+          <label className="panel-form-row">
+            <span className="panel-form-label">Base URL</span>
+            <input className="panel-input" value={baseUrl} onChange={(e) => setBaseUrl(e.target.value)} placeholder="Ollama or gateway URL" />
+          </label>
+          <label className="panel-form-row">
+            <span className="panel-form-label">API key</span>
+            <input className="panel-input" type="password" value={apiKey} onChange={(e) => setApiKey(e.target.value)} placeholder="Prefer env vars for regular use" autoComplete="off" />
+          </label>
+        </div>
+        <label className={`dlx-check ${saveKey ? "on" : ""}`}>
+          <input type="checkbox" checked={saveKey} onChange={(e) => setSaveKey(e.target.checked)} />
+          <span className="dlx-check-text">Save API key in this browser profile. Leave off to use only environment variables or one chat session.</span>
+        </label>
+        <div className="panel-btn-row">
+          <button className="panel-btn primary" type="button" onClick={saveSettings} disabled={busy}>
+            <Save size={12} /> Save defaults
+          </button>
+          <button className="panel-btn" type="button" onClick={testProvider} disabled={busy}>
+            <Check size={12} /> Test provider
+          </button>
+          <button className="panel-btn" type="button" onClick={rebuildIndex} disabled={busy || !activeProjectId}>
+            <RefreshCw size={12} /> Rebuild index
+          </button>
+        </div>
+        <p className="dlx-settings-pane-sub">
+          Environment variables also work: <code>OPENAI_API_KEY</code>, <code>ANTHROPIC_API_KEY</code>, <code>GEMINI_API_KEY</code>.
+          Ollama defaults to localhost.
+        </p>
+      </section>
+
+      <section className="ai-settings-card ai-settings-skills-link">
+        <div>
+          <div className="ai-settings-card-title"><BookOpen size={13} /> Skills moved to sidebar</div>
+          <p className="dlx-settings-pane-sub">
+            Create business, dbt, governance, and YAML patch skills from the new <code>Skills</code> tab in the left sidebar.
+            Skills are still indexed automatically and selected by intent during agent runs.
+          </p>
+        </div>
+        <button
+          className="panel-btn primary"
+          type="button"
+          onClick={() => {
+            window.dispatchEvent(new CustomEvent("datalex:left-tab", { detail: { tab: "SKILLS" } }));
+            closeModal?.();
+          }}
+        >
+          <BookOpen size={12} /> Open Skills
+        </button>
+      </section>
+
+      {status && <div className="dlx-modal-alert info">{status}</div>}
+    </div>
   );
 }
 

@@ -67,6 +67,11 @@ works.
 5. The Explorer populates. Every YAML file lives at exactly the path
    it occupied in your dbt repo — `models/staging/customers/…`,
    `models/marts/finance/…`, etc.
+6. The AI index rebuilds automatically. DataLex indexes dbt YAML, SQL,
+   `target/manifest.json`, `target/catalog.json`, semantic manifest,
+   validation findings, DataLex diagrams/models, glossary facts, and
+   `DataLex/Skills/*.md` so repo-wide Ask AI prompts can retrieve the
+   whole project context.
 
 ### 4. Walk the tree
 
@@ -130,6 +135,49 @@ entities:
 
 Entity definitions stay in their original `.yml` files — the diagram
 only stores references and positions.
+
+### Use Ask AI after import
+
+Ask AI is designed for the common dbt reality: teams often have physical
+models first and need help explaining, governing, or reverse-engineering
+them.
+
+Useful prompts after import:
+
+```text
+Reverse engineer this dbt repo into a business conceptual model.
+Explain what fct_orders is missing before we publish it.
+Find weak relationships and missing tests for customer/order models.
+Propose focused YAML changes to improve descriptions and relationships.
+```
+
+Where to ask:
+
+- Right-panel **AI** tab for the active selection or file.
+- Canvas floating **Ask AI** button for diagram-level questions.
+- Right-click an entity, relationship, Explorer file/folder, or
+  validation issue and choose **Ask AI**.
+- Select text in a YAML/editor panel and use the small Ask AI affordance.
+
+How proposals work:
+
+1. The agent retrieves exact structured dbt/DataLex facts, BM25 lexical
+   matches, graph/lineage context, validation output, relevant skills, and
+   local memory.
+2. The chat shows the answer and any proposed YAML changes.
+3. Click **Review plan** to open the center review editor with the full
+   request, answer, sources, agents, skills, validation impact, and change
+   JSON.
+4. Click **Validate** before applying. Invalid YAML, path escapes, wrong
+   layer operations, and duplicate relationships are blocked.
+5. Click **Apply** only after review. DataLex writes through the same
+   guarded create/save/delete APIs as manual UI edits, refreshes Explorer,
+   rebuilds the graph, reruns validation, updates SQL previews, and
+   rebuilds the AI index.
+
+Skills are project-local Markdown files under `DataLex/Skills/*.md`.
+Commit them when they represent team standards such as naming rules,
+governance requirements, dbt testing policy, or domain conventions.
 
 ### 6. Make an edit; see the diff
 
@@ -230,6 +278,8 @@ relative paths. There's no translation layer to get lost in.
 | Folders appear but files inside are empty       | The dbt schema YAML was unparseable. The importer returns a structured `PARSE_FAILED` error with file path + line/column; open the dev-tools console or run `dbt parse` to see which file. |
 | Relationships panel flags "N dangling"          | Open the Validation tab — the red **Dangling relationships** banner lists every `relationships:` entry whose endpoints reference a missing entity or column. Click **Remove dangling** to prune only the offending entries from the active file. |
 | Renaming/deleting a folder feels risky          | Both actions show an impact preview first (how many diagrams, `imports:` blocks, and relationships will be rewritten or removed) and require explicit confirmation — nothing cascades silently. |
+| Ask AI only sees one diagram                     | Rebuild the AI index from Settings → AI or re-run the dbt import. Repo-wide prompts such as "reverse engineer this repo" intentionally expand beyond the active file once the index exists. |
+| Old chat history lacks sources/proposals         | Chats created before AI result persistence only contain messages. New chats store sources, skills, memory, proposals, and Review plan context. |
 
 ## What to do next
 

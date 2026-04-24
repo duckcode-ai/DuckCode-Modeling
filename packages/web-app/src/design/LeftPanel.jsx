@@ -14,6 +14,7 @@ import { buildFileTree, countFiles } from "../lib/fileTree";
 import useWorkspaceStore from "../stores/workspaceStore";
 import useUiStore from "../stores/uiStore";
 import ExplorerContextMenu from "../components/panels/ExplorerContextMenu";
+import { rebuildAiIndex } from "../lib/api";
 
 function filterTreeNodes(nodes, query) {
   const needle = String(query || "").trim().toLowerCase();
@@ -101,12 +102,119 @@ function ArtifactIcon({ I, meta }) {
   return <I.Table />;
 }
 
+const SKILL_TEMPLATES = [
+  {
+    id: "conceptual",
+    name: "conceptual-business-modeling",
+    title: "Conceptual",
+    description: "Business concepts, domains, owners, glossary terms, and business relationships.",
+    useWhen: "conceptual model\nbusiness concept\nbusiness scenario\ndomain model\nbounded context",
+    tags: "conceptual,business,glossary",
+    layers: "conceptual",
+    agentModes: "conceptual_architect\nrelationship_modeler",
+    body: "- Create concepts, not tables.\n- Require description, owner, subject_area, domain, tags, and glossary terms when known.\n- Use relationship verbs in business language.\n- Ask follow-up questions when business meaning is unclear.",
+  },
+  {
+    id: "logical",
+    name: "logical-modeling-standards",
+    title: "Logical",
+    description: "Entities, attributes, candidate keys, optionality, and lineage.",
+    useWhen: "logical model\nattribute\ncandidate key\nnormalization\npromote to logical",
+    tags: "logical,attributes,keys",
+    layers: "logical",
+    agentModes: "logical_modeler\nyaml_patch_engineer",
+    body: "- Preserve conceptual lineage with derived_from or mapped_from metadata.\n- Define attributes with business names and descriptions.\n- Identify candidate keys and optionality from business meaning.\n- Avoid warehouse-only implementation choices.",
+  },
+  {
+    id: "physical",
+    name: "physical-dbt-modeling",
+    title: "Physical dbt",
+    description: "dbt YAML, columns, datatypes, tests, constraints, and contracts.",
+    useWhen: "physical model\ndbt\nschema.yml\ncolumn\ndatatype\ntest\nconstraint",
+    tags: "physical,dbt,tests,constraints",
+    layers: "physical",
+    agentModes: "physical_dbt_developer\nyaml_patch_engineer",
+    body: "- Preserve existing dbt YAML, descriptions, tests, tags, meta, and contracts.\n- Prefer focused YAML patches over full-file rewrites.\n- Infer datatypes from existing YAML, SQL, catalog metadata, or clear naming conventions.\n- Do not run dbt or apply DDL.",
+  },
+  {
+    id: "governance",
+    name: "governance-and-validation",
+    title: "Governance",
+    description: "Validation, coverage, ownership, policy, and quality rules.",
+    useWhen: "validation\ncoverage\ngovernance\nmissing description\nmissing owner\npolicy",
+    tags: "governance,validation,quality",
+    layers: "conceptual,logical,physical",
+    agentModes: "governance_reviewer\nyaml_patch_engineer",
+    body: "- Explain what is missing, why it matters, and the smallest safe YAML fix.\n- Separate blockers from documentation quality improvements.\n- Prioritize owner, description, glossary, keys, tests, and relationship endpoints by layer.",
+  },
+];
+const DATALEX_SKILL_FOLDER = "Skills";
+
+function skillSlug(value) {
+  return String(value || "modeling-skill")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "") || "modeling-skill";
+}
+
+function skillList(value, fallback = []) {
+  const items = String(value || "")
+    .split(/[\n,]/)
+    .map((item) => item.trim())
+    .filter(Boolean);
+  return items.length ? items : fallback;
+}
+
+function buildSkillContent({ name, description, useWhen, tags, layers, agentModes, body }) {
+  const title = String(name || "modeling-skill").trim();
+  const useWhenList = skillList(useWhen, ["modeling assistance"]);
+  const tagList = skillList(tags, ["modeling"]);
+  const layerList = skillList(layers, ["conceptual", "logical", "physical"]);
+  const agentModeList = skillList(agentModes, ["governance_reviewer"]);
+  return [
+    "---",
+    `name: ${JSON.stringify(title)}`,
+    `description: ${JSON.stringify(String(description || "DataLex AI modeling skill").trim())}`,
+    "use_when:",
+    ...useWhenList.map((item) => `  - ${JSON.stringify(item)}`),
+    "tags:",
+    ...tagList.map((item) => `  - ${JSON.stringify(item)}`),
+    "layers:",
+    ...layerList.map((item) => `  - ${JSON.stringify(item)}`),
+    "agent_modes:",
+    ...agentModeList.map((item) => `  - ${JSON.stringify(item)}`),
+    "priority: 1",
+    "---",
+    "",
+    `# ${title}`,
+    "",
+    "## When to use",
+    ...useWhenList.map((item) => `- ${item}`),
+    "",
+    "## Instructions",
+    String(body || "- Add your team's modeling standards here.").trim(),
+    "",
+  ].join("\n");
+}
+
 export default function LeftPanel({ activeTable, onSelectTable, tables, theme, setTheme, subjectAreas = [], connectionLabel = "workspace", connectionDsn = "", schemas = [], onAddEntity, projects = [], activeProjectId = null, onSelectProject = null }) {
   const I = Icon;
   const [tab, setTab] = React.useState("OBJECTS");
   const [query, setQuery] = React.useState("");
   const [explorerQuery, setExplorerQuery] = React.useState("");
   const [collapsed, setCollapsed] = React.useState({});
+  const [selectedSkillTemplate, setSelectedSkillTemplate] = React.useState(SKILL_TEMPLATES[0].id);
+  const initialSkillTemplate = SKILL_TEMPLATES[0];
+  const [skillName, setSkillName] = React.useState(initialSkillTemplate.name);
+  const [skillDescription, setSkillDescription] = React.useState(initialSkillTemplate.description);
+  const [skillUseWhen, setSkillUseWhen] = React.useState(initialSkillTemplate.useWhen);
+  const [skillTags, setSkillTags] = React.useState(initialSkillTemplate.tags);
+  const [skillLayers, setSkillLayers] = React.useState(initialSkillTemplate.layers);
+  const [skillAgentModes, setSkillAgentModes] = React.useState(initialSkillTemplate.agentModes);
+  const [skillBody, setSkillBody] = React.useState(initialSkillTemplate.body);
+  const [skillStatus, setSkillStatus] = React.useState("");
+  const [skillBusy, setSkillBusy] = React.useState(false);
   const toggle = (k) => setCollapsed((s) => ({ ...s, [k]: !s[k] }));
 
   /* Explorer: pull the file list + open-file action from the store directly.
@@ -123,6 +231,7 @@ export default function LeftPanel({ activeTable, onSelectTable, tables, theme, s
   // who loaded the jaffle-shop demo (offline) and a user with a real project
   // on disk both route through the same click handler.
   const openFile = useWorkspaceStore((s) => s.switchTab);
+  const createNewFile = useWorkspaceStore((s) => s.createNewFile);
   const createFolderAction = useWorkspaceStore((s) => s.createFolder);
   const renameFileAction = useWorkspaceStore((s) => s.renameFile);
   const moveFileAction = useWorkspaceStore((s) => s.moveFile);
@@ -131,6 +240,8 @@ export default function LeftPanel({ activeTable, onSelectTable, tables, theme, s
   const deleteFolderAction = useWorkspaceStore((s) => s.deleteFolder);
   const addToast = useUiStore((s) => s.addToast);
   const openModal = useUiStore((s) => s.openModal);
+  const openAiPanel = useUiStore((s) => s.openAiPanel);
+  const explorerReady = !offlineMode && !!activeProjectId;
   const fileTree = React.useMemo(
     () => buildFileTree(projectFiles || [], optimisticFolders || []),
     [projectFiles, optimisticFolders]
@@ -139,6 +250,65 @@ export default function LeftPanel({ activeTable, onSelectTable, tables, theme, s
     () => filterTreeNodes(fileTree, explorerQuery),
     [fileTree, explorerQuery]
   );
+  const skillFiles = React.useMemo(() => (
+    (projectFiles || [])
+      .filter((file) => {
+        const path = String(file.path || file.name || "").replace(/\\/g, "/").toLowerCase();
+        return path.startsWith(`${DATALEX_SKILL_FOLDER.toLowerCase()}/`);
+      })
+      .sort((a, b) => String(a.path || a.name || "").localeCompare(String(b.path || b.name || "")))
+  ), [projectFiles]);
+
+  React.useEffect(() => {
+    const onTab = (event) => {
+      const next = event?.detail?.tab;
+      if (next) setTab(String(next).toUpperCase());
+    };
+    window.addEventListener("datalex:left-tab", onTab);
+    return () => window.removeEventListener("datalex:left-tab", onTab);
+  }, []);
+
+  const applySkillTemplate = React.useCallback((templateId) => {
+    const template = SKILL_TEMPLATES.find((item) => item.id === templateId) || SKILL_TEMPLATES[0];
+    setSelectedSkillTemplate(template.id);
+    setSkillName(template.name);
+    setSkillDescription(template.description);
+    setSkillUseWhen(template.useWhen);
+    setSkillTags(template.tags);
+    setSkillLayers(template.layers);
+    setSkillAgentModes(template.agentModes);
+    setSkillBody(template.body);
+  }, []);
+
+  const createSkill = React.useCallback(async () => {
+    if (!explorerReady) {
+      setSkillStatus("Open a local project before creating skills.");
+      return;
+    }
+    const slug = skillSlug(skillName);
+    const content = buildSkillContent({
+      name: skillName,
+      description: skillDescription,
+      useWhen: skillUseWhen,
+      tags: skillTags,
+      layers: skillLayers,
+      agentModes: skillAgentModes,
+      body: skillBody,
+    });
+    setSkillBusy(true);
+    setSkillStatus("");
+    try {
+      const skillPath = `${DATALEX_SKILL_FOLDER}/${slug}.md`;
+      await createNewFile(skillPath, content);
+      await rebuildAiIndex(activeProjectId).catch(() => null);
+      addToast?.({ type: "success", message: `Created AI skill ${skillPath}` });
+      setSkillStatus(`Created and indexed ${skillPath}.`);
+    } catch (err) {
+      setSkillStatus(`Skill create failed: ${err?.message || err}`);
+    } finally {
+      setSkillBusy(false);
+    }
+  }, [activeProjectId, addToast, createNewFile, explorerReady, skillAgentModes, skillBody, skillDescription, skillLayers, skillName, skillTags, skillUseWhen]);
 
   const [folded, setFolded] = React.useState({});
   const toggleFolder = (path) => setFolded((s) => ({ ...s, [path]: !s[path] }));
@@ -146,7 +316,6 @@ export default function LeftPanel({ activeTable, onSelectTable, tables, theme, s
   // Context menu + drag state. `ctxMenu` is `{x, y, target, path}` or null.
   const [ctxMenu, setCtxMenu] = React.useState(null);
   const dragStateRef = React.useRef({ path: "", at: 0 });
-  const explorerReady = !offlineMode && !!activeProjectId;
 
   const openCtxMenu = React.useCallback((e, target, path) => {
     if (!explorerReady) return;
@@ -166,7 +335,17 @@ export default function LeftPanel({ activeTable, onSelectTable, tables, theme, s
 
   const handleCtxAction = React.useCallback(async (actionId, menu) => {
     try {
-      if (actionId === "new-file") {
+      if (actionId === "ask-ai") {
+        openAiPanel({
+          source: "explorer",
+          targetName: menu.path || "workspace",
+          context: {
+            kind: menu.target === "file" ? "file" : menu.target === "folder" ? "folder" : "workspace",
+            filePath: menu.target === "file" ? menu.path : "",
+            folderPath: menu.target === "folder" ? menu.path : "",
+          },
+        });
+      } else if (actionId === "new-file") {
         openModal("newFile", { targetFolder: menu.target === "folder" ? menu.path : "" });
       } else if (actionId === "new-folder") {
         const name = window.prompt("New folder name:", "new_folder");
@@ -249,6 +428,7 @@ export default function LeftPanel({ activeTable, onSelectTable, tables, theme, s
     deleteFolderAction,
     addToast,
     openModal,
+    openAiPanel,
   ]);
 
   // Drag-and-drop: drop a file onto a folder to move it there.
@@ -292,7 +472,7 @@ export default function LeftPanel({ activeTable, onSelectTable, tables, theme, s
   return (
     <div className="left">
       <div className="left-tabs">
-        {["OBJECTS", "EXPLORER", "THEMES"].map((t) => (
+        {["OBJECTS", "EXPLORER", "SKILLS", "THEMES"].map((t) => (
           <button key={t} className={`left-tab ${tab === t ? "active" : ""}`} onClick={() => setTab(t)}>{t}</button>
         ))}
       </div>
@@ -475,6 +655,86 @@ export default function LeftPanel({ activeTable, onSelectTable, tables, theme, s
             onClose={closeCtxMenu}
             onAction={handleCtxAction}
           />
+        </div>
+      )}
+
+      {tab === "SKILLS" && (
+        <div className="left-skills-panel">
+          <div className="left-skills-hero">
+            <div className="left-skills-icon"><I.Sparkle /></div>
+            <div>
+              <div className="left-skills-title">Agent Skills</div>
+              <div className="left-skills-sub">Teach DataLex when to use your business, dbt, and governance standards.</div>
+            </div>
+          </div>
+
+          <div className="left-skills-templates">
+            {SKILL_TEMPLATES.map((template) => (
+              <button
+                key={template.id}
+                type="button"
+                className={`left-skill-template ${selectedSkillTemplate === template.id ? "active" : ""}`}
+                onClick={() => applySkillTemplate(template.id)}
+              >
+                <strong>{template.title}</strong>
+                <span>{template.description}</span>
+              </button>
+            ))}
+          </div>
+
+          <div className="left-skill-form">
+            <label>
+              <span>Name</span>
+              <input value={skillName} onChange={(e) => setSkillName(e.target.value)} placeholder="business-modeling-standards" />
+            </label>
+            <label>
+              <span>Description</span>
+              <input value={skillDescription} onChange={(e) => setSkillDescription(e.target.value)} placeholder="When this skill should guide the AI" />
+            </label>
+            <label>
+              <span>Use when</span>
+              <textarea rows={3} value={skillUseWhen} onChange={(e) => setSkillUseWhen(e.target.value)} placeholder="One trigger per line" />
+            </label>
+            <div className="left-skill-grid">
+              <label>
+                <span>Tags</span>
+                <input value={skillTags} onChange={(e) => setSkillTags(e.target.value)} placeholder="dbt,governance" />
+              </label>
+              <label>
+                <span>Layers</span>
+                <input value={skillLayers} onChange={(e) => setSkillLayers(e.target.value)} placeholder="conceptual,logical,physical" />
+              </label>
+            </div>
+            <label>
+              <span>Agent modes</span>
+              <textarea rows={2} value={skillAgentModes} onChange={(e) => setSkillAgentModes(e.target.value)} placeholder="physical_dbt_developer" />
+            </label>
+            <label>
+              <span>Instructions</span>
+              <textarea rows={6} value={skillBody} onChange={(e) => setSkillBody(e.target.value)} placeholder="Write the rules this skill should enforce..." />
+            </label>
+            <button className="left-skill-create" type="button" onClick={createSkill} disabled={skillBusy || !explorerReady}>
+              <I.Plus /> {skillBusy ? "Creating..." : "Create Skill"}
+            </button>
+            {skillStatus && <div className="left-skill-status">{skillStatus}</div>}
+          </div>
+
+          <div className="left-skills-existing">
+            <div className="left-skills-heading">Existing Skills <span>{skillFiles.length}</span></div>
+            {skillFiles.length === 0 ? (
+              <div className="left-skills-empty">No skill files yet. Create one from a template above.</div>
+            ) : skillFiles.map((file) => (
+              <button
+                key={file.fullPath || file.path || file.name}
+                type="button"
+                className="left-skill-file"
+                onClick={() => openFile(file)}
+              >
+                <I.Dep />
+                <span>{file.path || file.name}</span>
+              </button>
+            ))}
+          </div>
         </div>
       )}
 

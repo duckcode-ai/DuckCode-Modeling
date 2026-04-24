@@ -7,6 +7,50 @@ from `v0.1.0` onward.
 
 ## [Unreleased]
 
+## [1.3.0] — 2026-04-24
+
+Minor release — adds the first production-oriented agentic modeling
+workflow for dbt teams. Ask AI can now use local project context,
+skills, memory, and typed dbt/DataLex search to explain models and
+propose reviewable YAML changes.
+
+### Added
+
+- **Agentic modeling assistant.** The right-panel AI chat now supports
+  OpenAI, Anthropic Claude, Gemini, Ollama-compatible endpoints, and a
+  local fallback. Requests are routed to modeling specialists for
+  conceptual architecture, logical modeling, physical/dbt development,
+  governance review, relationship modeling, and YAML patching.
+- **Typed local AI index for dbt/DataLex projects.** Importing a dbt repo
+  automatically indexes DataLex YAML, dbt YAML, SQL files, manifest,
+  catalog, semantic manifest, run results, validation findings, skills,
+  and memory. Retrieval uses structured lookup plus BM25 lexical search
+  instead of vector search for code/YAML.
+- **Project-local skills and memory.** The UI can create
+  `DataLex/Skills/*.md` files with `use_when`, tags, layers, and agent
+  modes. Chat history and modeling memory are stored locally under
+  `.datalex/agent/` with JSON plus optional SQLite runtime storage.
+- **Reviewable AI proposal flow.** AI responses can include structured
+  YAML proposals, validation, and apply actions. The new **Review plan**
+  button opens the full answer, sources, agents, skills, validation
+  impact, and change JSON in the center editor before applying.
+- **Contextual Ask AI entry points.** The assistant is available from the
+  canvas, right inspector, Explorer files/folders, validation rows,
+  selected text, relationships, and selected entities.
+
+### Changed
+
+- **AI chat behaves like a normal chat composer.** `Enter` submits,
+  `Shift+Enter` adds a newline, and a small animated status line shows
+  what the model is doing while it retrieves context and prepares a
+  response.
+- **Chat history restores AI result context for new chats.** Opening a
+  saved chat now restores sources, agent details, selected skills,
+  memory, proposed changes, and the Review plan content when that
+  metadata exists.
+- **Docs now describe installation, AI setup, skills, local indexing,
+  proposal review, and repo import behavior.**
+
 ## [1.2.0] — 2026-04-24
 
 Minor release — turns the open-source modeling loop into a clearer
@@ -1082,7 +1126,8 @@ Labs** (company).
   root; a `pip install`ed package run outside the repo needs
   `--schemas-root` or the repo on disk.
 
-[Unreleased]: https://github.com/duckcode-ai/DataLex/compare/v1.2.0...HEAD
+[Unreleased]: https://github.com/duckcode-ai/DataLex/compare/v1.3.0...HEAD
+[1.3.0]: https://github.com/duckcode-ai/DataLex/compare/v1.2.0...v1.3.0
 [1.2.0]: https://github.com/duckcode-ai/DataLex/compare/v1.1.1...v1.2.0
 [1.1.1]: https://github.com/duckcode-ai/DataLex/compare/v1.1.0...v1.1.1
 [1.1.0]: https://github.com/duckcode-ai/DataLex/compare/v1.0.6...v1.1.0

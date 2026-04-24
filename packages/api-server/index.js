@@ -7,6 +7,24 @@ import { execFileSync as rawExecFileSync, spawn } from "child_process";
 import { tmpdir } from "os";
 import { createRequire } from "module";
 import { randomBytes } from "crypto";
+import { listProviderMeta } from "./ai/providerMeta.js";
+import {
+  callAiProvider as callConfiguredAiProvider,
+  resolveAiProviderConfig as resolveConfiguredAiProvider,
+} from "./ai/providers.js";
+import {
+  appendAiChatMessages,
+  createAiChat,
+  deleteAiMemory,
+  extractModelingMemories,
+  getAiRuntimeStorageInfo,
+  getAiChat,
+  listAiChats,
+  listAiMemories,
+  persistAiIndexSnapshot,
+  renderMemoryContext,
+  upsertAiMemories,
+} from "./ai/agentStore.js";
 const require = createRequire(import.meta.url);
 const yaml = require("js-yaml");
 
@@ -130,6 +148,8 @@ const DIRECT_APPLY_ENABLED = ["1", "true", "yes", "on"].includes(String(process.
 const DATALEX_CONFIG_DIRNAME = ".datalex";
 const DATALEX_PROJECT_CONFIG = join(DATALEX_CONFIG_DIRNAME, "project.json");
 const DATALEX_WORKSPACE_ROOT = "DataLex";
+const DATALEX_SKILLS_DIR = "Skills";
+const AI_INDEX_CACHE = new Map();
 const DATALEX_DEFAULT_STRUCTURE = {
   version: 1,
   // Default to snowflake so baseline DDL generation works for new projects without extra config.
@@ -149,6 +169,292 @@ const DATALEX_DEFAULT_STRUCTURE = {
     bigquery: `${DATALEX_WORKSPACE_ROOT}/generated-sql/ddl/bigquery`,
   },
 };
+
+const AI_AGENT_PROFILES = {
+  conceptual_architect: {
+    label: "Conceptual Architect",
+    layer: "conceptual",
+    keywords: ["conceptual", "concept", "business", "domain", "bounded", "owner", "glossary", "subject", "scenario"],
+    contract: "Model business concepts, domains, owners, terms, and entity-level business relationships. Do not add columns, SQL, indexes, or database actions.",
+  },
+  logical_modeler: {
+    label: "Logical Modeler",
+    layer: "logical",
+    keywords: ["logical", "attribute", "candidate", "normalize", "normalization", "key", "lineage", "promote"],
+    contract: "Transform business concepts into logical entities, attributes, candidate keys, optionality, and lineage without warehouse-specific implementation details.",
+  },
+  physical_dbt_developer: {
+    label: "Physical dbt Developer",
+    layer: "physical",
+    keywords: ["physical", "dbt", "column", "datatype", "data type", "test", "constraint", "schema.yml", "warehouse", "sql"],
+    contract: "Work like a dbt developer: preserve existing dbt YAML, propose focused columns/tests/contracts/datatype changes, and never run dbt or apply DDL.",
+  },
+  governance_reviewer: {
+    label: "Governance Reviewer",
+    layer: "",
+    keywords: ["validation", "governance", "standard", "coverage", "missing", "quality", "policy", "description", "documentation"],
+    contract: "Explain validation and standards issues in business terms, distinguish blockers from quality gaps, and propose minimal metadata/test fixes.",
+  },
+  relationship_modeler: {
+    label: "Relationship Modeler",
+    layer: "",
+    keywords: ["relationship", "relation", "cardinality", "crow", "foreign key", "fk", "one to many", "many to one", "many to many", "arrow"],
+    contract: "Model relationship semantics, cardinality, optionality, and business verbs; conceptual relationships are entity-level, physical relationships require fields.",
+  },
+  yaml_patch_engineer: {
+    label: "YAML Patch Engineer",
+    layer: "",
+    keywords: ["yaml", "patch", "edit", "modify", "update", "delete", "create", "fix", "proposal", "generate"],
+    contract: "Produce small reviewable DataLex YAML proposals, preserve existing files, use guarded proposal change types, and include rationale and validation impact.",
+  },
+};
+
+const DEFAULT_AI_SKILL_FILES = [
+  {
+    path: "modeling-standards.md",
+    content: [
+      "---",
+      "name: \"DataLex Modeling Standards\"",
+      "description: \"Core industry standards for conceptual, logical, physical, and dbt modeling.\"",
+      "use_when:",
+      "  - \"modeling standards\"",
+      "  - \"data architecture\"",
+      "  - \"conceptual logical physical modeling\"",
+      "  - \"dbt yaml governance\"",
+      "tags:",
+      "  - \"standards\"",
+      "  - \"governance\"",
+      "  - \"architecture\"",
+      "layers:",
+      "  - \"conceptual\"",
+      "  - \"logical\"",
+      "  - \"physical\"",
+      "agent_modes:",
+      "  - \"conceptual_architect\"",
+      "  - \"logical_modeler\"",
+      "  - \"physical_dbt_developer\"",
+      "  - \"governance_reviewer\"",
+      "priority: 2",
+      "---",
+      "",
+      "# DataLex Modeling Standards",
+      "",
+      "- Treat DataLex YAML as the source of truth and propose small reviewable changes.",
+      "- Preserve existing files, descriptions, tests, tags, relationships, and lineage unless the user explicitly asks to change them.",
+      "- Conceptual models capture business meaning: concepts, owners, domains, subject areas, glossary terms, tags, and entity-level relationships.",
+      "- Logical models define platform-neutral structure: entities, attributes, candidate keys, optionality, and lineage from concepts.",
+      "- Physical models preserve dbt conventions: models, columns, descriptions, tests, constraints, contracts, semantic metadata, and warehouse readiness.",
+      "- Ask follow-up questions when a missing business fact would cause invented names, ownership, relationships, or grain.",
+      "",
+    ].join("\n"),
+  },
+  {
+    path: "conceptual-business-modeling.md",
+    content: [
+      "---",
+      "name: \"Conceptual Business Modeling\"",
+      "description: \"Business concept modeling before logical or physical implementation.\"",
+      "use_when:",
+      "  - \"conceptual model\"",
+      "  - \"business concept\"",
+      "  - \"business scenario\"",
+      "  - \"domain model\"",
+      "  - \"bounded context\"",
+      "tags:",
+      "  - \"conceptual\"",
+      "  - \"business\"",
+      "  - \"glossary\"",
+      "layers:",
+      "  - \"conceptual\"",
+      "agent_modes:",
+      "  - \"conceptual_architect\"",
+      "  - \"relationship_modeler\"",
+      "priority: 4",
+      "---",
+      "",
+      "# Conceptual Business Modeling",
+      "",
+      "- Create concepts, not tables. Do not add columns, database datatypes, indexes, DDL, dbt tests, or warehouse constraints.",
+      "- Each important concept should have name, description, owner, subject_area, domain, tags, and glossary terms when known.",
+      "- Relationships should be entity-level with business verbs, for example: \"One account can have many opportunities.\"",
+      "- Cross-domain relationships need a description explaining business meaning and ownership.",
+      "- Use follow-up questions when owner, domain, glossary meaning, or relationship verb is unclear.",
+      "",
+    ].join("\n"),
+  },
+  {
+    path: "logical-modeling-standards.md",
+    content: [
+      "---",
+      "name: \"Logical Modeling Standards\"",
+      "description: \"Platform-neutral logical entity, attribute, key, and lineage guidance.\"",
+      "use_when:",
+      "  - \"logical model\"",
+      "  - \"attribute\"",
+      "  - \"candidate key\"",
+      "  - \"normalization\"",
+      "  - \"promote to logical\"",
+      "tags:",
+      "  - \"logical\"",
+      "  - \"attributes\"",
+      "  - \"keys\"",
+      "layers:",
+      "  - \"logical\"",
+      "agent_modes:",
+      "  - \"logical_modeler\"",
+      "  - \"yaml_patch_engineer\"",
+      "priority: 4",
+      "---",
+      "",
+      "# Logical Modeling Standards",
+      "",
+      "- Preserve conceptual lineage with derived_from or mapped_from metadata where possible.",
+      "- Define attributes with business names and descriptions before warehouse datatypes.",
+      "- Identify candidate keys, natural keys, optionality, and relationship cardinality from business meaning.",
+      "- Avoid physical-only choices such as clustering, materialization, warehouse-specific types, indexes, and SQL unless promoting to physical.",
+      "- Propose normalization or denormalization rationale explicitly when model shape changes.",
+      "",
+    ].join("\n"),
+  },
+  {
+    path: "physical-dbt-modeling.md",
+    content: [
+      "---",
+      "name: \"Physical dbt Modeling\"",
+      "description: \"dbt schema YAML, columns, tests, datatypes, contracts, and warehouse-ready physical modeling.\"",
+      "use_when:",
+      "  - \"physical model\"",
+      "  - \"dbt\"",
+      "  - \"schema.yml\"",
+      "  - \"column\"",
+      "  - \"datatype\"",
+      "  - \"test\"",
+      "  - \"constraint\"",
+      "tags:",
+      "  - \"physical\"",
+      "  - \"dbt\"",
+      "  - \"tests\"",
+      "  - \"constraints\"",
+      "layers:",
+      "  - \"physical\"",
+      "agent_modes:",
+      "  - \"physical_dbt_developer\"",
+      "  - \"yaml_patch_engineer\"",
+      "priority: 5",
+      "---",
+      "",
+      "# Physical dbt Modeling",
+      "",
+      "- Preserve existing dbt model names, column docs, tests, tags, meta, constraints, contracts, and semantic model references.",
+      "- Prefer focused YAML patches over rewriting whole schema files.",
+      "- Infer datatypes from existing YAML, dbt catalog/manifest facts, SQL casts, warehouse metadata, or clear naming conventions; mark uncertainty in rationale.",
+      "- Use dbt tests for uniqueness, not_null, accepted_values, and relationships when they match real data quality requirements.",
+      "- Do not run dbt, apply DDL, or push to a database. Propose commands or SQL only for user approval.",
+      "",
+    ].join("\n"),
+  },
+  {
+    path: "relationship-rules.md",
+    content: [
+      "---",
+      "name: \"Relationship Rules\"",
+      "description: \"Relationship semantics, business verbs, cardinality, crow-foot meaning, and physical FK guidance.\"",
+      "use_when:",
+      "  - \"relationship\"",
+      "  - \"cardinality\"",
+      "  - \"foreign key\"",
+      "  - \"crow foot\"",
+      "  - \"one to many\"",
+      "  - \"many to one\"",
+      "tags:",
+      "  - \"relationships\"",
+      "  - \"cardinality\"",
+      "  - \"foreign_key\"",
+      "agent_modes:",
+      "  - \"relationship_modeler\"",
+      "  - \"yaml_patch_engineer\"",
+      "priority: 5",
+      "---",
+      "",
+      "# Relationship Rules",
+      "",
+      "- Conceptual relationships are entity-level and should include business wording and optional cardinality.",
+      "- Logical relationships clarify optionality, cardinality, and candidate key implications.",
+      "- Physical relationships require field endpoints and should align with dbt relationships tests or explicit constraint metadata.",
+      "- Keep relationship direction meaningful: `from` is the source/dependent side when field-level foreign keys exist; conceptual direction should read naturally as a business sentence.",
+      "- When changing cardinality, update both YAML definition and visual notation semantics.",
+      "",
+    ].join("\n"),
+  },
+  {
+    path: "governance-validation.md",
+    content: [
+      "---",
+      "name: \"Governance and Validation\"",
+      "description: \"Documentation, ownership, standards, validation, policy, and completeness guidance.\"",
+      "use_when:",
+      "  - \"validation\"",
+      "  - \"coverage\"",
+      "  - \"governance\"",
+      "  - \"missing description\"",
+      "  - \"missing owner\"",
+      "  - \"policy\"",
+      "tags:",
+      "  - \"governance\"",
+      "  - \"validation\"",
+      "  - \"quality\"",
+      "layers:",
+      "  - \"conceptual\"",
+      "  - \"logical\"",
+      "  - \"physical\"",
+      "agent_modes:",
+      "  - \"governance_reviewer\"",
+      "  - \"yaml_patch_engineer\"",
+      "priority: 4",
+      "---",
+      "",
+      "# Governance and Validation",
+      "",
+      "- Explain every issue as: what is missing, why it matters, and the smallest safe YAML fix.",
+      "- Separate blocking semantic/physical readiness issues from documentation coverage improvements.",
+      "- Conceptual coverage prioritizes owner, description, domain, subject area, glossary terms, tags, and orphan concepts.",
+      "- Logical coverage prioritizes candidate keys, attribute meaning, relationship optionality, and lineage.",
+      "- Physical coverage prioritizes column docs, datatypes, tests, constraints, relationship endpoints, and dbt readiness.",
+      "",
+    ].join("\n"),
+  },
+  {
+    path: "yaml-proposal-safety.md",
+    content: [
+      "---",
+      "name: \"YAML Proposal Safety\"",
+      "description: \"Rules for safe AI-generated DataLex YAML patches and proposal review.\"",
+      "use_when:",
+      "  - \"yaml\"",
+      "  - \"patch\"",
+      "  - \"proposal\"",
+      "  - \"update file\"",
+      "  - \"generate yaml\"",
+      "tags:",
+      "  - \"yaml\"",
+      "  - \"safety\"",
+      "  - \"proposal\"",
+      "agent_modes:",
+      "  - \"yaml_patch_engineer\"",
+      "priority: 5",
+      "---",
+      "",
+      "# YAML Proposal Safety",
+      "",
+      "- All changes must be proposed, never claimed as already applied.",
+      "- Prefer `patch_yaml` or small `create_diagram` / `create_model` changes over full-file rewrites.",
+      "- Every proposal needs rationale, source_context, validation_impact, and review_summary.",
+      "- Keep paths inside the DataLex workspace and use the domain-first layout.",
+      "- If a proposal might delete or rename user files, describe impact clearly and require user approval.",
+      "",
+    ].join("\n"),
+  },
+];
 
 // Canonical path for dedupe: follows symlinks and normalizes
 // case-insensitive filesystems (macOS APFS/HFS+, Windows NTFS) so
@@ -431,6 +737,7 @@ async function bootstrapProjectStructure(projectPath, { initializeGit = false } 
     join(DATALEX_WORKSPACE_ROOT, "generated-sql", "migrations"),
     join(DATALEX_WORKSPACE_ROOT, "domains"),
     join(DATALEX_WORKSPACE_ROOT, "projects"),
+    join(DATALEX_WORKSPACE_ROOT, DATALEX_SKILLS_DIR),
     "migrations/snowflake",
     "migrations/databricks",
     "migrations/bigquery",
@@ -503,6 +810,9 @@ async function bootstrapProjectStructure(projectPath, { initializeGit = false } 
     `${JSON.stringify(DATALEX_DEFAULT_STRUCTURE, null, 2)}\n`
   );
   await writeFileIfMissing(join(absoluteProjectPath, DATALEX_WORKSPACE_ROOT, ".gitkeep"), "");
+  for (const skill of DEFAULT_AI_SKILL_FILES) {
+    await writeFileIfMissing(join(absoluteProjectPath, DATALEX_WORKSPACE_ROOT, DATALEX_SKILLS_DIR, skill.path), skill.content);
+  }
   await writeFileIfMissing(
     join(absoluteProjectPath, "guides", "README.md"),
     "# Guides\n\nAdd setup, GitOps, and testing playbooks for your team.\n"
@@ -1945,6 +2255,1601 @@ function validateYamlOnSave(filePath, content) {
   return { ok: true };
 }
 
+function safeYamlLoad(content) {
+  try {
+    const doc = yaml.load(content);
+    return { doc, error: null };
+  } catch (err) {
+    return {
+      doc: null,
+      error: {
+        message: String(err?.reason || err?.message || "YAML parse failed"),
+        line: typeof err?.mark?.line === "number" ? err.mark.line + 1 : null,
+        column: typeof err?.mark?.column === "number" ? err.mark.column + 1 : null,
+      },
+    };
+  }
+}
+
+const AI_STOP_TOKENS = new Set([
+  "a", "an", "and", "are", "as", "at", "be", "by", "for", "from", "how", "in", "into", "is", "it", "of", "on", "or", "the", "this", "to", "we", "what", "with",
+]);
+
+function addAiToken(out, seen, token) {
+  const clean = String(token || "").trim().toLowerCase();
+  if (!clean || clean.length > 96 || AI_STOP_TOKENS.has(clean)) return;
+  if (!seen.has(clean)) {
+    seen.add(clean);
+    out.push(clean);
+  }
+}
+
+function aiTokens(value) {
+  const rawTokens = String(value || "")
+    .toLowerCase()
+    .replace(/[^a-z0-9_./:-]+/g, " ")
+    .split(/\s+/)
+    .filter(Boolean);
+  const out = [];
+  const seen = new Set();
+  for (const token of rawTokens) {
+    addAiToken(out, seen, token);
+    for (const part of token.split(/[./:_-]+/)) {
+      addAiToken(out, seen, part);
+      if (part.endsWith("s") && part.length > 3) addAiToken(out, seen, part.slice(0, -1));
+    }
+  }
+  return out;
+}
+
+function aiAddRecord(records, record) {
+  const text = [
+    record.path,
+    record.kind,
+    record.layer,
+    record.name,
+    record.domain,
+    record.subject_area,
+    record.description,
+    record.tags,
+    record.use_when,
+    record.agent_modes,
+    record.owner,
+    record.extra,
+  ].filter(Boolean).join(" ");
+  records.push({
+    id: `${record.kind || "record"}:${records.length}`,
+    ...record,
+    text,
+    tokens: aiTokens(text),
+  });
+}
+
+function aiLayerFromPath(pathValue) {
+  const p = String(pathValue || "").toLowerCase();
+  if (p.includes("/conceptual/")) return "conceptual";
+  if (p.includes("/logical/")) return "logical";
+  if (p.includes("/physical/")) return "physical";
+  return "";
+}
+
+function aiDomainFromPath(pathValue) {
+  const parts = String(pathValue || "").replace(/\\/g, "/").split("/").filter(Boolean);
+  const dlx = parts.findIndex((p) => p.toLowerCase() === "datalex");
+  if (dlx >= 0 && parts[dlx + 1] && !["conceptual", "logical", "physical", "generated-sql", "skills"].includes(parts[dlx + 1].toLowerCase())) {
+    return parts[dlx + 1];
+  }
+  return "";
+}
+
+function normalizeAiArray(value) {
+  if (Array.isArray(value)) return value.map((item) => String(item || "").trim()).filter(Boolean);
+  if (value == null) return [];
+  return String(value).split(/[\n,]/).map((item) => item.trim()).filter(Boolean);
+}
+
+function parseAiSkillMetadata(content) {
+  const text = String(content || "");
+  const match = text.match(/^---\s*\n([\s\S]*?)\n---\s*\n?/);
+  if (!match) return {};
+  const meta = {};
+  const lines = match[1].split(/\r?\n/);
+  let currentArrayKey = null;
+  for (const rawLine of lines) {
+    const line = rawLine.trimEnd();
+    const item = line.match(/^\s*-\s*(.+)$/);
+    if (item && currentArrayKey) {
+      const value = item[1].trim().replace(/^["']|["']$/g, "");
+      if (value) meta[currentArrayKey].push(value);
+      continue;
+    }
+    const kv = line.match(/^([A-Za-z0-9_-]+):\s*(.*)$/);
+    if (!kv) continue;
+    const key = kv[1].trim();
+    const value = kv[2].trim();
+    currentArrayKey = null;
+    if (!value) {
+      meta[key] = [];
+      currentArrayKey = key;
+    } else {
+      meta[key] = value.replace(/^["']|["']$/g, "");
+    }
+  }
+  return meta;
+}
+
+function classifyAiAgents(message, context = {}) {
+  const text = [
+    message,
+    context?.kind,
+    context?.modelKind,
+    context?.layer,
+    context?.selectedText,
+    context?.filePath,
+  ].filter(Boolean).join(" ").toLowerCase();
+  const selected = [];
+  for (const [id, profile] of Object.entries(AI_AGENT_PROFILES)) {
+    let score = 0;
+    for (const keyword of profile.keywords) {
+      if (text.includes(keyword)) score += keyword.includes(" ") ? 3 : 2;
+    }
+    if (profile.layer && String(context?.modelKind || context?.layer || "").toLowerCase() === profile.layer) score += 4;
+    if (id === "relationship_modeler" && (context?.kind === "relationship" || context?.relId)) score += 5;
+    if (id === "yaml_patch_engineer" && /\b(create|update|modify|delete|fix|generate|propose|patch)\b/.test(text)) score += 4;
+    if (score > 0) selected.push({ id, ...profile, score });
+  }
+  if (!selected.length) {
+    selected.push({ id: "governance_reviewer", ...AI_AGENT_PROFILES.governance_reviewer, score: 1 });
+  }
+  if (!selected.some((agent) => agent.id === "yaml_patch_engineer") && /\b(yaml|file|change|proposal|apply)\b/.test(text)) {
+    selected.push({ id: "yaml_patch_engineer", ...AI_AGENT_PROFILES.yaml_patch_engineer, score: 2 });
+  }
+  return selected
+    .sort((a, b) => b.score - a.score)
+    .slice(0, 4)
+    .map((agent) => ({
+      id: agent.id,
+      label: agent.label,
+      layer: agent.layer,
+      score: agent.score,
+      contract: agent.contract,
+    }));
+}
+
+function aiCollectYamlRecords(records, file, content, doc) {
+  const pathValue = file.path || "";
+  const layer = String(doc?.model?.kind || doc?.layer || doc?.kind || aiLayerFromPath(pathValue) || "").toLowerCase();
+  const domain = String(doc?.model?.domain || doc?.domain || aiDomainFromPath(pathValue) || "").trim();
+  aiAddRecord(records, {
+    kind: /\.diagram\.ya?ml$/i.test(pathValue) ? "diagram_file" : "yaml_file",
+    path: pathValue,
+    name: doc?.model?.name || doc?.name || basename(pathValue),
+    layer,
+    domain,
+    description: doc?.description || doc?.title || "",
+    extra: content.slice(0, 1200),
+  });
+
+  const entities = Array.isArray(doc?.entities) ? doc.entities : [];
+  for (const entity of entities) {
+    const entityName = String(entity?.name || entity?.entity || "").trim();
+    if (!entityName) continue;
+    aiAddRecord(records, {
+      kind: String(entity?.type || "").toLowerCase() === "concept" || layer === "conceptual" ? "concept" : "entity",
+      path: pathValue,
+      name: entityName,
+      layer,
+      domain: entity.domain || domain,
+      subject_area: entity.subject_area || entity.subject || "",
+      owner: entity.owner || "",
+      tags: Array.isArray(entity.tags) ? entity.tags.join(" ") : "",
+      description: entity.description || "",
+      extra: JSON.stringify(entity).slice(0, 1600),
+    });
+    for (const field of Array.isArray(entity.fields) ? entity.fields : []) {
+      const fieldName = String(field?.name || "").trim();
+      if (!fieldName) continue;
+      aiAddRecord(records, {
+        kind: "field",
+        path: pathValue,
+        name: `${entityName}.${fieldName}`,
+        layer,
+        domain: entity.domain || domain,
+        description: field.description || "",
+        tags: Array.isArray(field.tags) ? field.tags.join(" ") : "",
+        extra: JSON.stringify(field).slice(0, 1000),
+      });
+    }
+  }
+
+  for (const rel of Array.isArray(doc?.relationships) ? doc.relationships : []) {
+    const fromEntity = rel?.from?.entity || rel?.from?.table || "";
+    const toEntity = rel?.to?.entity || rel?.to?.table || "";
+    aiAddRecord(records, {
+      kind: "relationship",
+      path: pathValue,
+      name: rel?.name || `${fromEntity}_to_${toEntity}`,
+      layer,
+      domain,
+      description: rel?.description || rel?.verb || "",
+      extra: JSON.stringify(rel).slice(0, 1200),
+    });
+  }
+
+  const dbtModels = Array.isArray(doc?.models) ? doc.models : [];
+  for (const model of dbtModels) {
+    const modelName = String(model?.name || "").trim();
+    if (!modelName) continue;
+    aiAddRecord(records, {
+      kind: "dbt_model",
+      path: pathValue,
+      name: modelName,
+      layer: "physical",
+      domain,
+      description: model.description || "",
+      tags: Array.isArray(model.tags) ? model.tags.join(" ") : "",
+      extra: JSON.stringify(model).slice(0, 1600),
+    });
+    for (const col of Array.isArray(model.columns) ? model.columns : []) {
+      const colName = String(col?.name || "").trim();
+      if (!colName) continue;
+      aiAddRecord(records, {
+        kind: "column",
+        path: pathValue,
+        name: `${modelName}.${colName}`,
+        layer: "physical",
+        domain,
+        description: col.description || "",
+        tags: Array.isArray(col.tags) ? col.tags.join(" ") : "",
+        extra: JSON.stringify(col).slice(0, 1000),
+      });
+    }
+  }
+}
+
+const AI_REPO_SKIP_DIRS = new Set([
+  ".git",
+  ".datalex",
+  ".venv",
+  "venv",
+  "env",
+  "node_modules",
+  "dbt_packages",
+  "logs",
+  "__pycache__",
+]);
+
+function aiKindForRepoArtifact(relPath) {
+  const p = String(relPath || "").toLowerCase();
+  if (p === "dbt_project.yml" || p === "dbt_project.yaml") return "dbt_project";
+  if (p.endsWith(".sql")) return "dbt_sql";
+  if (p.endsWith(".yml") || p.endsWith(".yaml")) return "dbt_yaml";
+  if (p.endsWith(".md")) return "dbt_doc";
+  return "repo_artifact";
+}
+
+function dbtDomainFromPath(relPath) {
+  const parts = String(relPath || "").replace(/\\/g, "/").split("/").filter(Boolean);
+  if (parts[0] === "models" && parts[1]) return parts[1];
+  if (parts[0] === "snapshots" && parts[1]) return parts[1];
+  if (parts[0] === "seeds" && parts[1]) return parts[1];
+  return "";
+}
+
+function dbtDomainFromNode(node, fallbackPath = "") {
+  const fqn = Array.isArray(node?.fqn) ? node.fqn.filter(Boolean) : [];
+  if (fqn.length >= 3) return String(fqn[1] || "");
+  return dbtDomainFromPath(node?.original_file_path || node?.path || fallbackPath);
+}
+
+async function walkAiRepoArtifacts(projectRoot, { skipModelPath = "" } = {}) {
+  const files = [];
+  async function walk(dir, base = projectRoot) {
+    let entries = [];
+    try { entries = await readdir(dir, { withFileTypes: true }); } catch (_err) { return; }
+    entries.sort((a, b) => a.name.localeCompare(b.name));
+    for (const entry of entries) {
+      const full = join(dir, entry.name);
+      const rel = toPosixPath(relative(base, full));
+      if (entry.isDirectory()) {
+        if (AI_REPO_SKIP_DIRS.has(entry.name)) continue;
+        if (entry.name === DATALEX_WORKSPACE_ROOT) continue;
+        if (skipModelPath && isPathInside(skipModelPath, full)) continue;
+        if (rel.toLowerCase() === "target") continue;
+        await walk(full, base);
+      } else if (/\.(sql|ya?ml|md)$/i.test(entry.name) || /^dbt_project\.ya?ml$/i.test(entry.name)) {
+        files.push({ fullPath: full, path: rel, name: entry.name });
+      }
+    }
+  }
+  await walk(projectRoot);
+  return files;
+}
+
+async function readJsonArtifact(filePath) {
+  if (!filePath || !existsSync(filePath)) return null;
+  try {
+    return JSON.parse(await readFile(filePath, "utf-8"));
+  } catch (_err) {
+    return null;
+  }
+}
+
+function collectDbtManifestRecords(records, manifest, artifactPath) {
+  if (!manifest || typeof manifest !== "object") return;
+  aiAddRecord(records, {
+    kind: "dbt_manifest",
+    path: artifactPath,
+    name: "manifest.json",
+    layer: "physical",
+    description: `dbt manifest with ${Object.keys(manifest.nodes || {}).length} nodes and ${Object.keys(manifest.sources || {}).length} sources`,
+    extra: JSON.stringify({
+      metadata: manifest.metadata || {},
+      generated_at: manifest.metadata?.generated_at || manifest.generated_at,
+    }).slice(0, 2000),
+  });
+
+  for (const [uniqueId, node] of Object.entries(manifest.nodes || {})) {
+    const resourceType = String(node?.resource_type || "").toLowerCase();
+    const name = String(node?.name || node?.alias || uniqueId).trim();
+    const originalPath = node?.original_file_path || node?.path || artifactPath;
+    if (resourceType === "model" || resourceType === "seed" || resourceType === "snapshot") {
+      const domain = dbtDomainFromNode(node, originalPath);
+      aiAddRecord(records, {
+        kind: "dbt_manifest_model",
+        path: originalPath,
+        name,
+        layer: "physical",
+        domain,
+        description: node?.description || "",
+        tags: Array.isArray(node?.tags) ? node.tags.join(" ") : "",
+        owner: node?.meta?.owner || node?.config?.meta?.owner || "",
+        extra: JSON.stringify({
+          unique_id: uniqueId,
+          materialized: node?.config?.materialized,
+          database: node?.database,
+          schema: node?.schema,
+          alias: node?.alias,
+          depends_on: node?.depends_on?.nodes || [],
+          contract: node?.contract || node?.config?.contract,
+          meta: node?.meta || node?.config?.meta || {},
+        }).slice(0, 2400),
+      });
+      for (const [columnName, column] of Object.entries(node?.columns || {})) {
+        aiAddRecord(records, {
+          kind: "dbt_manifest_column",
+          path: originalPath,
+          name: `${name}.${columnName}`,
+          layer: "physical",
+          domain,
+          description: column?.description || "",
+          tags: Array.isArray(column?.tags) ? column.tags.join(" ") : "",
+          extra: JSON.stringify({
+            unique_id: `${uniqueId}.${columnName}`,
+            data_type: column?.data_type,
+            tests: column?.tests || [],
+            meta: column?.meta || {},
+          }).slice(0, 1600),
+        });
+      }
+      for (const dep of node?.depends_on?.nodes || []) {
+        aiAddRecord(records, {
+          kind: "dbt_lineage_edge",
+          path: originalPath,
+          name: `${dep} -> ${uniqueId}`,
+          layer: "physical",
+          domain,
+          description: `dbt dependency from ${dep} to ${uniqueId}`,
+          extra: JSON.stringify({ from: dep, to: uniqueId, model: name }).slice(0, 1200),
+        });
+      }
+    } else if (resourceType === "test") {
+      aiAddRecord(records, {
+        kind: "dbt_test",
+        path: originalPath,
+        name,
+        layer: "physical",
+        domain: dbtDomainFromNode(node, originalPath),
+        description: node?.test_metadata?.name || node?.description || "",
+        extra: JSON.stringify({
+          unique_id: uniqueId,
+          depends_on: node?.depends_on?.nodes || [],
+          column_name: node?.column_name,
+          test_metadata: node?.test_metadata,
+        }).slice(0, 1600),
+      });
+    }
+  }
+
+  for (const [uniqueId, source] of Object.entries(manifest.sources || {})) {
+    const name = [source?.source_name, source?.name].filter(Boolean).join(".");
+    aiAddRecord(records, {
+      kind: "dbt_source",
+      path: source?.original_file_path || artifactPath,
+      name: name || uniqueId,
+      layer: "physical",
+      domain: dbtDomainFromNode(source, source?.original_file_path || artifactPath),
+      description: source?.description || "",
+      tags: Array.isArray(source?.tags) ? source.tags.join(" ") : "",
+      extra: JSON.stringify({
+        unique_id: uniqueId,
+        database: source?.database,
+        schema: source?.schema,
+        loader: source?.loader,
+        freshness: source?.freshness,
+        meta: source?.meta || {},
+      }).slice(0, 1800),
+    });
+  }
+
+  for (const [uniqueId, metric] of Object.entries(manifest.metrics || {})) {
+    aiAddRecord(records, {
+      kind: "dbt_metric",
+      path: metric?.original_file_path || artifactPath,
+      name: metric?.name || uniqueId,
+      layer: "semantic",
+      domain: dbtDomainFromNode(metric, metric?.original_file_path || artifactPath),
+      description: metric?.description || "",
+      extra: JSON.stringify(metric).slice(0, 1800),
+    });
+  }
+
+  for (const [uniqueId, semanticModel] of Object.entries(manifest.semantic_models || {})) {
+    aiAddRecord(records, {
+      kind: "dbt_semantic_model",
+      path: semanticModel?.original_file_path || artifactPath,
+      name: semanticModel?.name || uniqueId,
+      layer: "semantic",
+      domain: dbtDomainFromNode(semanticModel, semanticModel?.original_file_path || artifactPath),
+      description: semanticModel?.description || "",
+      extra: JSON.stringify(semanticModel).slice(0, 2200),
+    });
+  }
+}
+
+function collectDbtCatalogRecords(records, catalog, artifactPath) {
+  if (!catalog || typeof catalog !== "object") return;
+  aiAddRecord(records, {
+    kind: "dbt_catalog",
+    path: artifactPath,
+    name: "catalog.json",
+    layer: "physical",
+    description: `dbt catalog with ${Object.keys(catalog.nodes || {}).length} relations`,
+    extra: JSON.stringify(catalog.metadata || {}).slice(0, 1200),
+  });
+  for (const [uniqueId, node] of Object.entries({ ...(catalog.nodes || {}), ...(catalog.sources || {}) })) {
+    const name = String(node?.metadata?.name || node?.name || uniqueId).trim();
+    const pathValue = node?.metadata?.original_file_path || artifactPath;
+    aiAddRecord(records, {
+      kind: "dbt_catalog_relation",
+      path: pathValue,
+      name,
+      layer: "physical",
+      domain: dbtDomainFromPath(pathValue),
+      description: node?.metadata?.comment || "",
+      extra: JSON.stringify(node?.metadata || {}).slice(0, 1600),
+    });
+    for (const [columnName, column] of Object.entries(node?.columns || {})) {
+      aiAddRecord(records, {
+        kind: "dbt_catalog_column",
+        path: pathValue,
+        name: `${name}.${columnName}`,
+        layer: "physical",
+        domain: dbtDomainFromPath(pathValue),
+        description: column?.comment || "",
+        extra: JSON.stringify({
+          type: column?.type,
+          index: column?.index,
+          name: column?.name || columnName,
+        }).slice(0, 1000),
+      });
+    }
+  }
+}
+
+function collectDbtRunResultsRecords(records, runResults, artifactPath) {
+  if (!runResults || typeof runResults !== "object" || !Array.isArray(runResults.results)) return;
+  aiAddRecord(records, {
+    kind: "dbt_run_results",
+    path: artifactPath,
+    name: "run_results.json",
+    layer: "physical",
+    description: `dbt run results with ${runResults.results.length} results`,
+    extra: JSON.stringify(runResults.metadata || {}).slice(0, 1200),
+  });
+  for (const result of runResults.results.slice(0, 500)) {
+    const uniqueId = result?.unique_id || result?.node?.unique_id || "";
+    aiAddRecord(records, {
+      kind: "dbt_run_result",
+      path: artifactPath,
+      name: uniqueId || result?.status || "dbt result",
+      layer: "physical",
+      description: `dbt ${result?.status || "status"} for ${uniqueId}`,
+      extra: JSON.stringify({
+        unique_id: uniqueId,
+        status: result?.status,
+        execution_time: result?.execution_time,
+        message: result?.message,
+      }).slice(0, 1200),
+    });
+  }
+}
+
+async function collectDbtArtifactRecords(records, projectRoot) {
+  const targetRoot = join(projectRoot, "target");
+  const artifacts = {
+    manifest: join(targetRoot, "manifest.json"),
+    catalog: join(targetRoot, "catalog.json"),
+    semanticManifest: join(targetRoot, "semantic_manifest.json"),
+    runResults: join(targetRoot, "run_results.json"),
+  };
+  const manifest = await readJsonArtifact(artifacts.manifest);
+  const catalog = await readJsonArtifact(artifacts.catalog);
+  const semanticManifest = await readJsonArtifact(artifacts.semanticManifest);
+  const runResults = await readJsonArtifact(artifacts.runResults);
+  collectDbtManifestRecords(records, manifest, "target/manifest.json");
+  collectDbtCatalogRecords(records, catalog, "target/catalog.json");
+  if (semanticManifest) {
+    aiAddRecord(records, {
+      kind: "dbt_semantic_manifest",
+      path: "target/semantic_manifest.json",
+      name: "semantic_manifest.json",
+      layer: "semantic",
+      description: "dbt semantic manifest for metrics and semantic models",
+      extra: JSON.stringify(semanticManifest).slice(0, 4000),
+    });
+  }
+  collectDbtRunResultsRecords(records, runResults, "target/run_results.json");
+  return {
+    manifest: Boolean(manifest),
+    catalog: Boolean(catalog),
+    semanticManifest: Boolean(semanticManifest),
+    runResults: Boolean(runResults),
+  };
+}
+
+async function buildAiIndex(project) {
+  const structure = await loadProjectStructure(project.path);
+  const yamlFiles = await walkYamlFiles(structure.modelPath);
+  const records = [];
+  for (const file of yamlFiles) {
+    let content = "";
+    try {
+      content = await readFile(file.fullPath, "utf-8");
+    } catch (_err) {
+      continue;
+    }
+    const { doc, error } = safeYamlLoad(content);
+    if (error || !doc || typeof doc !== "object" || Array.isArray(doc)) {
+      aiAddRecord(records, {
+        kind: "yaml_parse_error",
+        path: file.path,
+        name: file.name,
+        description: error?.message || "YAML file could not be parsed.",
+        extra: content.slice(0, 1000),
+      });
+      continue;
+    }
+    aiCollectYamlRecords(records, file, content, doc);
+  }
+
+  const skipModelPath = resolve(structure.modelPath) === resolve(project.path) ? "" : structure.modelPath;
+  const repoFiles = await walkAiRepoArtifacts(project.path, { skipModelPath });
+  for (const file of repoFiles) {
+    let content = "";
+    try {
+      content = await readFile(file.fullPath, "utf-8");
+    } catch (_err) {
+      continue;
+    }
+    aiAddRecord(records, {
+      kind: aiKindForRepoArtifact(file.path),
+      path: file.path,
+      name: file.name,
+      layer: "physical",
+      domain: dbtDomainFromPath(file.path),
+      description: content.slice(0, 1400),
+      extra: content.slice(0, 3200),
+    });
+    if (/\.ya?ml$/i.test(file.name)) {
+      const { doc } = safeYamlLoad(content);
+      if (doc && typeof doc === "object" && !Array.isArray(doc)) {
+        const models = Array.isArray(doc.models) ? doc.models : [];
+        const sources = Array.isArray(doc.sources) ? doc.sources : [];
+        const semanticModels = Array.isArray(doc.semantic_models) ? doc.semantic_models : [];
+        for (const model of models) {
+          const modelName = String(model?.name || "").trim();
+          if (!modelName) continue;
+          aiAddRecord(records, {
+            kind: "dbt_yaml_model",
+            path: file.path,
+            name: modelName,
+            layer: "physical",
+            domain: dbtDomainFromPath(file.path),
+            description: model.description || "",
+            tags: Array.isArray(model.tags) ? model.tags.join(" ") : "",
+            extra: JSON.stringify(model).slice(0, 1800),
+          });
+        }
+        for (const source of sources) {
+          const sourceName = String(source?.name || "").trim();
+          if (!sourceName) continue;
+          aiAddRecord(records, {
+            kind: "dbt_yaml_source",
+            path: file.path,
+            name: sourceName,
+            layer: "physical",
+            domain: dbtDomainFromPath(file.path),
+            description: source.description || "",
+            extra: JSON.stringify(source).slice(0, 1800),
+          });
+        }
+        for (const semanticModel of semanticModels) {
+          const semanticName = String(semanticModel?.name || "").trim();
+          if (!semanticName) continue;
+          aiAddRecord(records, {
+            kind: "dbt_yaml_semantic_model",
+            path: file.path,
+            name: semanticName,
+            layer: "semantic",
+            domain: dbtDomainFromPath(file.path),
+            description: semanticModel.description || "",
+            extra: JSON.stringify(semanticModel).slice(0, 2200),
+          });
+        }
+      }
+    }
+  }
+
+  const dbtArtifacts = await collectDbtArtifactRecords(records, project.path);
+
+  const skillRoots = [
+    { dir: join(structure.modelPath, DATALEX_SKILLS_DIR), label: DATALEX_SKILLS_DIR },
+    // Backward-compatible read only: older previews wrote DataLex/skills.
+    { dir: join(structure.modelPath, "skills"), label: "skills" },
+  ];
+  async function walkSkills(dir, label, base = dir) {
+    let entries = [];
+    try { entries = await readdir(dir, { withFileTypes: true }); } catch (_err) { return; }
+    entries.sort((a, b) => a.name.localeCompare(b.name));
+    for (const entry of entries) {
+      const full = join(dir, entry.name);
+      if (entry.isDirectory()) {
+        await walkSkills(full, label, base);
+      } else if (/\.(md|ya?ml|txt)$/i.test(entry.name)) {
+        const rel = toPosixPath(join(label, relative(base, full)));
+        let content = "";
+        try { content = await readFile(full, "utf-8"); } catch (_err) { continue; }
+        const meta = parseAiSkillMetadata(content);
+        const useWhen = Array.isArray(meta.use_when) ? meta.use_when : [];
+        const tags = Array.isArray(meta.tags) ? meta.tags : [];
+        const layers = normalizeAiArray(meta.layers || meta.layer);
+        const agentModes = normalizeAiArray(meta.agent_modes || meta.agent_mode);
+        aiAddRecord(records, {
+          kind: "skill",
+          path: rel,
+          name: meta.name || entry.name,
+          description: [
+            meta.description || "",
+            useWhen.length ? `Use when: ${useWhen.join(", ")}` : "",
+            content.slice(0, 1800),
+          ].filter(Boolean).join("\n"),
+          tags: tags.join(" "),
+          layer: layers.join(" "),
+          use_when: useWhen.join(" "),
+          agent_modes: agentModes.join(" "),
+          priority: Number(meta.priority || 0) || 0,
+          extra: content.slice(0, 4000),
+        });
+      }
+    }
+  }
+  for (const root of skillRoots) {
+    await walkSkills(root.dir, root.label);
+  }
+
+  async function walkTextArtifacts(dir, base = structure.modelPath) {
+    let entries = [];
+    try { entries = await readdir(dir, { withFileTypes: true }); } catch (_err) { return; }
+    entries.sort((a, b) => a.name.localeCompare(b.name));
+    for (const entry of entries) {
+      const full = join(dir, entry.name);
+      const rel = toPosixPath(relative(base, full));
+      if (entry.isDirectory()) {
+        if (rel.toLowerCase() === "skills" || rel.toLowerCase().startsWith("skills/")) continue;
+        await walkTextArtifacts(full, base);
+      } else if (/\.(md|sql)$/i.test(entry.name)) {
+        let content = "";
+        try { content = await readFile(full, "utf-8"); } catch (_err) { continue; }
+        aiAddRecord(records, {
+          kind: /\.sql$/i.test(entry.name) ? "sql_artifact" : "document",
+          path: rel,
+          name: entry.name,
+          layer: aiLayerFromPath(rel),
+          domain: aiDomainFromPath(rel),
+          description: content.slice(0, 1000),
+          extra: content.slice(0, 2000),
+        });
+      }
+    }
+  }
+  await walkTextArtifacts(structure.modelPath);
+
+  const docFreq = new Map();
+  const tokenIndex = new Map();
+  records.forEach((record, recordIndex) => {
+    const tokenCounts = new Map();
+    for (const token of record.tokens || []) {
+      tokenCounts.set(token, (tokenCounts.get(token) || 0) + 1);
+    }
+    record.tokenLength = record.tokens?.length || 0;
+    record.tokenCounts = Object.fromEntries(tokenCounts);
+    for (const token of tokenCounts.keys()) {
+      docFreq.set(token, (docFreq.get(token) || 0) + 1);
+      if (!tokenIndex.has(token)) tokenIndex.set(token, []);
+      tokenIndex.get(token).push(recordIndex);
+    }
+  });
+  const avgLen = records.length
+    ? records.reduce((sum, record) => sum + (record.tokens?.length || 0), 0) / records.length
+    : 1;
+  const typedCounts = {};
+  for (const record of records) {
+    typedCounts[record.kind || "record"] = (typedCounts[record.kind || "record"] || 0) + 1;
+  }
+  const index = {
+    projectId: project.id,
+    projectPath: project.path,
+    modelPath: structure.modelPath,
+    builtAt: new Date().toISOString(),
+    records,
+    docFreq: Object.fromEntries(docFreq),
+    tokenIndex: Object.fromEntries(tokenIndex),
+    avgLen,
+    typedCounts,
+    dbtArtifacts,
+  };
+  AI_INDEX_CACHE.set(project.id, index);
+  await persistAiIndexSnapshot(project, index).catch(() => null);
+  return index;
+}
+
+function searchAiIndex(index, query, { limit = 20, selected = null } = {}) {
+  if (!index) return [];
+  const queryTokens = aiTokens([
+    query,
+    selected?.kind,
+    selected?.entityName,
+    selected?.fieldName,
+    selected?.relId,
+    selected?.filePath,
+    selected?.selectedText,
+  ].filter(Boolean).join(" "));
+  if (queryTokens.length === 0) return index.records.slice(0, limit);
+  const n = Math.max(1, index.records.length);
+  const avgLen = Math.max(1, index.avgLen || 1);
+  const k1 = 1.2;
+  const b = 0.75;
+  const queryText = queryTokens.join(" ");
+  const reverseIntent = /\b(reverse|engineer|conceptual|logical|business|domain|repo|repository|workspace)\b/.test(queryText);
+  const datatypeIntent = /\b(type|datatype|data_type|catalog|column|schema)\b/.test(queryText);
+  const relationshipIntent = /\b(relationship|relation|lineage|ref|foreign|fk|cardinality|join)\b/.test(queryText);
+  const governanceIntent = /\b(owner|description|governance|validation|coverage|test|quality)\b/.test(queryText);
+  const candidateIndexes = new Set();
+  for (const token of queryTokens) {
+    for (const idx of index.tokenIndex?.[token] || []) candidateIndexes.add(idx);
+  }
+  if (candidateIndexes.size === 0) return [];
+  const scored = [];
+  for (const recordIndex of candidateIndexes) {
+    const record = index.records?.[recordIndex];
+    if (!record) continue;
+    const tokenLength = Math.max(1, record.tokenLength || record.tokens?.length || 0);
+    const tf = record.tokenCounts || {};
+    let score = 0;
+    const recordName = String(record.name || "").toLowerCase();
+    const recordPath = String(record.path || "").toLowerCase();
+    const recordKind = String(record.kind || "").toLowerCase();
+    for (const qt of queryTokens) {
+      const freq = Number(tf[qt] || 0);
+      if (!freq) continue;
+      const df = Number(index.docFreq?.[qt] || 0);
+      const idf = Math.log(1 + (n - df + 0.5) / (df + 0.5));
+      const denom = freq + k1 * (1 - b + b * tokenLength / avgLen);
+      score += idf * ((freq * (k1 + 1)) / denom);
+      if (recordName === qt) score += 10;
+      if (recordName.split(/[./:_-]+/).includes(qt)) score += 5;
+      if (recordName.includes(qt)) score += 2;
+      if (recordPath.includes(qt)) score += 1.75;
+    }
+    if (selected?.entityName && String(record.text || "").toLowerCase().includes(String(selected.entityName).toLowerCase())) {
+      score += 4;
+    }
+    if (selected?.fieldName && String(record.text || "").toLowerCase().includes(String(selected.fieldName).toLowerCase())) {
+      score += 4;
+    }
+    if (reverseIntent && ["dbt_manifest_model", "dbt_yaml_model", "dbt_sql", "dbt_source", "dbt_semantic_model", "dbt_metric"].includes(recordKind)) score += 3;
+    if (datatypeIntent && ["dbt_catalog_column", "dbt_manifest_column", "column", "field"].includes(recordKind)) score += 4;
+    if (relationshipIntent && ["relationship", "dbt_lineage_edge", "dbt_test"].includes(recordKind)) score += 4;
+    if (governanceIntent && ["yaml_parse_error", "dbt_test", "skill", "concept", "entity", "dbt_manifest_model"].includes(recordKind)) score += 2;
+    if (score > 0) scored.push({ ...record, score });
+  }
+  return scored.sort((a, b) => b.score - a.score).slice(0, limit);
+}
+
+function redactAiRecord(record) {
+  const description = String(record.description || "").replace(/\s+/g, " ").trim();
+  return {
+    kind: record.kind,
+    path: record.path,
+    name: record.name,
+    layer: record.layer || "",
+    domain: record.domain || "",
+    tags: record.tags || "",
+    use_when: record.use_when || "",
+    agent_modes: record.agent_modes || "",
+    priority: Number(record.priority || 0) || undefined,
+    description: description.slice(0, 260),
+    score: record.score ? Number(record.score.toFixed(3)) : undefined,
+  };
+}
+
+function dedupeAiRecords(records, limit = 24) {
+  const seen = new Set();
+  const kindCounts = new Map();
+  const pathCounts = new Map();
+  const out = [];
+  for (const record of records || []) {
+    const key = [
+      record.kind || "",
+      record.path || "",
+      record.name || "",
+    ].join("|").toLowerCase();
+    if (seen.has(key)) continue;
+    const kind = String(record.kind || "record");
+    const path = String(record.path || "");
+    const kindCount = kindCounts.get(kind) || 0;
+    const pathCount = pathCounts.get(path) || 0;
+    if (out.length >= Math.ceil(limit * 0.55) && kindCount >= 5) continue;
+    if (out.length >= Math.ceil(limit * 0.55) && path && pathCount >= 3) continue;
+    seen.add(key);
+    kindCounts.set(kind, kindCount + 1);
+    pathCounts.set(path, pathCount + 1);
+    out.push(record);
+    if (out.length >= limit) break;
+  }
+  return out;
+}
+
+function isRepoWideAiRequest(message, context = {}) {
+  const text = [
+    message,
+    context?.scope,
+    context?.intent,
+  ].filter(Boolean).join(" ").toLowerCase();
+  return /\b(repo|repository|project|workspace|all models|entire|reverse engineer|reverse-engineer|business conceptual|conceptual based|logical based|dbt import|manifest|catalog)\b/.test(text);
+}
+
+function repoWideAiQuery(message) {
+  return [
+    message,
+    "dbt model models sql schema yaml manifest catalog lineage ref source sources column columns datatype tests semantic metrics exposure",
+  ].filter(Boolean).join(" ");
+}
+
+function unscopedAiContext(context = {}) {
+  const {
+    filePath: _filePath,
+    activeFilePath: _activeFilePath,
+    activeYamlPreview: _activeYamlPreview,
+    ...rest
+  } = context || {};
+  return rest;
+}
+
+function repoWideSeedRecords(index, limit = 12) {
+  const priority = new Map([
+    ["dbt_manifest_model", 1],
+    ["dbt_yaml_model", 2],
+    ["dbt_catalog_relation", 3],
+    ["dbt_sql", 4],
+    ["dbt_source", 5],
+    ["dbt_manifest_column", 6],
+    ["dbt_catalog_column", 7],
+    ["dbt_semantic_model", 8],
+    ["dbt_metric", 9],
+    ["diagram_file", 10],
+  ]);
+  return (index?.records || [])
+    .filter((record) => priority.has(record.kind))
+    .sort((a, b) => {
+      const kindDelta = priority.get(a.kind) - priority.get(b.kind);
+      if (kindDelta) return kindDelta;
+      return String(a.path || "").localeCompare(String(b.path || "")) || String(a.name || "").localeCompare(String(b.name || ""));
+    })
+    .slice(0, limit);
+}
+
+function selectAiSkills(index, { message, context = {}, agents = [], sources = [], skillControls = {} } = {}) {
+  const disabled = new Set(normalizeAiArray(skillControls.disabled || skillControls.disabledPaths).map((v) => v.toLowerCase()));
+  const pinned = new Set(normalizeAiArray(skillControls.pinned || skillControls.pinnedPaths).map((v) => v.toLowerCase()));
+  const agentIds = new Set((agents || []).map((agent) => agent.id));
+  const queryText = [
+    message,
+    context?.kind,
+    context?.modelKind,
+    context?.layer,
+    context?.selectedText,
+    [...agentIds].join(" "),
+  ].filter(Boolean).join(" ").toLowerCase();
+  const sourceSkillPaths = new Set((sources || []).filter((source) => source.kind === "skill").map((source) => String(source.path || "").toLowerCase()));
+  const skills = [];
+  for (const record of index?.records || []) {
+    if (record.kind !== "skill") continue;
+    const pathKey = String(record.path || "").toLowerCase();
+    const nameKey = String(record.name || "").toLowerCase();
+    if (disabled.has(pathKey) || disabled.has(nameKey)) continue;
+    let score = Number(record.priority || 0);
+    if (pinned.has(pathKey) || pinned.has(nameKey)) score += 100;
+    if (sourceSkillPaths.has(pathKey)) score += 8;
+    const modes = new Set(normalizeAiArray(record.agent_modes));
+    for (const mode of modes) if (agentIds.has(mode)) score += 12;
+    const layerText = String(record.layer || "").toLowerCase();
+    if (context?.modelKind && layerText.includes(String(context.modelKind).toLowerCase())) score += 6;
+    for (const token of aiTokens([record.name, record.tags, record.use_when, record.description].join(" "))) {
+      if (queryText.includes(token)) score += 1;
+    }
+    if (score > 0) skills.push({ ...record, score });
+  }
+  return skills.sort((a, b) => b.score - a.score).slice(0, 8).map(redactAiRecord);
+}
+
+function buildAiContextPreview(index, { message = "", context = {}, skillControls = {} } = {}) {
+  const agents = classifyAiAgents(message, context);
+  const repoWide = isRepoWideAiRequest(message, context);
+  const activeContextSources = searchAiIndex(index, "", { selected: context, limit: 8 });
+  const broadSources = searchAiIndex(index, message, { selected: unscopedAiContext(context), limit: 28 });
+  const repoSources = repoWide
+    ? searchAiIndex(index, repoWideAiQuery(message), { selected: unscopedAiContext(context), limit: 32 })
+    : [];
+  const repoSeedSources = repoWide ? repoWideSeedRecords(index, 12) : [];
+  const rawSources = repoWide
+    ? dedupeAiRecords([...repoSeedSources, ...repoSources, ...broadSources, ...activeContextSources], 24)
+    : dedupeAiRecords([...activeContextSources, ...broadSources], 24);
+  const sources = rawSources.map(redactAiRecord);
+  const selectedSkills = selectAiSkills(index, { message, context, agents, sources, skillControls });
+  const relatedEntity = String(context?.entityName || context?.tableName || "").toLowerCase();
+  const lineage = relatedEntity
+    ? (index?.records || [])
+      .filter((record) => record.kind === "relationship" && String(record.text || "").toLowerCase().includes(relatedEntity))
+      .slice(0, 8)
+      .map(redactAiRecord)
+    : [];
+  const validationFindings = (index?.records || []).filter((record) => record.kind === "yaml_parse_error").slice(0, 8).map(redactAiRecord);
+  return {
+    agents,
+    sources,
+    selected_skills: selectedSkills,
+    lineage,
+    validation_findings: validationFindings,
+    retrieval_pipeline: [
+      repoWide ? "repo_wide_context" : "selected_object_context",
+      "structured_datalex_lookup",
+      "dbt_manifest_catalog_lookup",
+      "bm25_lexical_search",
+      "graph_lineage_expansion",
+      "validation_findings",
+      "scoped_skills",
+      "project_memory",
+    ],
+  };
+}
+
+function detectDuplicateRelationships(doc) {
+  const relationships = Array.isArray(doc?.relationships) ? doc.relationships : [];
+  const seen = new Set();
+  const duplicates = [];
+  for (const rel of relationships) {
+    const key = [
+      rel?.from?.entity || rel?.from?.table || rel?.from || "",
+      rel?.from?.field || "",
+      rel?.to?.entity || rel?.to?.table || rel?.to || "",
+      rel?.to?.field || "",
+      rel?.cardinality || "",
+    ].map((v) => String(v).toLowerCase()).join("|");
+    if (seen.has(key)) duplicates.push(rel?.name || key);
+    seen.add(key);
+  }
+  return duplicates;
+}
+
+function validateAiProposalChangeDryRun(structure, rawChange) {
+  const change = rawChange && typeof rawChange === "object" ? { ...rawChange } : {};
+  const type = String(change?.type || change?.operation || "").trim();
+  const errors = [];
+  const warnings = [];
+  let normalized = change;
+  let content = null;
+  let targetPath = change.path || change.fullPath || change.toPath || change.name || "";
+
+  try {
+    if (!type) throw new ApiError(400, "VALIDATION", "Each proposed change needs a type");
+    if (type === "create_diagram") {
+      const domain = String(change.domain || "core").trim() || "core";
+      const layerRaw = String(change.layer || "conceptual").trim();
+      const layerFolder = layerRaw.toLowerCase() === "physical" ? "physical" : layerRaw.charAt(0).toUpperCase() + layerRaw.slice(1).toLowerCase();
+      const name = String(change.name || "ai_generated").trim().toLowerCase().replace(/[^a-z0-9_]+/g, "_").replace(/^_+|_+$/g, "") || "ai_generated";
+      normalized = { ...change, type: "create_file", path: change.path || `${domain}/${layerFolder}/${name}.diagram.yaml`, content: change.content || defaultAiDiagramContent(change) };
+    } else if (type === "create_model") {
+      const domain = String(change.domain || "core").trim() || "core";
+      const layerRaw = String(change.layer || change.modelKind || "conceptual").trim();
+      const layerFolder = layerRaw.toLowerCase() === "physical" ? "physical" : layerRaw.charAt(0).toUpperCase() + layerRaw.slice(1).toLowerCase();
+      const name = String(change.name || "ai_generated").trim().toLowerCase().replace(/[^a-z0-9_]+/g, "_").replace(/^_+|_+$/g, "") || "ai_generated";
+      normalized = { ...change, type: "create_file", path: change.path || `${domain}/${layerFolder}/${name}.model.yaml`, content: change.content || defaultAiModelContent(change) };
+    }
+
+    if (["create_file", "update_file", "patch_yaml"].includes(normalized.type)) {
+      const filePath = resolveAiWorkspacePath(structure, normalized.path || normalized.fullPath);
+      targetPath = relative(structure.modelPath, filePath);
+      content = String(normalized.content ?? "");
+      if (normalized.type === "patch_yaml" && content === "" && Array.isArray(normalized.patch)) {
+        if (!existsSync(filePath)) throw new ApiError(404, "NOT_FOUND", `File not found: ${normalized.path}`);
+        const current = readFileSync(filePath, "utf-8");
+        const { doc, error } = safeYamlLoad(current);
+        if (error) throw new ApiError(422, "YAML_PARSE_ERROR", error.message, error);
+        content = yaml.dump(applyJsonPatch(doc, normalized.patch), { lineWidth: 120, noRefs: true });
+      }
+      const validation = validateYamlOnSave(filePath, content);
+      if (!validation.ok) throw new ApiError(422, validation.code, validation.message, validation.details || null);
+      const { doc, error } = safeYamlLoad(content);
+      if (error) throw new ApiError(422, "YAML_PARSE_ERROR", error.message, error);
+      const duplicates = detectDuplicateRelationships(doc);
+      if (duplicates.length) warnings.push(`Duplicate relationship definitions detected: ${duplicates.slice(0, 5).join(", ")}`);
+      const layer = String(doc?.model?.kind || doc?.layer || doc?.kind || aiLayerFromPath(targetPath) || "").toLowerCase();
+      if (layer === "conceptual" && /models\s*:|columns\s*:|indexes\s*:|materialized\s*:/i.test(content)) {
+        warnings.push("Conceptual proposals should avoid dbt models, columns, indexes, and warehouse implementation properties.");
+      }
+    } else if (normalized.type === "delete_file") {
+      const filePath = resolveAiWorkspacePath(structure, normalized.path || normalized.fullPath);
+      targetPath = relative(structure.modelPath, filePath);
+      if (!existsSync(filePath)) throw new ApiError(404, "NOT_FOUND", `File not found: ${normalized.path}`);
+    } else if (normalized.type === "rename_file") {
+      const fromPath = resolveAiWorkspacePath(structure, normalized.fromPath || normalized.path);
+      const toPath = resolveAiWorkspacePath(structure, normalized.toPath);
+      targetPath = relative(structure.modelPath, toPath);
+      if (!existsSync(fromPath)) throw new ApiError(404, "NOT_FOUND", `File not found: ${normalized.fromPath || normalized.path}`);
+    } else {
+      throw new ApiError(400, "VALIDATION", `Unsupported AI proposal change type: ${normalized.type || type}`);
+    }
+  } catch (err) {
+    errors.push({ code: err.code || "VALIDATION", message: err.message || String(err), details: err.details || null });
+  }
+
+  return {
+    valid: errors.length === 0,
+    type: normalized.type || type,
+    path: targetPath,
+    normalized_change: normalized,
+    errors,
+    warnings,
+    validation_impact: errors.length
+      ? "Cannot apply until validation errors are fixed."
+      : warnings.length
+        ? "Can apply, but review warnings first."
+        : "No blocking proposal validation issues found.",
+  };
+}
+
+function resolveAiProviderConfig(input = {}) {
+  return resolveConfiguredAiProvider(input);
+}
+
+async function callAiProvider(config, messages) {
+  return callConfiguredAiProvider(config, messages);
+}
+
+function parseAiJson(text) {
+  if (!text) return null;
+  try { return JSON.parse(text); } catch (_err) {}
+  const match = String(text).match(/\{[\s\S]*\}/);
+  if (!match) return null;
+  try { return JSON.parse(match[0]); } catch (_err) { return null; }
+}
+
+function localAiAnswer({ message, sources, memories = [] }) {
+  const top = (sources || []).slice(0, 6);
+  const sourceLines = top.map((s) => `- ${s.kind}: ${s.name || s.path} (${s.path})`).join("\n");
+  const memoryLines = (memories || []).slice(0, 6).map((m) => `- ${m.category}: ${m.content}`).join("\n");
+  return {
+    answer: [
+      "I found the most relevant DataLex/dbt context using the local structured index and BM25-style lexical search.",
+      sourceLines ? `\nRelevant context:\n${sourceLines}` : "",
+      memoryLines ? `\nRemembered modeling preferences:\n${memoryLines}` : "",
+      "\nNo provider is configured, so I did not generate file changes. Configure OpenAI, Anthropic, Gemini, or Ollama to produce approved YAML proposals.",
+    ].join("\n"),
+    questions: [],
+    proposed_changes: [],
+    commands_to_run: [],
+    risks: [],
+    confidence: top.length ? 0.55 : 0.25,
+    requires_user_approval: true,
+    echo: message,
+  };
+}
+
+async function resolveProjectAndStructure(projectId) {
+  const projects = await loadProjects();
+  const project = projects.find((p) => p.id === projectId);
+  if (!project) throw new ApiError(404, "NOT_FOUND", "Project not found");
+  const structure = await loadProjectStructure(project.path);
+  if (!existsSync(structure.modelPath)) await mkdir(structure.modelPath, { recursive: true });
+  return { project, structure };
+}
+
+function resolveAiWorkspacePath(structure, rawPath) {
+  const text = toPosixPath(String(rawPath || "").trim()).replace(/^\/+/, "");
+  if (!text) throw new ApiError(400, "VALIDATION", "Proposal path is required");
+  const candidate = isAbsolute(text) ? resolve(text) : resolve(structure.modelPath, text);
+  if (!isPathInside(structure.modelPath, candidate)) {
+    throw new ApiError(400, "PATH_ESCAPE", "AI proposal path must stay inside the DataLex workspace");
+  }
+  return candidate;
+}
+
+function defaultAiDiagramContent(change) {
+  const domain = String(change.domain || "core").trim() || "core";
+  const layer = String(change.layer || "conceptual").trim().toLowerCase();
+  const name = String(change.name || "ai_generated").trim().toLowerCase().replace(/[^a-z0-9_]+/g, "_").replace(/^_+|_+$/g, "") || "ai_generated";
+  const title = String(change.title || name.replace(/_/g, " "));
+  return yaml.dump({
+    kind: "diagram",
+    name,
+    title,
+    layer,
+    domain,
+    entities: Array.isArray(change.entities) ? change.entities : [],
+    relationships: Array.isArray(change.relationships) ? change.relationships : [],
+  }, { lineWidth: 120, noRefs: true });
+}
+
+function defaultAiModelContent(change) {
+  const domain = String(change.domain || "core").trim() || "core";
+  const kind = String(change.layer || change.modelKind || "conceptual").trim().toLowerCase();
+  const name = String(change.name || "ai_generated").trim().toLowerCase().replace(/[^a-z0-9_]+/g, "_").replace(/^_+|_+$/g, "") || "ai_generated";
+  return yaml.dump({
+    model: { name, kind, domain },
+    entities: Array.isArray(change.entities) ? change.entities : [],
+    relationships: Array.isArray(change.relationships) ? change.relationships : [],
+  }, { lineWidth: 120, noRefs: true });
+}
+
+function applyJsonPatch(doc, patchOps) {
+  const root = doc && typeof doc === "object" ? doc : {};
+  const clone = JSON.parse(JSON.stringify(root));
+  const pointerParts = (pathValue) => String(pathValue || "")
+    .split("/")
+    .slice(1)
+    .map((part) => part.replace(/~1/g, "/").replace(/~0/g, "~"));
+  const parentFor = (pathValue) => {
+    const parts = pointerParts(pathValue);
+    const key = parts.pop();
+    let cur = clone;
+    for (const part of parts) {
+      if (cur[part] == null || typeof cur[part] !== "object") cur[part] = {};
+      cur = cur[part];
+    }
+    return { parent: cur, key };
+  };
+  for (const op of Array.isArray(patchOps) ? patchOps : []) {
+    const { parent, key } = parentFor(op.path);
+    if (op.op === "remove") {
+      if (Array.isArray(parent)) parent.splice(Number(key), 1);
+      else delete parent[key];
+    } else if (op.op === "add" || op.op === "replace") {
+      if (Array.isArray(parent) && key === "-") parent.push(op.value);
+      else parent[key] = op.value;
+    } else {
+      throw new ApiError(400, "VALIDATION", `Unsupported JSON patch op: ${op.op}`);
+    }
+  }
+  return clone;
+}
+
+async function applyAiProposalChange(project, structure, change) {
+  const type = String(change?.type || change?.operation || "").trim();
+  if (!type) throw new ApiError(400, "VALIDATION", "Each proposed change needs a type");
+
+  if (type === "create_diagram") {
+    const domain = String(change.domain || "core").trim() || "core";
+    const layerRaw = String(change.layer || "conceptual").trim();
+    const layerFolder = layerRaw.toLowerCase() === "physical" ? "physical" : layerRaw.charAt(0).toUpperCase() + layerRaw.slice(1).toLowerCase();
+    const name = String(change.name || "ai_generated").trim().toLowerCase().replace(/[^a-z0-9_]+/g, "_").replace(/^_+|_+$/g, "") || "ai_generated";
+    change = {
+      ...change,
+      type: "create_file",
+      path: change.path || `${domain}/${layerFolder}/${name}.diagram.yaml`,
+      content: change.content || defaultAiDiagramContent(change),
+    };
+  } else if (type === "create_model") {
+    const domain = String(change.domain || "core").trim() || "core";
+    const layerRaw = String(change.layer || change.modelKind || "conceptual").trim();
+    const layerFolder = layerRaw.toLowerCase() === "physical" ? "physical" : layerRaw.charAt(0).toUpperCase() + layerRaw.slice(1).toLowerCase();
+    const name = String(change.name || "ai_generated").trim().toLowerCase().replace(/[^a-z0-9_]+/g, "_").replace(/^_+|_+$/g, "") || "ai_generated";
+    change = {
+      ...change,
+      type: "create_file",
+      path: change.path || `${domain}/${layerFolder}/${name}.model.yaml`,
+      content: change.content || defaultAiModelContent(change),
+    };
+  }
+
+  if (change.type === "create_file" || change.type === "update_file") {
+    const filePath = resolveAiWorkspacePath(structure, change.path || change.fullPath);
+    const content = String(change.content ?? "");
+    const validation = validateYamlOnSave(filePath, content);
+    if (!validation.ok) throw new ApiError(422, validation.code, validation.message, validation.details || null);
+    if (change.type === "create_file" && existsSync(filePath) && !change.overwrite) {
+      throw new ApiError(409, "CONFLICT", `File already exists: ${relative(structure.modelPath, filePath)}`);
+    }
+    await mkdir(dirname(filePath), { recursive: true });
+    await writeFile(filePath, content, "utf-8");
+    const stats = await stat(filePath);
+    return { type: change.type, path: relative(structure.modelPath, filePath), fullPath: filePath, name: basename(filePath), size: stats.size, modifiedAt: stats.mtime.toISOString() };
+  }
+
+  if (change.type === "patch_yaml") {
+    const filePath = resolveAiWorkspacePath(structure, change.path || change.fullPath);
+    if (!existsSync(filePath)) throw new ApiError(404, "NOT_FOUND", `File not found: ${change.path}`);
+    const current = await readFile(filePath, "utf-8");
+    let content = change.content;
+    if (content == null && Array.isArray(change.patch)) {
+      const { doc, error } = safeYamlLoad(current);
+      if (error) throw new ApiError(422, "YAML_PARSE_ERROR", error.message, error);
+      content = yaml.dump(applyJsonPatch(doc, change.patch), { lineWidth: 120, noRefs: true });
+    }
+    if (typeof content !== "string") throw new ApiError(400, "VALIDATION", "patch_yaml requires content or patch operations");
+    const validation = validateYamlOnSave(filePath, content);
+    if (!validation.ok) throw new ApiError(422, validation.code, validation.message, validation.details || null);
+    await writeFile(filePath, content, "utf-8");
+    const stats = await stat(filePath);
+    return { type: "patch_yaml", path: relative(structure.modelPath, filePath), fullPath: filePath, name: basename(filePath), size: stats.size, modifiedAt: stats.mtime.toISOString() };
+  }
+
+  if (change.type === "delete_file") {
+    const filePath = resolveAiWorkspacePath(structure, change.path || change.fullPath);
+    if (!existsSync(filePath)) throw new ApiError(404, "NOT_FOUND", `File not found: ${change.path}`);
+    await unlinkFile(filePath);
+    return { type: "delete_file", path: relative(structure.modelPath, filePath), fullPath: filePath, name: basename(filePath) };
+  }
+
+  if (change.type === "rename_file") {
+    const fromPath = resolveAiWorkspacePath(structure, change.fromPath || change.path);
+    const toPath = resolveAiWorkspacePath(structure, change.toPath);
+    if (!existsSync(fromPath)) throw new ApiError(404, "NOT_FOUND", `File not found: ${change.fromPath || change.path}`);
+    if (existsSync(toPath) && !change.overwrite) throw new ApiError(409, "CONFLICT", `Destination already exists: ${change.toPath}`);
+    await mkdir(dirname(toPath), { recursive: true });
+    await rename(fromPath, toPath);
+    const stats = await stat(toPath);
+    return { type: "rename_file", path: relative(structure.modelPath, toPath), fromPath: relative(structure.modelPath, fromPath), fullPath: toPath, name: basename(toPath), size: stats.size, modifiedAt: stats.mtime.toISOString() };
+  }
+
+  throw new ApiError(400, "VALIDATION", `Unsupported AI proposal change type: ${change.type || type}`);
+}
+
+app.post("/api/ai/settings/test", requireAdmin, async (req, res, next) => {
+  try {
+    const config = resolveAiProviderConfig(req.body || {});
+    if (!config.provider || config.provider === "local") {
+      return res.json({ ok: true, provider: "local", message: "Local deterministic retrieval is available. Configure a provider for generative proposals." });
+    }
+    if (config.provider !== "ollama" && !config.apiKey) {
+      return apiFail(res, 400, "AI_PROVIDER_NOT_CONFIGURED", `Missing ${config.envKey || "API key"} for ${config.provider}.`);
+    }
+    await callAiProvider(config, [
+      { role: "system", content: "Return JSON only." },
+      { role: "user", content: "Return {\"ok\":true,\"message\":\"ready\"}." },
+    ]);
+    res.json({ ok: true, provider: config.provider, model: config.model || null });
+  } catch (err) {
+    next(err);
+  }
+});
+
+app.get("/api/ai/providers", requireAdmin, async (_req, res) => {
+  res.json({ ok: true, providers: listProviderMeta() });
+});
+
+app.post("/api/ai/index/rebuild", requireAdmin, async (req, res, next) => {
+  try {
+    const { project, structure } = await resolveProjectAndStructure(req.body?.projectId);
+    const index = await buildAiIndex(project);
+    const storage = await getAiRuntimeStorageInfo(project);
+    res.json({
+      ok: true,
+      projectId: project.id,
+      modelPath: structure.modelPath,
+      builtAt: index.builtAt,
+      recordCount: index.records.length,
+      typedCounts: index.typedCounts || {},
+      dbtArtifacts: index.dbtArtifacts || {},
+      storage,
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+app.post("/api/ai/context/preview", requireAdmin, async (req, res, next) => {
+  try {
+    const { project } = await resolveProjectAndStructure(req.body?.projectId);
+    const message = String(req.body?.message || "").trim();
+    const index = AI_INDEX_CACHE.get(project.id) || await buildAiIndex(project);
+    const preview = buildAiContextPreview(index, {
+      message,
+      context: req.body?.context || {},
+      skillControls: req.body?.skills || {},
+    });
+    const memories = await listAiMemories(project);
+    res.json({
+      ok: true,
+      projectId: project.id,
+      ...preview,
+      memory: {
+        active: memories.slice(0, 20),
+      },
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+app.get("/api/ai/chats", requireAdmin, async (req, res, next) => {
+  try {
+    const { project } = await resolveProjectAndStructure(String(req.query.projectId || ""));
+    const chats = await listAiChats(project);
+    res.json({ ok: true, chats });
+  } catch (err) {
+    next(err);
+  }
+});
+
+app.post("/api/ai/chats", requireAdmin, async (req, res, next) => {
+  try {
+    const { project } = await resolveProjectAndStructure(req.body?.projectId);
+    const chat = await createAiChat(project, { title: req.body?.title, message: req.body?.message });
+    res.json({ ok: true, chat });
+  } catch (err) {
+    next(err);
+  }
+});
+
+app.get("/api/ai/chats/:chatId", requireAdmin, async (req, res, next) => {
+  try {
+    const { project } = await resolveProjectAndStructure(String(req.query.projectId || ""));
+    const chat = await getAiChat(project, req.params.chatId);
+    if (!chat) throw new ApiError(404, "NOT_FOUND", "AI chat not found");
+    res.json({ ok: true, chat });
+  } catch (err) {
+    next(err);
+  }
+});
+
+app.get("/api/ai/memory", requireAdmin, async (req, res, next) => {
+  try {
+    const { project } = await resolveProjectAndStructure(String(req.query.projectId || ""));
+    const memories = await listAiMemories(project);
+    res.json({ ok: true, memories });
+  } catch (err) {
+    next(err);
+  }
+});
+
+app.post("/api/ai/memory", requireAdmin, async (req, res, next) => {
+  try {
+    const { project } = await resolveProjectAndStructure(req.body?.projectId);
+    const items = Array.isArray(req.body?.memories) ? req.body.memories : [{ category: req.body?.category, content: req.body?.content }];
+    const added = await upsertAiMemories(project, items);
+    res.json({ ok: true, added, memories: await listAiMemories(project) });
+  } catch (err) {
+    next(err);
+  }
+});
+
+app.delete("/api/ai/memory/:memoryId", requireAdmin, async (req, res, next) => {
+  try {
+    const { project } = await resolveProjectAndStructure(String(req.query.projectId || req.body?.projectId || ""));
+    const deleted = await deleteAiMemory(project, req.params.memoryId);
+    if (!deleted) throw new ApiError(404, "NOT_FOUND", "AI memory not found");
+    res.json({ ok: true, memoryId: req.params.memoryId });
+  } catch (err) {
+    next(err);
+  }
+});
+
+app.post("/api/ai/ask", requireAdmin, async (req, res, next) => {
+  try {
+    const { project } = await resolveProjectAndStructure(req.body?.projectId);
+    const message = String(req.body?.message || "").trim();
+    if (!message) throw new ApiError(400, "VALIDATION", "message is required");
+    const index = AI_INDEX_CACHE.get(project.id) || await buildAiIndex(project);
+    const contextPreview = buildAiContextPreview(index, {
+      message,
+      context: req.body?.context || {},
+      skillControls: req.body?.skills || {},
+    });
+    const sources = contextPreview.sources;
+    const config = resolveAiProviderConfig(req.body?.provider || {});
+    let chat = req.body?.chatId ? await getAiChat(project, req.body.chatId) : null;
+    if (!chat) chat = await createAiChat(project, { message });
+    chat = await appendAiChatMessages(project, chat.id, [{
+      role: "user",
+      content: message,
+      metadata: { context: req.body?.context || {} },
+    }]);
+    const memories = await listAiMemories(project);
+    const memoryContext = renderMemoryContext(memories);
+    const history = (Array.isArray(chat.messages) ? chat.messages : [])
+      .slice(-12)
+      .map((m) => ({ role: m.role, content: m.content }))
+      .filter((m) => m.role === "user" || m.role === "assistant");
+    let answer = null;
+    if (config.provider && config.provider !== "local") {
+      const system = [
+        "You are the DataLex agentic modeling assistant.",
+        "Return JSON only with keys: answer, questions, proposed_changes, commands_to_run, risks, confidence, requires_user_approval.",
+        "All file changes must be proposed_changes only. Never claim files are changed.",
+        "Use DataLex YAML, preserve existing files unless a focused patch is proposed, and never run dbt or apply DDL.",
+        "Use the built-in DataLex modeling skills as baseline industry/dbt/governance standards when user-defined skills are absent or not relevant.",
+        "Prefer user-provided project skills over built-in defaults when they conflict, but never ignore the selected specialist contract.",
+        `Selected specialist agents: ${contextPreview.agents.map((agent) => `${agent.id} (${agent.contract})`).join(" | ")}`,
+        `Selected skills: ${contextPreview.selected_skills.map((skill) => `${skill.name} at ${skill.path}`).join(", ") || "none"}`,
+        "Use change types exactly: create_file, update_file, patch_yaml, delete_file, rename_file, create_diagram, create_model.",
+        "For create_diagram include domain, layer, name, entities, relationships, and relationship verbs when conceptual.",
+        "For create_model include domain, layer, name, entities, relationships. Conceptual entities use type: concept and should include description, owner, subject_area, terms, tags when known.",
+        "For patch_yaml prefer JSON patch operations when changing small sections; use full content only when necessary.",
+        "Keep new DataLex paths domain-first, for example crm/Conceptual/customer_360.diagram.yaml or sales/physical/orders.diagram.yaml.",
+        "Retrieved records with kind=skill are scoped instructions. Use a skill only when its use_when, tags, or content match the current request/context.",
+        "If the request lacks required business meaning, ask questions instead of fabricating important facts.",
+        memoryContext,
+      ].join(" ");
+      const user = JSON.stringify({
+        request: message,
+        context: req.body?.context || {},
+        chat_history: history,
+        persisted_memory: memories.slice(0, 20),
+        selected_agents: contextPreview.agents,
+        selected_skills: contextPreview.selected_skills,
+        lineage_context: contextPreview.lineage,
+        validation_findings: contextPreview.validation_findings,
+        retrieved_sources: sources,
+        proposal_change_types: ["create_file", "update_file", "patch_yaml", "delete_file", "rename_file", "create_diagram", "create_model"],
+      }, null, 2);
+      const raw = await callAiProvider(config, [{ role: "system", content: system }, { role: "user", content: user }]);
+      answer = parseAiJson(raw);
+    }
+    if (!answer) answer = localAiAnswer({ message, sources, memories });
+    const proposalChanges = Array.isArray(answer.proposed_changes)
+      ? answer.proposed_changes.map((change) => ({
+        rationale: change?.rationale || "Proposed by the DataLex modeling agent from retrieved project context.",
+        source_context: change?.source_context || sources.slice(0, 5).map((source) => source.path || source.name).filter(Boolean),
+        validation_impact: change?.validation_impact || "Run proposal validation before applying.",
+        review_summary: change?.review_summary || `${String(change?.type || change?.operation || "change").replace(/_/g, " ")} requires user approval.`,
+        ...change,
+      }))
+      : [];
+    const extractedMemories = extractModelingMemories(message).map((memory) => ({ ...memory, sourceChatId: chat.id }));
+    const addedMemories = await upsertAiMemories(project, extractedMemories);
+    const agentRun = {
+      agents: contextPreview.agents,
+      selected_skills: contextPreview.selected_skills,
+      retrieved_sources: sources,
+      lineage: contextPreview.lineage,
+      validation_findings: contextPreview.validation_findings,
+      retrieval_pipeline: contextPreview.retrieval_pipeline,
+      proposal_summary: proposalChanges.map((change, index) => ({
+        index,
+        type: change?.type || change?.operation || "change",
+        path: change?.path || change?.fullPath || change?.toPath || change?.name || "",
+        review_summary: change?.review_summary || "",
+      })),
+      validation_impact: proposalChanges.length ? "Validate proposals before applying." : "No YAML changes proposed.",
+    };
+    const memoryPayload = {
+      active: memories.slice(0, 20),
+      added: addedMemories,
+    };
+    const responsePayload = {
+      ok: true,
+      provider: config.provider || "local",
+      model: config.model || "",
+      chatId: chat.id,
+      answer: String(answer.answer || ""),
+      questions: Array.isArray(answer.questions) ? answer.questions : [],
+      proposed_changes: proposalChanges,
+      commands_to_run: Array.isArray(answer.commands_to_run) ? answer.commands_to_run : [],
+      risks: Array.isArray(answer.risks) ? answer.risks : [],
+      confidence: Number(answer.confidence || 0),
+      requires_user_approval: answer.requires_user_approval !== false,
+      sources,
+      agent_run: agentRun,
+      memory: memoryPayload,
+    };
+    await appendAiChatMessages(project, chat.id, [{
+      role: "assistant",
+      content: String(answer.answer || ""),
+      metadata: {
+        provider: config.provider || "local",
+        model: config.model || "",
+        proposedChangeCount: proposalChanges.length,
+        sourceCount: sources.length,
+        agents: contextPreview.agents.map((agent) => agent.id),
+        aiResult: responsePayload,
+      },
+    }]);
+    res.json(responsePayload);
+  } catch (err) {
+    next(err);
+  }
+});
+
+app.post("/api/ai/proposals/validate", requireAdmin, async (req, res, next) => {
+  try {
+    const { project, structure } = await resolveProjectAndStructure(req.body?.projectId);
+    const changes = Array.isArray(req.body?.changes) ? req.body.changes : [];
+    if (!changes.length) throw new ApiError(400, "VALIDATION", "changes array is required");
+    const results = changes.map((change) => validateAiProposalChangeDryRun(structure, change));
+    const valid = results.every((item) => item.valid);
+    res.json({
+      ok: true,
+      projectId: project.id,
+      valid,
+      results,
+      summary: {
+        total: results.length,
+        valid: results.filter((item) => item.valid).length,
+        errors: results.reduce((sum, item) => sum + item.errors.length, 0),
+        warnings: results.reduce((sum, item) => sum + item.warnings.length, 0),
+      },
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+app.post("/api/ai/proposals/apply", requireAdmin, async (req, res, next) => {
+  try {
+    const { project, structure } = await resolveProjectAndStructure(req.body?.projectId);
+    const changes = Array.isArray(req.body?.changes) ? req.body.changes : [];
+    if (!changes.length) throw new ApiError(400, "VALIDATION", "changes array is required");
+    const validationResults = changes.map((change) => validateAiProposalChangeDryRun(structure, change));
+    const failed = validationResults.find((item) => !item.valid);
+    if (failed) {
+      const firstError = failed.errors?.[0] || {};
+      const status = firstError.code === "PATH_ESCAPE" ? 400 : 422;
+      throw new ApiError(status, firstError.code || "AI_PROPOSAL_INVALID", firstError.message || "AI proposal validation failed.", { results: validationResults });
+    }
+    const applied = [];
+    for (const change of changes) {
+      applied.push(await applyAiProposalChange(project, structure, change));
+    }
+    const files = await walkYamlFiles(structure.modelPath);
+    const index = await buildAiIndex(project);
+    res.json({
+      ok: true,
+      applied,
+      validation: {
+        valid: true,
+        results: validationResults,
+      },
+      files,
+      primaryFile: applied.find((item) => item.fullPath && item.type !== "delete_file") || null,
+      index: { builtAt: index.builtAt, recordCount: index.records.length },
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
 // Write/update a file
 app.put("/api/files", requireAdmin, async (req, res) => {
   try {
@@ -2146,12 +4051,19 @@ function ensureWorkspaceFolders(rootPath) {
       "generated-sql/migrations",
       "domains",
       "projects",
+      DATALEX_SKILLS_DIR,
     ]) {
       const fullDir = join(rootPath, rel);
       if (!existsSync(fullDir)) {
         mkdirSync(fullDir, { recursive: true });
         const keepFile = join(fullDir, ".gitkeep");
         if (!existsSync(keepFile)) writeFileSync(keepFile, "", "utf-8");
+      }
+    }
+    for (const skill of DEFAULT_AI_SKILL_FILES) {
+      const target = join(rootPath, DATALEX_SKILLS_DIR, skill.path);
+      if (!existsSync(target)) {
+        writeFileSync(target, skill.content, "utf-8");
       }
     }
     return { ok: true };
@@ -3432,6 +5344,27 @@ app.post("/api/dbt/import", requireAdmin, express.json({ limit: "2mb" }), async 
       }
     }
 
+    // Reverse-engineering support: once the imported dbt repo is registered,
+    // immediately build the local AI index from dbt SQL/YAML plus manifest /
+    // catalog artifacts. This makes Ask AI useful right after "Open project"
+    // without asking users to run a manual rebuild.
+    let aiIndex = null;
+    let aiIndexError = null;
+    if (projectRecord) {
+      try {
+        const index = await buildAiIndex(projectRecord);
+        aiIndex = {
+          builtAt: index.builtAt,
+          recordCount: index.records.length,
+          typedCounts: index.typedCounts || {},
+          dbtArtifacts: index.dbtArtifacts || {},
+          storage: await getAiRuntimeStorageInfo(projectRecord),
+        };
+      } catch (err) {
+        aiIndexError = String(err?.message || err).slice(0, 500);
+      }
+    }
+
     const hasFailures = writeFailures.length > 0 || registerError != null;
     res.status(hasFailures ? 207 : 200).json({
       success: !hasFailures,
@@ -3441,6 +5374,8 @@ app.post("/api/dbt/import", requireAdmin, express.json({ limit: "2mb" }), async 
       project: projectRecord,
       writeFailures,
       registerError,
+      aiIndex,
+      aiIndexError,
     });
   } catch (err) {
     if (err instanceof ApiError) return next(err);
@@ -4217,6 +6152,9 @@ app.use((err, _req, res, _next) => {
   if (res.headersSent) return;
   if (err instanceof ApiError) {
     return apiFail(res, err.status, err.code, err.message, err.details);
+  }
+  if (err?.status && err?.code) {
+    return apiFail(res, err.status, err.code, err.message || "Request failed", err.details || null);
   }
   console.error("[datalex] unhandled error:", err);
   return apiFail(res, 500, "INTERNAL", err?.message || "Internal server error");

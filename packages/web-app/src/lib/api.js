@@ -253,6 +253,64 @@ export async function saveAllProjectFiles(projectId, files) {
   });
 }
 
+export async function testAiSettings(body = {}) {
+  return request("/ai/settings/test", {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+}
+
+export async function fetchAiProviders() {
+  return request("/ai/providers");
+}
+
+export async function fetchAiChats(projectId) {
+  return request(`/ai/chats?projectId=${encodeURIComponent(projectId)}`);
+}
+
+export async function fetchAiChat(projectId, chatId) {
+  return request(`/ai/chats/${encodeURIComponent(chatId)}?projectId=${encodeURIComponent(projectId)}`);
+}
+
+export async function fetchAiMemory(projectId) {
+  return request(`/ai/memory?projectId=${encodeURIComponent(projectId)}`);
+}
+
+export async function askAi(body = {}) {
+  return request("/ai/ask", {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+}
+
+export async function previewAiContext(body = {}) {
+  return request("/ai/context/preview", {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+}
+
+export async function validateAiProposal(body = {}) {
+  return request("/ai/proposals/validate", {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+}
+
+export async function applyAiProposal(body = {}) {
+  return request("/ai/proposals/apply", {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+}
+
+export async function rebuildAiIndex(projectId) {
+  return request("/ai/index/rebuild", {
+    method: "POST",
+    body: JSON.stringify({ projectId }),
+  });
+}
+
 export async function importSchemaContent({ format, content, filename, modelName }) {
   return request("/import", {
     method: "POST",

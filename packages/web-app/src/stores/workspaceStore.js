@@ -21,6 +21,8 @@ import {
   deleteProjectFile,
   deleteProjectFolder,
   saveAllProjectFiles,
+  applyAiProposal,
+  rebuildAiIndex,
   fetchModelGraph,
 } from "../lib/api";
 import { removeEntity } from "../lib/yamlRoundTrip";
@@ -1728,6 +1730,71 @@ const useWorkspaceStore = create((set, get) => ({
       return desc;
     } catch (err) {
       set({ error: err.message });
+      throw err;
+    }
+  },
+
+  applyAiProposalChanges: async (changes, options = {}) => {
+    const { activeProjectId, offlineMode } = get();
+    if (offlineMode) {
+      throw new Error("AI proposals can only be applied to an open local project.");
+    }
+    if (!activeProjectId) {
+      throw new Error("Open a project before applying an AI proposal.");
+    }
+    const proposalChanges = Array.isArray(changes) ? changes : [];
+    if (proposalChanges.length === 0) {
+      throw new Error("No AI proposal changes to apply.");
+    }
+
+    set({ loading: true, error: null });
+    try {
+      const result = await applyAiProposal({
+        projectId: activeProjectId,
+        changes: proposalChanges,
+        proposalId: options.proposalId || undefined,
+      });
+
+      const files = result?.files || [];
+      const primary = result?.primaryFile || null;
+      set((s) => {
+        const nextCache = { ...(s.fileContentCache || {}) };
+        for (const item of result?.applied || []) {
+          const rel = normalizeWorkspacePath(item.path || "");
+          if (rel && item.type === "delete_file") delete nextCache[rel];
+        }
+        return {
+          projectFiles: files,
+          fileContentCache: nextCache,
+          modelGraphVersion: (s.modelGraphVersion || 0) + 1,
+          loading: false,
+        };
+      });
+
+      if (primary?.fullPath) {
+        const target = files.find((f) => f.fullPath === primary.fullPath || f.path === primary.path) || primary;
+        await get().openFile(target);
+      } else {
+        const active = get().activeFile;
+        if (active?.fullPath) {
+          const refreshed = files.find((f) => f.fullPath === active.fullPath);
+          if (refreshed) {
+            set({ activeFile: null });
+            await get().openFile(refreshed);
+          }
+        }
+      }
+
+      try {
+        await rebuildAiIndex(activeProjectId);
+      } catch (_err) {
+        // Apply already rebuilt the server index; this is a defensive refresh
+        // for future API variants and should not block the UI.
+      }
+
+      return result;
+    } catch (err) {
+      set({ error: err.message, loading: false });
       throw err;
     }
   },

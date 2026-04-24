@@ -84,8 +84,14 @@ export default function ImportDbtRepoDialog() {
         await loadDbtImportTreeAsProject(tree, res.project);
         addToast({
           type: "success",
-          message: `Opened ${dir} in place — ${tree.length} file${tree.length === 1 ? "" : "s"}. Save All writes back into this folder.`,
+          message: `Opened ${dir} in place — ${tree.length} file${tree.length === 1 ? "" : "s"}. AI indexed ${res.aiIndex?.recordCount || 0} dbt/DataLex facts.`,
         });
+        if (res.aiIndexError) {
+          addToast({
+            type: "warning",
+            message: `dbt import succeeded, but AI index rebuild failed: ${res.aiIndexError}`,
+          });
+        }
         const collisions = useWorkspaceStore.getState().dbtImportCollisions || [];
         if (collisions.length) {
           addToast({

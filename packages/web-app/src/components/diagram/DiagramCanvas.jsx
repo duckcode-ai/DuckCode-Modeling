@@ -10,6 +10,7 @@ import {
   useEdgesState,
   MarkerType,
 } from "@xyflow/react";
+import { Wand2 } from "lucide-react";
 import "@xyflow/react/dist/style.css";
 
 import EntityNode from "./EntityNode";
@@ -368,6 +369,33 @@ function FlowCanvas() {
   const [rfEdges, setRfEdges, onEdgesChange] = useEdgesState([]);
   const [layoutDone, setLayoutDone] = useState(false);
   const autoTuneRef = useRef(0);
+  const openQuickAi = useCallback(() => {
+    const activeFile = useWorkspaceStore.getState().activeFile;
+    const fileName = activeFile?.name || activeFile?.path || "diagram";
+    const ui = useUiStore.getState();
+    if (selectedEntityId) {
+      ui.openAiPanel?.({
+        source: "canvas-quick-entity",
+        targetName: selectedEntityId,
+        context: {
+          kind: "entity",
+          entityName: selectedEntityId,
+          fileName,
+          filePath: activeFile?.path || activeFile?.fullPath || "",
+        },
+      });
+      return;
+    }
+    ui.openAiPanel?.({
+      source: "canvas-quick-diagram",
+      targetName: fileName,
+      context: {
+        kind: "diagram",
+        fileName,
+        filePath: activeFile?.path || activeFile?.fullPath || "",
+      },
+    });
+  }, [selectedEntityId]);
 
   // Auto-tune: apply smart defaults when a large model is first loaded
   useEffect(() => {
@@ -595,7 +623,13 @@ function FlowCanvas() {
     const ui = useUiStore.getState();
     const diagram = useDiagramStore.getState();
     if (menu.target === "entity") {
-      if (actionId === "edit") {
+      if (actionId === "ask-ai") {
+        ui.openAiPanel?.({
+          source: "canvas-entity",
+          targetName: menu.nodeId,
+          context: { kind: "entity", entityName: menu.nodeId },
+        });
+      } else if (actionId === "edit") {
         diagram.selectEntity(menu.nodeId);
         ui.setSelection?.({ kind: "entity", entityName: menu.nodeId });
         if (!ui.rightPanelOpen) ui.toggleRightPanel?.();
@@ -609,14 +643,26 @@ function FlowCanvas() {
         window.dispatchEvent(new CustomEvent("dl:entity:duplicate", { detail: { name: menu.nodeId } }));
       }
     } else if (menu.target === "relationship") {
-      if (actionId === "edit") {
+      if (actionId === "ask-ai") {
+        ui.openAiPanel?.({
+          source: "canvas-relationship",
+          targetName: menu.edgeId,
+          context: { kind: "relationship", relId: menu.edgeId },
+        });
+      } else if (actionId === "edit") {
         ui.setSelection?.({ kind: "relationship", relId: menu.edgeId });
         if (!ui.rightPanelOpen) ui.toggleRightPanel?.();
       } else if (actionId === "delete") {
         window.dispatchEvent(new CustomEvent("dl:relationship:delete", { detail: { id: menu.edgeId } }));
       }
     } else if (menu.target === "pane") {
-      if (actionId === "fit") diagram.requestFitDiagram();
+      if (actionId === "ask-ai") {
+        ui.openAiPanel?.({
+          source: "canvas",
+          targetName: "diagram",
+          context: { kind: "diagram" },
+        });
+      } else if (actionId === "fit") diagram.requestFitDiagram();
       else if (actionId === "add-entity") ui.openModal?.("newEntity");
       else if (actionId === "add-entities") ui.openModal?.("entityPicker");
     }
@@ -725,6 +771,15 @@ function FlowCanvas() {
         showInteractive={false}
         style={{ borderRadius: 8, border: "1px solid #e2e8f0", overflow: "hidden" }}
       />
+      <button
+        type="button"
+        className="diagram-ai-quick-btn nodrag nopan"
+        onClick={openQuickAi}
+        title={selectedEntityId ? `Ask AI about ${selectedEntityId}` : "Ask AI about this diagram"}
+        aria-label={selectedEntityId ? `Ask AI about ${selectedEntityId}` : "Ask AI about this diagram"}
+      >
+        <Wand2 size={15} />
+      </button>
       <CanvasContextMenu
         menu={contextMenu}
         onClose={() => setContextMenu(null)}

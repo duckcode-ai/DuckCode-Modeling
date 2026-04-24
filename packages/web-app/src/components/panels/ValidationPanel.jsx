@@ -20,6 +20,7 @@ import {
   Info,
   Gauge,
   Layers,
+  Wand2,
 } from "lucide-react";
 import yaml from "js-yaml";
 import useWorkspaceStore from "../../stores/workspaceStore";
@@ -549,7 +550,7 @@ function toneIconFor(tone) {
   }
 }
 
-function IssueRow({ issue, toneOverride = "" }) {
+function IssueRow({ issue, toneOverride = "", onAskAi = null }) {
   const { tone: severityTone, Icon: severityIcon } = severityConfig(issue.severity);
   const tone = toneOverride || severityTone;
   const Icon = toneOverride ? toneIconFor(toneOverride) : severityIcon;
@@ -597,6 +598,17 @@ function IssueRow({ issue, toneOverride = "" }) {
                 {issue.path}
               </code>
             )}
+            {onAskAi && (
+              <button
+                type="button"
+                className="panel-btn"
+                style={{ padding: "2px 7px", fontSize: 10 }}
+                onClick={() => onAskAi(issue)}
+                title="Ask AI to explain or propose a fix for this validation issue"
+              >
+                <Wand2 size={10} /> Ask AI
+              </button>
+            )}
           </div>
           <p style={{ margin: "3px 0 0", fontSize: 11.5, color: "var(--text-secondary)", lineHeight: 1.45 }}>
             {issue.message}
@@ -639,7 +651,7 @@ function IssueRow({ issue, toneOverride = "" }) {
   );
 }
 
-function IssueGroups({ issues, prefix, toneOverride = "" }) {
+function IssueGroups({ issues, prefix, toneOverride = "", onAskAi = null }) {
   const groups = groupIssuesByTarget(issues);
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
@@ -663,7 +675,7 @@ function IssueGroups({ issues, prefix, toneOverride = "" }) {
             </StatusPill>
           </div>
           {group.items.map((iss, idx) => (
-            <IssueRow key={`${prefix}-${group.target}-${idx}`} issue={iss} toneOverride={toneOverride} />
+            <IssueRow key={`${prefix}-${group.target}-${idx}`} issue={iss} toneOverride={toneOverride} onAskAi={onAskAi} />
           ))}
         </div>
       ))}
@@ -706,6 +718,7 @@ function CoverageList({ title, items, emptyLabel }) {
 export default function ValidationPanel() {
   const { activeFileContent, activeFile, updateContent } = useWorkspaceStore();
   const addToast = useUiStore((s) => s.addToast);
+  const openAiPanel = useUiStore((s) => s.openAiPanel);
 
   const currentCheck = useMemo(() => {
     if (!activeFileContent) return null;
@@ -735,6 +748,18 @@ export default function ValidationPanel() {
     addToast({
       type: "success",
       message: `Removed ${count} dangling relationship${count === 1 ? "" : "s"}.`,
+    });
+  };
+
+  const handleAskAiIssue = (issue) => {
+    openAiPanel({
+      source: "validation",
+      targetName: issue?.code || "validation issue",
+      context: {
+        kind: "validation_issue",
+        issue,
+        filePath: activeFile?.path || activeFile?.fullPath || activeFile?.name || "",
+      },
     });
   };
 
@@ -947,7 +972,7 @@ export default function ValidationPanel() {
           icon={<AlertCircle size={11} style={{ color: "var(--cat-users)" }} />}
           description="These are the findings that can fail validation or semantic gate checks. Fix these first."
         >
-          <IssueGroups issues={errors} prefix="err" toneOverride="error" />
+          <IssueGroups issues={errors} prefix="err" toneOverride="error" onAskAi={handleAskAiIssue} />
         </PanelSection>
       )}
 
@@ -959,7 +984,7 @@ export default function ValidationPanel() {
           icon={<Layers size={11} style={{ color: "var(--cat-billing)" }} />}
           description="These issues usually do not hard-fail immediately, but they weaken model design, semantics, and downstream usability."
         >
-          <IssueGroups issues={modelQualityIssues} prefix="quality" toneOverride="warning" />
+          <IssueGroups issues={modelQualityIssues} prefix="quality" toneOverride="warning" onAskAi={handleAskAiIssue} />
         </PanelSection>
       )}
 
@@ -971,7 +996,7 @@ export default function ValidationPanel() {
           icon={<Info size={11} style={{ color: "var(--cat-product)" }} />}
           description="These findings show what is still missing in metadata, descriptions, tests, and contract coverage. They are guidance unless they also appear as blockers above."
         >
-          <IssueGroups issues={coverageIssues} prefix="coverage" toneOverride="info" />
+          <IssueGroups issues={coverageIssues} prefix="coverage" toneOverride="info" onAskAi={handleAskAiIssue} />
         </PanelSection>
       )}
 

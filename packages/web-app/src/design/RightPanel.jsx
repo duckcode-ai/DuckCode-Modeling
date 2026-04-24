@@ -32,8 +32,10 @@ const RelationsView   = React.lazy(() => import("./inspector/RelationsView"));
 const IndexesView     = React.lazy(() => import("./inspector/IndexesView"));
 const SqlView         = React.lazy(() => import("./inspector/SqlView"));
 const YamlEditorShell = React.lazy(() => import("./inspector/YamlEditorShell"));
+const AiAssistantSurface = React.lazy(() => import("../components/ai/AiAssistantSurface"));
 
 const BASE_TABS = [
+  { id: "AI",        label: "AI" },
   { id: "COLUMNS",   label: "Columns" },
   { id: "RELATIONS", label: "Relations" },
   { id: "INDEXES",   label: "Indexes" },
@@ -42,12 +44,14 @@ const BASE_TABS = [
 ];
 
 const CONCEPTUAL_TABS = [
+  { id: "AI",        label: "AI" },
   { id: "DETAILS",   label: "Details" },
   { id: "RELATIONS", label: "Relationships" },
   { id: "YAML",      label: "YAML" },
 ];
 
 const LOGICAL_TABS = [
+  { id: "AI",        label: "AI" },
   { id: "DETAILS",   label: "Details" },
   { id: "RELATIONS", label: "Relationships" },
   { id: "YAML",      label: "YAML" },
@@ -121,6 +125,8 @@ export default function RightPanel({
   const setRightPanelTab = useUiStore((s) => s.setRightPanelTab);
   const rightPanelWidth = useUiStore((s) => s.rightPanelWidth);
   const setRightPanelWidth = useUiStore((s) => s.setRightPanelWidth);
+  const openAiPanel = useUiStore((s) => s.openAiPanel);
+  const aiPanelPayload = useUiStore((s) => s.aiPanelPayload);
   const modelKind = String(schema?.modelKind || "physical").trim().toLowerCase();
   const tabs = React.useMemo(() => {
     if (modelKind === "conceptual") {
@@ -172,6 +178,32 @@ export default function RightPanel({
   }, [table, rel]);
 
   /* ── Header trailing actions (copy / edit / delete) ───────── */
+  const askAiPayload = React.useMemo(() => ({
+    source: "right-inspector",
+    targetName: rel?.name || table?.name || "selection",
+    context: rel
+      ? { kind: "relationship", relId: rel.id || rel.name, relationshipName: rel.name }
+      : table
+        ? { kind: "entity", entityName: table.name, modelKind }
+        : { kind: "inspector", modelKind },
+  }), [table, rel, modelKind]);
+
+  const handleInspectorContextMenu = React.useCallback((event) => {
+    const target = event.target;
+    const isEditable = target?.closest?.("input, textarea, select, [contenteditable='true']");
+    if (isEditable) return;
+    event.preventDefault();
+    openAiPanel({
+      ...askAiPayload,
+      source: "right-inspector-context",
+      targetName: selectedCol || askAiPayload.targetName,
+      context: {
+        ...(askAiPayload.context || {}),
+        fieldName: selectedCol || undefined,
+      },
+    });
+  }, [askAiPayload, openAiPanel, selectedCol]);
+
   const headerActions = table && !rel ? (
     <div className="panel-btn-row">
       <button
@@ -196,7 +228,14 @@ export default function RightPanel({
 
   /* ── Tab body ─────────────────────────────────────────────── */
   let body;
-  if (tab === "YAML") {
+  if (tab === "AI") {
+    body = (
+      <AiAssistantSurface
+        compact
+        payload={aiPanelPayload || askAiPayload}
+      />
+    );
+  } else if (tab === "YAML") {
     body = <YamlEditorShell />;
   } else if (tab === "SQL") {
     body = (isDiagramFile && schema?.tables?.length)
@@ -251,7 +290,7 @@ export default function RightPanel({
   }
 
   return (
-    <div className="right">
+    <div className="right" onContextMenu={handleInspectorContextMenu}>
       <ResizeHandle initialWidth={rightPanelWidth} onCommit={setRightPanelWidth} />
       <PanelFrame
         icon={header.icon}
@@ -282,7 +321,7 @@ export default function RightPanel({
             minHeight: 0,
             display: "flex",
             flexDirection: "column",
-            padding: tab === "YAML" ? 0 : 14,
+            padding: tab === "YAML" || tab === "AI" ? 0 : 14,
           }}
         >
           <React.Suspense

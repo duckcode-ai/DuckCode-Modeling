@@ -8,7 +8,7 @@
 import React, { useEffect, useState } from "react";
 import {
   Columns3, ShieldCheck, GitCompare, Clock, X,
-  BookOpen, ChevronUp, Wand2, KeyRound, GitBranch, Database, FileCode2, Braces,
+  BookOpen, ChevronUp, Wand2, KeyRound, GitBranch, Database, FileCode2, Braces, Copy,
 } from "lucide-react";
 
 import yaml from "js-yaml";
@@ -56,6 +56,7 @@ const NewLogicalEntityDialog = React.lazy(() => import("../components/dialogs/Ne
 const EntityPickerDialog  = React.lazy(() => import("../components/dialogs/EntityPickerDialog"));
 const BulkRenameColumnDialog = React.lazy(() => import("../components/dialogs/BulkRenameColumnDialog"));
 const ShareBundleDialog   = React.lazy(() => import("../components/dialogs/ShareBundleDialog"));
+const AiAssistantDialog   = React.lazy(() => import("../components/dialogs/AiAssistantDialog"));
 
 function normalizeWorkspaceFileRef(value) {
   return String(value || "").replace(/\\/g, "/").replace(/^[/\\]+/, "");
@@ -236,6 +237,39 @@ function LayerSupportPanel({ title, eyebrow, description, table, rel, relationsh
   );
 }
 
+function AiPlanReviewEditor({ document, onClose }) {
+  const content = String(document?.content || "");
+  const copy = React.useCallback(() => {
+    navigator.clipboard?.writeText(content).catch(() => {});
+  }, [content]);
+  if (!document) return null;
+  return (
+    <section className="ai-plan-editor-shell" aria-label="AI review plan">
+      <div className="ai-plan-editor-header">
+        <div className="ai-plan-editor-title">
+          <span>AI Review Plan</span>
+          <strong>{document.title || "Proposal review"}</strong>
+          {document.subtitle && <small>{document.subtitle}</small>}
+        </div>
+        <div className="ai-plan-editor-actions">
+          <button type="button" className="panel-btn" onClick={copy}>
+            <Copy size={12} /> Copy
+          </button>
+          <button type="button" className="panel-btn" onClick={onClose}>
+            <X size={12} /> Close
+          </button>
+        </div>
+      </div>
+      <textarea
+        className="ai-plan-editor-text"
+        readOnly
+        value={content}
+        spellCheck={false}
+      />
+    </section>
+  );
+}
+
 function BottomPanelContent({ tab, table, rel, relationships, schema, activeFile, isDiagramFile }) {
   let node;
   switch (tab) {
@@ -406,9 +440,12 @@ export default function Shell() {
   const {
     activeModal, openModal, closeModal,
     bottomPanelOpen, bottomPanelTab, setBottomPanelTab, toggleBottomPanel,
-    rightPanelOpen, rightPanelWidth, commandPaletteOpen, setCommandPaletteOpen,
+    rightPanelOpen, rightPanelTab, rightPanelWidth, commandPaletteOpen, setCommandPaletteOpen,
     shellViewMode,
+    openAiPanel,
     addToast,
+    aiReviewDocument,
+    closeAiReviewDocument,
   } = useUiStore();
 
   /* Keep the `--right-w` CSS var in sync with the store so the grid knows
@@ -425,6 +462,7 @@ export default function Shell() {
 
   /* ── Keyboard shortcuts (match legacy App.jsx behavior) ────────── */
   const [showShortcuts, setShowShortcuts] = useState(false);
+  const [textAiTarget, setTextAiTarget] = useState(null);
 
   /* ── First-run onboarding welcome ──────────────────────────────────
      Defer to an effect so SSR-style renders don't read localStorage,
@@ -644,6 +682,74 @@ export default function Shell() {
   }, [activeFileContent]);
   const activeModelKind = String(schema?.modelKind || "physical").toLowerCase();
   const canRunForwardSql = activeModelKind === "physical";
+  const openCurrentAiPanel = React.useCallback((source = "global") => {
+    openAiPanel({
+      source,
+      targetName: selectedEntityId || activeFile?.name || "workspace",
+      context: {
+        kind: selectedEntityId ? "entity" : "workspace",
+        entityName: selectedEntityId || null,
+        filePath: activeFile?.path || activeFile?.fullPath || "",
+        modelKind: activeModelKind,
+      },
+    });
+  }, [activeFile, activeModelKind, openAiPanel, selectedEntityId]);
+
+  React.useEffect(() => {
+    const updateSelectionTarget = () => {
+      const selection = window.getSelection?.();
+      const text = selection?.toString?.().trim() || "";
+      if (!selection || text.length < 3 || selection.rangeCount === 0) {
+        setTextAiTarget(null);
+        return;
+      }
+      const anchor = selection.anchorNode;
+      const appRoot = document.querySelector(".luna-root") || document.body;
+      const elementNode = window.Node?.ELEMENT_NODE || 1;
+      if (anchor && appRoot && !appRoot.contains(anchor.nodeType === elementNode ? anchor : anchor.parentElement)) {
+        setTextAiTarget(null);
+        return;
+      }
+      const range = selection.getRangeAt(0);
+      const rect = range.getBoundingClientRect();
+      if (!rect || (!rect.width && !rect.height)) {
+        setTextAiTarget(null);
+        return;
+      }
+      const x = Math.min(window.innerWidth - 124, Math.max(12, rect.left + rect.width / 2 - 52));
+      const y = Math.max(12, rect.top - 42);
+      setTextAiTarget({ text: text.slice(0, 4000), x, y });
+    };
+    const clearIfClickedAway = (event) => {
+      if (event.target?.closest?.(".ai-selection-popover")) return;
+      window.setTimeout(updateSelectionTarget, 0);
+    };
+    document.addEventListener("mouseup", clearIfClickedAway);
+    document.addEventListener("keyup", updateSelectionTarget);
+    document.addEventListener("selectionchange", updateSelectionTarget);
+    return () => {
+      document.removeEventListener("mouseup", clearIfClickedAway);
+      document.removeEventListener("keyup", updateSelectionTarget);
+      document.removeEventListener("selectionchange", updateSelectionTarget);
+    };
+  }, []);
+
+  const openSelectedTextAiPanel = React.useCallback(() => {
+    if (!textAiTarget?.text) return;
+    openAiPanel({
+      source: "selected-text",
+      targetName: "selected text",
+      context: {
+        kind: "text_selection",
+        selectedText: textAiTarget.text,
+        entityName: selectedEntityId || null,
+        filePath: activeFile?.path || activeFile?.fullPath || "",
+        modelKind: activeModelKind,
+      },
+    });
+    setTextAiTarget(null);
+    window.getSelection?.()?.removeAllRanges?.();
+  }, [activeFile, activeModelKind, openAiPanel, selectedEntityId, textAiTarget]);
 
   const panelModel = React.useMemo(() => schemaToPanelModel(schema), [schema]);
 
@@ -1374,6 +1480,8 @@ export default function Shell() {
           if (!ok) addToast({ type: "info", message: "Nothing to redo." });
         }}
         onSettings={() => openModal("settings")}
+        onAiSettings={() => openModal("settings", { initialTab: "ai" })}
+        onAskAi={() => openCurrentAiPanel("global")}
         onConnections={() => openModal("connectionsManager")}
         onCommit={() => openModal("commit")}
         onRunSql={() => canRunForwardSql && openModal("exportDdl")}
@@ -1479,6 +1587,13 @@ export default function Shell() {
         </React.Suspense>
       )}
 
+      {aiReviewDocument && (
+        <AiPlanReviewEditor
+          document={aiReviewDocument}
+          onClose={closeAiReviewDocument}
+        />
+      )}
+
       {rightPanelOpen && (
         <RightPanel
           table={activeTable}
@@ -1513,6 +1628,32 @@ export default function Shell() {
       {!bottomPanelOpen && (
         <button className="bottom-reopen" onClick={toggleBottomPanel} title="Open panel (⌘J)">
           <ChevronUp size={12} /> Panel
+        </button>
+      )}
+
+      {!(rightPanelOpen && rightPanelTab === "AI") && (
+        <button
+          type="button"
+          className="ai-fab"
+          onClick={() => openCurrentAiPanel("floating-assistant")}
+          title="Ask AI about the current model, selection, or workspace"
+        >
+          <Wand2 size={16} />
+          Ask AI
+        </button>
+      )}
+
+      {textAiTarget && (
+        <button
+          type="button"
+          className="ai-selection-popover"
+          style={{ left: `${textAiTarget.x}px`, top: `${textAiTarget.y}px` }}
+          onMouseDown={(event) => event.preventDefault()}
+          onClick={openSelectedTextAiPanel}
+          title="Ask AI about selected text"
+        >
+          <Wand2 size={12} />
+          Ask AI
         </button>
       )}
 
@@ -1559,6 +1700,7 @@ export default function Shell() {
           { id: "commit",     section: "Git",     label: "Commit changes…",        meta: "",    icon: <span style={{ fontSize: 12 }}>✓</span>,  run: () => openModal("commit") },
           { id: "settings",   section: "Actions", label: "Settings…",              meta: "",    icon: <span style={{ fontSize: 12 }}>⚙</span>,  run: () => openModal("settings") },
           { id: "connect",    section: "Actions", label: "Manage connections…",    meta: "",    icon: <span style={{ fontSize: 12 }}>⛁</span>,  run: () => openModal("connectionsManager") },
+          { id: "ask-ai",     section: "Actions", label: "Ask AI…",                 meta: "",    icon: <Wand2 size={12} />,                 run: () => openCurrentAiPanel("command-palette") },
           { id: "import",     section: "Actions", label: "Import schema…",         meta: "",    icon: <span style={{ fontSize: 12 }}>⇩</span>,  run: () => openModal("importDialog") },
           { id: "import-dbt", section: "Actions", label: "Import dbt repo…",       meta: "",    icon: <span style={{ fontSize: 12 }}>⤓</span>,  run: () => openModal("importDbtRepo") },
           ...(canRunForwardSql ? [
@@ -1598,6 +1740,7 @@ export default function Shell() {
         {activeModal === "entityPicker"       && <EntityPickerDialog />}
         {activeModal === "bulkRenameColumn"   && <BulkRenameColumnDialog />}
         {activeModal === "shareBundle"        && <ShareBundleDialog />}
+        {activeModal === "askAi"              && <AiAssistantDialog />}
         {activeModal === "snapshots"          && <SnapshotsDialog />}
         {activeModal === "gitBranch"          && <GitBranchDialog />}
         {activeModal === "welcome"            && <WelcomeModal onClose={closeModal} />}

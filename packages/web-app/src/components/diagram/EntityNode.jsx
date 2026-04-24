@@ -447,19 +447,21 @@ export default function EntityNode({ data }) {
   // container's clipping.
   const ctxMenuEl = ctxMenu ? (
     <div
+      className="dlx-floating-menu"
       onMouseDown={(e) => e.stopPropagation()}
       style={{
         position: "fixed",
         top: ctxMenu.y,
         left: ctxMenu.x,
         zIndex: 10000,
-        background: "white",
-        border: "1px solid #e2e8f0",
+        background: "var(--bg-1)",
+        border: "1px solid var(--border-default)",
         borderRadius: 6,
-        boxShadow: "0 4px 18px rgba(15, 23, 42, 0.15)",
+        boxShadow: "0 18px 50px rgba(0, 0, 0, 0.32)",
         minWidth: 200,
         padding: 4,
         fontSize: 12,
+        color: "var(--text-primary)",
       }}
     >
       <button
@@ -476,9 +478,9 @@ export default function EntityNode({ data }) {
           cursor: "pointer",
           borderRadius: 4,
           textAlign: "left",
-          color: "#1e293b",
+          color: "var(--text-primary)",
         }}
-        onMouseEnter={(e) => (e.currentTarget.style.background = "#f1f5f9")}
+        onMouseEnter={(e) => (e.currentTarget.style.background = "var(--bg-3)")}
         onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
       >
         <GitBranch size={12} />
@@ -498,9 +500,9 @@ export default function EntityNode({ data }) {
           cursor: "pointer",
           borderRadius: 4,
           textAlign: "left",
-          color: "#1e293b",
+          color: "var(--text-primary)",
         }}
-        onMouseEnter={(e) => (e.currentTarget.style.background = "#f1f5f9")}
+        onMouseEnter={(e) => (e.currentTarget.style.background = "var(--bg-3)")}
         onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
       >
         <Replace size={12} />
