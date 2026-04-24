@@ -45,7 +45,7 @@ const TOUR_STEPS = [
     popover: {
       title: "2 · Create by modeling layer",
       description:
-        "The + button now asks for <strong>Conceptual</strong>, <strong>Logical</strong>, or <strong>Physical</strong>. New diagrams live under one shared home: <code>diagrams/&lt;layer&gt;/&lt;domain&gt;/...</code> inside the DataLex workspace.",
+        "The + button now asks for <strong>Conceptual</strong>, <strong>Logical</strong>, or <strong>Physical</strong>. New assets live under a domain-first layout: <code>&lt;domain&gt;/&lt;layer&gt;/...</code> inside the DataLex workspace.",
       side: "bottom",
       align: "start",
     },
@@ -55,7 +55,7 @@ const TOUR_STEPS = [
     popover: {
       title: "3 · Explorer shows the real YAML tree",
       description:
-        "Every file here is on disk. DataLex keeps diagrams together under <code>diagrams/</code>, models under <code>models/</code>, and generated SQL under <code>generated-sql/</code> so the repo stays predictable.",
+        "Every file here is on disk. DataLex keeps modeling files grouped by domain first, then layer, so teams can stay inside one business area without jumping between separate diagram and model roots.",
       side: "right",
       align: "start",
     },

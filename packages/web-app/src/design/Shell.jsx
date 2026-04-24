@@ -49,6 +49,7 @@ const ApplyDdlDialog      = React.lazy(() => import("../components/dialogs/Apply
 const PanelDialog         = React.lazy(() => import("../components/dialogs/PanelDialog"));
 const GitBranchDialog     = React.lazy(() => import("../components/dialogs/GitBranchDialog"));
 const ImportDbtRepoDialog = React.lazy(() => import("../components/dialogs/ImportDbtRepoDialog"));
+const DbtYamlPickerDialog = React.lazy(() => import("../components/dialogs/DbtYamlPickerDialog"));
 const NewRelationshipDialog = React.lazy(() => import("../components/dialogs/NewRelationshipDialog"));
 const NewConceptDialog    = React.lazy(() => import("../components/dialogs/NewConceptDialog"));
 const NewLogicalEntityDialog = React.lazy(() => import("../components/dialogs/NewLogicalEntityDialog"));
@@ -252,7 +253,7 @@ function BottomPanelContent({ tab, table, rel, relationships, schema, activeFile
       node = <LayerSupportPanel title="dbt YAML" eyebrow="Physical" description="Physical diagrams are composed from dbt model/source YAML. Drag dbt YAML files from Explorer into this diagram and model constraints here." table={table} rel={rel} relationships={relationships} schema={schema} activeFile={activeFile} isDiagramFile={isDiagramFile} />;
       break;
     case "sql":
-      node = <LayerSupportPanel title="SQL Preview" eyebrow="Physical" description="Generate or export SQL from physical dbt-backed diagrams. Logical diagrams can stage generated dbt SQL/YAML under generated-sql/ and models/." table={table} rel={rel} relationships={relationships} schema={schema} activeFile={activeFile} isDiagramFile={isDiagramFile} />;
+      node = <LayerSupportPanel title="SQL Preview" eyebrow="Physical" description="Generate or export SQL from physical dbt-backed diagrams. Logical diagrams can stage generated dbt SQL/YAML under generated-sql/ and the active domain folder." table={table} rel={rel} relationships={relationships} schema={schema} activeFile={activeFile} isDiagramFile={isDiagramFile} />;
       break;
     case "constraints":
       node = <LayerSupportPanel title="Constraints" eyebrow="Physical" description="Review physical names, dialect data types, PK/FK/AK flags, relationship tests, nullability, and generated constraint readiness." table={table} rel={rel} relationships={relationships} schema={schema} activeFile={activeFile} isDiagramFile={isDiagramFile} />;
@@ -1590,6 +1591,7 @@ export default function Shell() {
         {activeModal === "importDialog"       && <PanelDialog kind="import" />}
         {activeModal === "connectors"         && <PanelDialog kind="connectors" />}
         {activeModal === "importDbtRepo"      && <ImportDbtRepoDialog />}
+        {activeModal === "dbtYamlPicker"      && <DbtYamlPickerDialog />}
         {activeModal === "newConcept"         && <NewConceptDialog />}
         {activeModal === "newLogicalEntity"   && <NewLogicalEntityDialog />}
         {activeModal === "newRelationship"    && <NewRelationshipDialog />}

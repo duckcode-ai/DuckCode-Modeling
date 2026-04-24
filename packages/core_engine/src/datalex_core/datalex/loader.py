@@ -346,6 +346,9 @@ def load_project(
         "snippets": (manifest or {}).get("snippets", ".datalex/snippets/**/*.yaml"),
         "policies": (manifest or {}).get("policies", "policies/**/*.yaml"),
         "diagrams": (manifest or {}).get("diagrams", [
+            "DataLex/*/conceptual/**/*.yaml",
+            "DataLex/*/logical/**/*.yaml",
+            "DataLex/*/physical/**/*.yaml",
             "DataLex/*/Conceptual/**/*.yaml",
             "DataLex/*/Logical/**/*.yaml",
             "DataLex/*/Physical/**/*.yaml",

@@ -51,7 +51,7 @@
     },
     "diagrams": {
       "type": "string",
-      "description": "Glob for kind:diagram files. Defaults include domain-first DataLex/*/Conceptual|Logical|Physical paths and legacy datalex/diagrams paths."
+      "description": "Glob for kind:diagram files. Defaults include domain-first DataLex/*/(conceptual|logical|physical) paths and legacy datalex/diagrams paths."
     },
     "imports": {
       "type": "array",

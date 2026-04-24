@@ -187,7 +187,7 @@ const ISSUE_GUIDANCE = {
   },
   PHYSICAL_MISSING_SQL_OUTPUT: {
     why: "Physical release readiness needs generated or referenced SQL so the model can become runnable.",
-    nextStep: "Generate or link dbt SQL under generated-sql/ or models/physical for the physical model.",
+    nextStep: "Generate or link dbt SQL under generated-sql/ or the domain's physical folder for the physical model.",
   },
   CONCEPTUAL_MISSING_DOMAIN: {
     why: "The model domain tells consumers which business area owns the conceptual view.",

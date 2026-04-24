@@ -442,6 +442,26 @@ function normalizeWorkspacePath(path) {
   return String(path || "").replace(/\\/g, "/").replace(/^[/\\]+/, "");
 }
 
+function normalizeDiagramTargetFolder(folder, layer = "physical") {
+  const clean = normalizeWorkspacePath(folder).replace(/^DataLex\//i, "").replace(/\/+$/g, "");
+  if (!clean) return `core/${layer}`;
+  if (/^[^/]+\/(conceptual|logical|physical)$/i.test(clean)) return clean;
+
+  const legacy = clean.match(/^([^/]+)\/(Conceptual|Logical|Physical)(?:\/[^/]+)?$/i);
+  if (legacy) {
+    const [, domain, legacyLayer] = legacy;
+    return `${domain}/${legacyLayer.toLowerCase()}`;
+  }
+
+  const artifactFirst = clean.match(/^(?:diagrams|models)\/(conceptual|logical|physical)(?:\/([^/]+))?$/i);
+  if (artifactFirst) {
+    const [, normalizedLayer, domain] = artifactFirst;
+    return `${domain || "core"}/${normalizedLayer.toLowerCase()}`;
+  }
+
+  return clean;
+}
+
 function fileRefMatches(fileInfo, fileRef) {
   const target = normalizeWorkspacePath(fileRef);
   if (!target) return false;
@@ -1712,23 +1732,22 @@ const useWorkspaceStore = create((set, get) => ({
     }
   },
 
-  /* Create a new .diagram.yaml file. Defaults to the shared physical
-     diagrams folder inside the DataLex workspace, but accepts `targetFolder` so the
-     Explorer context-menu "New diagram here" can land it in the clicked
-     folder instead. Target folder is a POSIX subpath relative to the
-     project model root — same shape as Explorer node `path` values. */
+  /* Create a new .diagram.yaml file. Defaults to the canonical
+     domain-first physical folder inside the DataLex workspace, but accepts
+     `targetFolder` so the Explorer context-menu "New diagram here" can land
+     it in the clicked folder instead. Target folder is a POSIX subpath
+     relative to the project model root — same shape as Explorer node
+     `path` values. */
   createNewDiagram: async (slug, targetFolder = "") => {
     const clean = String(slug || "untitled")
       .trim()
       .toLowerCase()
       .replace(/[^a-z0-9_]+/g, "_")
       .replace(/^_+|_+$/g, "") || "untitled";
-    const folder = String(targetFolder || "")
-      .replace(/^\/+|\/+$/g, "")
-      .replace(/^DataLex\//i, "");
+    const folder = normalizeDiagramTargetFolder(targetFolder, "physical");
     const subpath = folder
       ? `${folder}/${clean}.diagram.yaml`
-      : `diagrams/physical/${clean}.diagram.yaml`;
+      : `core/physical/${clean}.diagram.yaml`;
     const content =
       `kind: diagram\n` +
       `name: ${clean}\n` +

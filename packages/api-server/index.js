@@ -423,10 +423,12 @@ async function bootstrapProjectStructure(projectPath, { initializeGit = false } 
 
   const dirs = [
     DATALEX_WORKSPACE_ROOT,
-    join(DATALEX_WORKSPACE_ROOT, "core", "Conceptual"),
-    join(DATALEX_WORKSPACE_ROOT, "core", "Logical"),
-    join(DATALEX_WORKSPACE_ROOT, "core", "Physical", "postgres"),
-    join(DATALEX_WORKSPACE_ROOT, "core", "Generated", "dbt"),
+    join(DATALEX_WORKSPACE_ROOT, "core", "conceptual"),
+    join(DATALEX_WORKSPACE_ROOT, "core", "logical"),
+    join(DATALEX_WORKSPACE_ROOT, "core", "physical"),
+    join(DATALEX_WORKSPACE_ROOT, "imported", "physical"),
+    join(DATALEX_WORKSPACE_ROOT, "generated-sql", "ddl"),
+    join(DATALEX_WORKSPACE_ROOT, "generated-sql", "migrations"),
     join(DATALEX_WORKSPACE_ROOT, "domains"),
     join(DATALEX_WORKSPACE_ROOT, "projects"),
     "migrations/snowflake",
@@ -2136,12 +2138,10 @@ async function resolveProjectAndModelPath(projectId) {
 function ensureWorkspaceFolders(rootPath) {
   try {
     for (const rel of [
-      "diagrams/conceptual",
-      "diagrams/logical",
-      "diagrams/physical",
-      "models/conceptual",
-      "models/logical",
-      "models/physical/postgres",
+      "core/conceptual",
+      "core/logical",
+      "core/physical",
+      "imported/physical",
       "generated-sql/ddl",
       "generated-sql/migrations",
       "domains",
@@ -3396,7 +3396,7 @@ app.post("/api/dbt/import", requireAdmin, express.json({ limit: "2mb" }), async 
       const seed = ensureWorkspaceFolders(workspaceRoot);
       if (!seed.ok) {
         writeFailures.push({
-          path: `${DATALEX_WORKSPACE_ROOT}/diagrams/conceptual/.gitkeep`,
+          path: `${DATALEX_WORKSPACE_ROOT}/core/conceptual/.gitkeep`,
           code: "INTERNAL",
           error: seed.error,
         });

@@ -49,7 +49,7 @@ const WORKFLOW_STEPS = [
 ];
 
 const FEATURE_ITEMS = [
-  { icon: FolderTree, text: "One DataLex root with shared folders: diagrams/<layer>/<domain>, models/<layer>/<domain>, and generated-sql/ for exported SQL." },
+  { icon: FolderTree, text: "One DataLex root with a domain-first layout: <domain>/<conceptual|logical|physical>/..., plus generated-sql/ for exported SQL." },
   { icon: Route, text: "The + button starts with the right layer so each diagram opens in the correct workbench mode." },
   { icon: Network, text: "Relationship handles on cards create business, logical, or physical relationships for the active layer." },
   { icon: FileCode2, text: "Logical models can generate staged dbt SQL and YAML before you promote them into the connected repo." },

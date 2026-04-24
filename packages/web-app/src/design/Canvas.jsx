@@ -3,6 +3,7 @@ import React from "react";
 import Icon from "./icons";
 import { NOTATION, FK_COLOR_MAP } from "./notation";
 import useUiStore from "../stores/uiStore";
+import useWorkspaceStore from "../stores/workspaceStore";
 import NodeErrorBoundary from "../components/shared/NodeErrorBoundary";
 import { openRelationshipEditor } from "./relationshipEditor";
 import { buildConceptualAreas, conceptualRelationshipLabel, conceptualRelationshipSentence } from "../lib/conceptualModeling";
@@ -711,8 +712,11 @@ export default function Canvas({ tables, setTables, relationships, areas, select
   const setRightPanelOpen = useUiStore((s) => s.setRightPanelOpen);
   const setRightPanelTab = useUiStore((s) => s.setRightPanelTab);
   const openModal = useUiStore((s) => s.openModal);
+  const activeFile = useWorkspaceStore((s) => s.activeFile);
+  const projectFiles = useWorkspaceStore((s) => s.projectFiles);
   const I = Icon;
   const [hovered, setHovered] = React.useState(null);
+  const [yamlDropActive, setYamlDropActive] = React.useState(false);
   const viewportRef = React.useRef(null);
   const stageRef = React.useRef(null);
   const panDragRef = React.useRef(null);
@@ -722,6 +726,8 @@ export default function Canvas({ tables, setTables, relationships, areas, select
   const [viewportState, setViewportState] = React.useState({ left: 0, top: 0, width: 1, height: 1 });
   const world = React.useMemo(() => getWorldBounds(tables, modelKind), [tables, modelKind]);
   const conceptualMode = String(modelKind || "").toLowerCase() === "conceptual";
+  const logicalMode = String(modelKind || "").toLowerCase() === "logical";
+  const physicalMode = String(modelKind || "").toLowerCase() === "physical";
   const renderedAreas = React.useMemo(
     () => conceptualMode
       ? buildConceptualAreas(tables, areas)
@@ -935,6 +941,19 @@ export default function Canvas({ tables, setTables, relationships, areas, select
     setBottomPanelTab("modeler");
   }, [setBottomPanelOpen, setBottomPanelTab]);
 
+  const openPhysicalFlow = React.useCallback(() => {
+    if (!tables.length) {
+      const isDiagram = /\.diagram\.ya?ml$/i.test(String(activeFile?.name || activeFile?.path || ""));
+      if (isDiagram && (projectFiles || []).length > 0) {
+        openModal("dbtYamlPicker");
+      } else {
+        openModal("importDbtRepo");
+      }
+      return;
+    }
+    openStudio();
+  }, [activeFile, openModal, openStudio, projectFiles, tables.length]);
+
   const openNewConceptDialog = React.useCallback((point = {}) => {
     openModal("newConcept", {
       x: Number.isFinite(Number(point.x)) ? Number(point.x) : undefined,
@@ -1048,7 +1067,7 @@ export default function Canvas({ tables, setTables, relationships, areas, select
               </button>
             </>
           )}
-          {!conceptualMode && String(modelKind || "").toLowerCase() === "logical" && (
+          {!conceptualMode && logicalMode && (
             <>
               <button data-tour="add-entities" className="canvas-btn" onClick={() => openNewLogicalEntityDialog()} title="Create a logical entity with starter attributes and keys">
                 <I.Plus />Add Entity
@@ -1064,10 +1083,15 @@ export default function Canvas({ tables, setTables, relationships, areas, select
               </button>
             </>
           )}
-          {!conceptualMode && String(modelKind || "").toLowerCase() === "physical" && (
+          {!conceptualMode && physicalMode && (
             <>
-              <button data-tour="add-entities" className="canvas-btn" onClick={openStudio} title="Open physical dbt YAML, SQL preview, and constraint workflow">
-                <I.Plus />Physical Studio
+              <button
+                data-tour="add-entities"
+                className="canvas-btn"
+                onClick={openPhysicalFlow}
+                title={tables.length ? "Open the physical dbt workflow panel" : "Import dbt YAML into this physical diagram"}
+              >
+                <I.Plus />{tables.length ? "Physical Studio" : "Import dbt YAML"}
               </button>
               <button
                 data-tour="add-relationship"
@@ -1099,7 +1123,7 @@ export default function Canvas({ tables, setTables, relationships, areas, select
             if (e.target === e.currentTarget) onSelect(null);
           }}
           onDoubleClick={(e) => {
-            if ((conceptualMode || String(modelKind || "").toLowerCase() === "logical") && e.target === e.currentTarget) {
+            if ((conceptualMode || logicalMode) && e.target === e.currentTarget) {
               const rect = stageRef.current?.getBoundingClientRect();
               const point = {
                 x: rect ? Math.max(0, (e.clientX - rect.left) / zoom) : undefined,
@@ -1118,7 +1142,7 @@ export default function Canvas({ tables, setTables, relationships, areas, select
               if (e.target === e.currentTarget) onSelect(null);
             }}
             onDoubleClick={(e) => {
-              if ((conceptualMode || String(modelKind || "").toLowerCase() === "logical") && e.target === e.currentTarget) {
+              if ((conceptualMode || logicalMode) && e.target === e.currentTarget) {
                 const rect = stageRef.current?.getBoundingClientRect();
                 const point = {
                   x: rect ? Math.max(0, (e.clientX - rect.left) / zoom) : undefined,
@@ -1131,18 +1155,29 @@ export default function Canvas({ tables, setTables, relationships, areas, select
             onDragOver={onDropYamlSource ? (e) => {
               // Accept the drag only if it advertises a YAML source payload —
               // plain file-path drags (folder moves) fall through.
-              if (Array.from(e.dataTransfer.types || []).includes("application/x-datalex-yaml-source")) {
+              const types = Array.from(e.dataTransfer.types || []);
+              if (types.includes("application/x-datalex-yaml-source") || types.includes("application/x-datalex-file-path") || types.includes("text/plain")) {
                 e.preventDefault();
                 e.dataTransfer.dropEffect = "copy";
+                if (physicalMode) setYamlDropActive(true);
               }
+            } : undefined}
+            onDragLeave={onDropYamlSource ? (e) => {
+              if (e.target === e.currentTarget) setYamlDropActive(false);
             } : undefined}
             onDrop={onDropYamlSource ? (e) => {
               const raw = e.dataTransfer.getData("application/x-datalex-yaml-source");
-              if (!raw) return;
-              e.preventDefault();
+              const fallbackPath = e.dataTransfer.getData("application/x-datalex-file-path") || e.dataTransfer.getData("text/plain");
+              setYamlDropActive(false);
               let payload;
-              try { payload = JSON.parse(raw); } catch (_err) { return; }
+              if (raw) {
+                try { payload = JSON.parse(raw); } catch (_err) { payload = null; }
+              }
+              if ((!payload || !payload.path) && fallbackPath && /\.ya?ml$/i.test(String(fallbackPath).trim())) {
+                payload = { path: String(fallbackPath).trim() };
+              }
               if (!payload || !payload.path) return;
+              e.preventDefault();
               const stage = stageRef.current;
               const rect = stage?.getBoundingClientRect();
               const x = rect ? Math.max(0, (e.clientX - rect.left) / zoom) : 60;
@@ -1150,6 +1185,42 @@ export default function Canvas({ tables, setTables, relationships, areas, select
               onDropYamlSource({ path: payload.path, x, y });
             } : undefined}
           >
+            {physicalMode && (yamlDropActive || tables.length === 0) && (
+              <div
+                style={{
+                  position: "absolute",
+                  left: 48,
+                  top: 72,
+                  zIndex: 2,
+                  width: 390,
+                  padding: 18,
+                  borderRadius: 14,
+                  border: yamlDropActive ? "1px solid var(--accent)" : "1px solid var(--border-strong)",
+                  background: yamlDropActive
+                    ? "color-mix(in srgb, var(--accent-dim) 55%, var(--bg-2))"
+                    : "color-mix(in srgb, var(--bg-2) 92%, transparent)",
+                  boxShadow: "var(--shadow-pop)",
+                  display: "grid",
+                  gap: 10,
+                  pointerEvents: "none",
+                }}
+              >
+                <div style={{ fontSize: 11, letterSpacing: "0.12em", textTransform: "uppercase", color: "var(--text-tertiary)" }}>
+                  Physical Flow
+                </div>
+                <div style={{ fontSize: 16, fontWeight: 700, color: "var(--text-primary)" }}>
+                  {yamlDropActive ? "Drop dbt YAML onto the diagram" : "Drag dbt YAML from Explorer"}
+                </div>
+                <div style={{ fontSize: 12, lineHeight: 1.5, color: "var(--text-secondary)" }}>
+                  Build the physical diagram from real dbt model or source YAML. Drag a dbt YAML file from the left Explorer into this canvas to add its objects, then define relationships and constraints on top.
+                </div>
+                <div style={{ display: "flex", gap: 8, flexWrap: "wrap", fontSize: 11, color: "var(--text-tertiary)" }}>
+                  <span className="status-pill tone-neutral">Explorer → Canvas</span>
+                  <span className="status-pill tone-neutral">dbt YAML only</span>
+                  <span className="status-pill tone-neutral">Diagram references, not copies</span>
+                </div>
+              </div>
+            )}
             {conceptualMode && tables.length === 0 && (
               <div
                 style={{
