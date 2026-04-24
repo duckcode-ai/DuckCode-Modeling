@@ -946,6 +946,24 @@ input { font: inherit; color: inherit; }
   color: var(--text-tertiary);
 }
 .tree-item.active .tree-icon { color: var(--accent); }
+.tree-artifact-icon {
+  width: 14px;
+  height: 14px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 14px;
+  color: var(--text-tertiary);
+}
+.tree-artifact.active .tree-artifact-icon { color: var(--accent); }
+.tree-artifact-conceptual .tree-artifact-icon { color: #22c55e; }
+.tree-artifact-logical .tree-artifact-icon { color: #06b6d4; }
+.tree-artifact-physical .tree-artifact-icon { color: #818cf8; }
+.tree-artifact-diagram .tree-artifact-icon { color: #f59e0b; }
+.tree-artifact-dbt .tree-artifact-icon { color: #f97316; }
+.tree-artifact-semantic .tree-artifact-icon { color: #a78bfa; }
+.tree-artifact-relationship .tree-artifact-icon { color: #fb7185; }
+.tree-artifact-datatype .tree-artifact-icon { color: #2dd4bf; }
 .tree-item .badge {
   margin-left: auto;
   font-size: 10px;

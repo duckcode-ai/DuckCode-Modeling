@@ -39,15 +39,16 @@ function defaultRelName(fromEntity, toEntity) {
 
 export default function NewRelationshipDialog() {
   const { closeModal, addToast, modalPayload } = useUiStore();
+  const conceptualLevel = Boolean(modalPayload?.conceptualLevel) || String(modalPayload?.modelKind || "").toLowerCase() === "conceptual";
   // Endpoint source: a drag on the canvas pre-fills from/to/columns and the
   // dialog is a one-pane confirmation. The toolbar / command-palette / right-
   // click paths send `tables:[{id,name,columns:[{name}]}]` in the payload and
   // leave endpoints empty — the user picks them with dropdowns here.
   const pickableTables = Array.isArray(modalPayload?.tables) ? modalPayload.tables : null;
   const initFromEntity = String(modalPayload?.fromEntity || "");
-  const initFromColumn = String(modalPayload?.fromColumn || (initFromEntity ? "id" : ""));
+  const initFromColumn = conceptualLevel ? "" : String(modalPayload?.fromColumn || (initFromEntity ? "id" : ""));
   const initToEntity = String(modalPayload?.toEntity || "");
-  const initToColumn = String(modalPayload?.toColumn || (initToEntity ? "id" : ""));
+  const initToColumn = conceptualLevel ? "" : String(modalPayload?.toColumn || (initToEntity ? "id" : ""));
 
   const [fromEntity, setFromEntity] = useState(initFromEntity);
   const [fromColumn, setFromColumn] = useState(initFromColumn);
@@ -59,6 +60,8 @@ export default function NewRelationshipDialog() {
   const [identifying, setIdentifying] = useState(false);
   const [optional, setOptional] = useState(false);
   const [onDelete, setOnDelete] = useState("");
+  const [verb, setVerb] = useState(String(modalPayload?.verb || ""));
+  const [description, setDescription] = useState(String(modalPayload?.description || ""));
   const [error, setError] = useState("");
 
   // When the user picks entities in picker mode, refresh the default name.
@@ -86,7 +89,7 @@ export default function NewRelationshipDialog() {
     return (hit?.columns || []).map((c) => c.name).filter(Boolean);
   }, [pickableTables, toEntity]);
 
-  const canSubmit = !!name.trim() && !!fromEntity && !!toEntity && !!fromColumn && !!toColumn;
+  const canSubmit = !!name.trim() && !!fromEntity && !!toEntity && (conceptualLevel || (!!fromColumn && !!toColumn));
 
   // Phase 4.3 — inline endpoint validation. When the user opened the dialog
   // via toolbar/command-palette, pickableTables has the authoritative column
@@ -101,11 +104,11 @@ export default function NewRelationshipDialog() {
     );
     if (!hit) return `${side} entity "${entityId}" is not on this diagram.`;
     const cols = (hit.columns || []).map((c) => c.name).filter(Boolean);
-    if (column && !cols.includes(column)) {
+    if (!conceptualLevel && column && !cols.includes(column)) {
       return `${side} column "${column}" does not exist on ${hit.name || entityId}.`;
     }
     return null;
-  }, [pickableTables]);
+  }, [conceptualLevel, pickableTables]);
 
   const endpointError = React.useMemo(() => {
     if (!fromEntity || !toEntity) return "";
@@ -134,10 +137,14 @@ export default function NewRelationshipDialog() {
     if (isDiagram) {
       const next = addDiagramRelationship(s.activeFileContent, {
         name: name.trim(),
-        from: { entity: fromEntity, field: fromColumn },
-        to: { entity: toEntity, field: toColumn },
+        from: conceptualLevel ? { entity: fromEntity } : { entity: fromEntity, field: fromColumn },
+        to: conceptualLevel ? { entity: toEntity } : { entity: toEntity, field: toColumn },
         cardinality,
-        identifying,
+        identifying: conceptualLevel ? undefined : identifying,
+        optional: conceptualLevel ? undefined : optional,
+        on_delete: conceptualLevel ? undefined : (onDelete || undefined),
+        verb: conceptualLevel ? (verb.trim() || undefined) : undefined,
+        description: description.trim() || undefined,
         label: "",
       });
       if (!next) {
@@ -151,7 +158,9 @@ export default function NewRelationshipDialog() {
       s.updateContent(next);
       addToast({
         type: "success",
-        message: `Linked ${fromEntity}.${fromColumn} → ${toEntity}.${toColumn} (diagram).`,
+        message: conceptualLevel
+          ? `Linked ${fromEntity} → ${toEntity} (conceptual).`
+          : `Linked ${fromEntity}.${fromColumn} → ${toEntity}.${toColumn} (diagram).`,
       });
       closeModal();
       return;
@@ -159,8 +168,8 @@ export default function NewRelationshipDialog() {
 
     // Model-file mode: fall through to the existing addRelationship path,
     // which writes into `relationships:` inside the model YAML itself.
-    const from = `${fromEntity}.${fromColumn}`;
-    const to = `${toEntity}.${toColumn}`;
+    const from = conceptualLevel ? { entity: fromEntity } : `${fromEntity}.${fromColumn}`;
+    const to = conceptualLevel ? { entity: toEntity } : `${toEntity}.${toColumn}`;
     const { yaml: next, error: err } = addRelationship(
       s.activeFileContent,
       name.trim(),
@@ -178,11 +187,13 @@ export default function NewRelationshipDialog() {
     // the just-written relationship via the narrow patchRelationship
     // helper rather than expanding addRelationship's signature.
     let yamlOut = next;
-    if (identifying || optional || onDelete) {
+    if (identifying || optional || onDelete || verb.trim() || description.trim()) {
       const patched = patchRelationship(yamlOut, name.trim(), {
-        identifying: identifying ? true : undefined,
-        optional: optional ? true : undefined,
-        on_delete: onDelete || undefined,
+        identifying: conceptualLevel ? undefined : (identifying ? true : undefined),
+        optional: conceptualLevel ? undefined : (optional ? true : undefined),
+        on_delete: conceptualLevel ? undefined : (onDelete || undefined),
+        verb: conceptualLevel ? (verb.trim() || undefined) : undefined,
+        description: description.trim() || undefined,
       });
       if (patched) yamlOut = patched;
     }
@@ -190,7 +201,9 @@ export default function NewRelationshipDialog() {
     s.updateContent(yamlOut);
     addToast({
       type: "success",
-      message: `Linked ${fromEntity}.${fromColumn} → ${toEntity}.${toColumn}.`,
+      message: conceptualLevel
+        ? `Linked ${fromEntity} → ${toEntity}.`
+        : `Linked ${fromEntity}.${fromColumn} → ${toEntity}.${toColumn}.`,
     });
     closeModal();
   };
@@ -201,14 +214,18 @@ export default function NewRelationshipDialog() {
     return (
       <Modal
         icon={<GitBranch size={14} />}
-        title="New relationship"
-        size="md"
-        onClose={closeModal}
-        footer={<button type="button" className="panel-btn" onClick={closeModal}>Close</button>}
+          title="New relationship"
+          size="md"
+          onClose={closeModal}
+          footer={<button type="button" className="panel-btn" onClick={closeModal}>Close</button>}
       >
         <div className="dlx-modal-alert">
           <AlertCircle size={12} style={{ marginTop: 1, flexShrink: 0 }} />
-          <span>Missing endpoint(s). Drag between two column keys on the canvas to start again.</span>
+          <span>
+            {conceptualLevel
+              ? "Missing concept endpoints. Drag from one concept card to another or use Add Relationship again."
+              : "Missing endpoint(s). Drag between two column keys on the canvas to start again."}
+          </span>
         </div>
       </Modal>
     );
@@ -217,8 +234,8 @@ export default function NewRelationshipDialog() {
   return (
     <Modal
       icon={<GitBranch size={14} />}
-      title="New relationship"
-      subtitle="Declare a foreign-key edge between two entities. Writes to model YAML."
+      title={conceptualLevel ? "New conceptual relationship" : "New relationship"}
+      subtitle={conceptualLevel ? "Define a business relationship between two concepts." : "Declare a foreign-key edge between two entities. Writes to model YAML."}
       size="md"
       onClose={closeModal}
       footer={
@@ -264,15 +281,17 @@ export default function NewRelationshipDialog() {
                     return <option key={id} value={id}>{label}</option>;
                   })}
                 </select>
-                <select
-                  className="panel-input"
-                  value={fromColumn}
-                  onChange={(e) => setFromColumn(e.target.value)}
-                  disabled={!fromEntity || fromCols.length === 0}
-                >
-                  <option value="">Choose column…</option>
-                  {fromCols.map((c) => <option key={c} value={c}>{c}</option>)}
-                </select>
+                {!conceptualLevel && (
+                  <select
+                    className="panel-input"
+                    value={fromColumn}
+                    onChange={(e) => setFromColumn(e.target.value)}
+                    disabled={!fromEntity || fromCols.length === 0}
+                  >
+                    <option value="">Choose column…</option>
+                    {fromCols.map((c) => <option key={c} value={c}>{c}</option>)}
+                  </select>
+                )}
               </div>
 
               <Link2 size={14} style={{ color: "var(--text-tertiary)", marginBottom: 10 }} />
@@ -299,15 +318,17 @@ export default function NewRelationshipDialog() {
                     return <option key={id} value={id}>{label}</option>;
                   })}
                 </select>
-                <select
-                  className="panel-input"
-                  value={toColumn}
-                  onChange={(e) => setToColumn(e.target.value)}
-                  disabled={!toEntity || toCols.length === 0}
-                >
-                  <option value="">Choose column…</option>
-                  {toCols.map((c) => <option key={c} value={c}>{c}</option>)}
-                </select>
+                {!conceptualLevel && (
+                  <select
+                    className="panel-input"
+                    value={toColumn}
+                    onChange={(e) => setToColumn(e.target.value)}
+                    disabled={!toEntity || toCols.length === 0}
+                  >
+                    <option value="">Choose column…</option>
+                    {toCols.map((c) => <option key={c} value={c}>{c}</option>)}
+                  </select>
+                )}
               </div>
             </div>
           </div>
@@ -327,10 +348,10 @@ export default function NewRelationshipDialog() {
             }}
           >
             <span style={{ color: "var(--text-primary)", fontWeight: 600 }}>{fromEntity}</span>
-            <span style={{ color: "var(--text-tertiary)" }}>.{fromColumn}</span>
+            {!conceptualLevel && <span style={{ color: "var(--text-tertiary)" }}>.{fromColumn}</span>}
             <Link2 size={12} style={{ margin: "0 4px", color: "var(--text-tertiary)" }} />
             <span style={{ color: "var(--text-primary)", fontWeight: 600 }}>{toEntity}</span>
-            <span style={{ color: "var(--text-tertiary)" }}>.{toColumn}</span>
+            {!conceptualLevel && <span style={{ color: "var(--text-tertiary)" }}>.{toColumn}</span>}
           </div>
         )}
 
@@ -345,6 +366,34 @@ export default function NewRelationshipDialog() {
             autoFocus
           />
         </div>
+
+        {conceptualLevel && (
+          <>
+            <div className="dlx-modal-section">
+              <label className="dlx-modal-field-label" htmlFor="rel-verb">Business verb</label>
+              <input
+                id="rel-verb"
+                className="panel-input"
+                value={verb}
+                onChange={(e) => setVerb(e.target.value)}
+                placeholder="places, owns, produces, depends on…"
+              />
+            </div>
+
+            <div className="dlx-modal-section">
+              <label className="dlx-modal-field-label" htmlFor="rel-description">Relationship meaning</label>
+              <textarea
+                id="rel-description"
+                className="panel-input"
+                rows={3}
+                value={description}
+                onChange={(e) => setDescription(e.target.value)}
+                placeholder="Short explanation of what this business relationship means."
+                style={{ resize: "vertical" }}
+              />
+            </div>
+          </>
+        )}
 
         <div className="dlx-modal-section">
           <label className="dlx-modal-field-label">Cardinality</label>
@@ -379,36 +428,40 @@ export default function NewRelationshipDialog() {
           </div>
         </div>
 
-        <div className="dlx-modal-section">
-          <label className="dlx-modal-field-label" htmlFor="rel-ondelete">ON DELETE</label>
-          <select
-            id="rel-ondelete"
-            className="panel-input"
-            value={onDelete}
-            onChange={(e) => setOnDelete(e.target.value)}
-          >
-            {ON_DELETE.map((o) => <option key={o.id} value={o.id}>{o.label}</option>)}
-          </select>
-        </div>
+        {!conceptualLevel && (
+          <>
+            <div className="dlx-modal-section">
+              <label className="dlx-modal-field-label" htmlFor="rel-ondelete">ON DELETE</label>
+              <select
+                id="rel-ondelete"
+                className="panel-input"
+                value={onDelete}
+                onChange={(e) => setOnDelete(e.target.value)}
+              >
+                {ON_DELETE.map((o) => <option key={o.id} value={o.id}>{o.label}</option>)}
+              </select>
+            </div>
 
-        <div className="dlx-modal-section">
-          <label className="dlx-check" style={{ display: "inline-flex", alignItems: "center", gap: 8, cursor: "pointer" }}>
-            <input type="checkbox" checked={identifying} onChange={(e) => setIdentifying(e.target.checked)} />
-            <span style={{ fontSize: 12 }}>Identifying
-              <span style={{ display: "block", fontSize: 11, color: "var(--text-tertiary)", marginTop: 2 }}>
-                FK is part of the child's primary key.
-              </span>
-            </span>
-          </label>
-          <label className="dlx-check" style={{ display: "inline-flex", alignItems: "center", gap: 8, cursor: "pointer", marginTop: 8 }}>
-            <input type="checkbox" checked={optional} onChange={(e) => setOptional(e.target.checked)} />
-            <span style={{ fontSize: 12 }}>Optional
-              <span style={{ display: "block", fontSize: 11, color: "var(--text-tertiary)", marginTop: 2 }}>
-                Child row may exist without a parent (nullable FK).
-              </span>
-            </span>
-          </label>
-        </div>
+            <div className="dlx-modal-section">
+              <label className="dlx-check" style={{ display: "inline-flex", alignItems: "center", gap: 8, cursor: "pointer" }}>
+                <input type="checkbox" checked={identifying} onChange={(e) => setIdentifying(e.target.checked)} />
+                <span style={{ fontSize: 12 }}>Identifying
+                  <span style={{ display: "block", fontSize: 11, color: "var(--text-tertiary)", marginTop: 2 }}>
+                    FK is part of the child's primary key.
+                  </span>
+                </span>
+              </label>
+              <label className="dlx-check" style={{ display: "inline-flex", alignItems: "center", gap: 8, cursor: "pointer", marginTop: 8 }}>
+                <input type="checkbox" checked={optional} onChange={(e) => setOptional(e.target.checked)} />
+                <span style={{ fontSize: 12 }}>Optional
+                  <span style={{ display: "block", fontSize: 11, color: "var(--text-tertiary)", marginTop: 2 }}>
+                    Child row may exist without a parent (nullable FK).
+                  </span>
+                </span>
+              </label>
+            </div>
+          </>
+        )}
 
         {(error || endpointError) && (
           <div className="dlx-modal-alert">

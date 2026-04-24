@@ -1,0 +1,14 @@
+kind: relationship
+layer: logical
+name: order_customer_fk
+from:
+  entity: order
+  column: customer_id
+to:
+  entity: customer
+  column: customer_id
+cardinality: many_to_one
+role_name: ordered_by
+identifying: false
+description: Every logical order belongs to one logical customer.
+

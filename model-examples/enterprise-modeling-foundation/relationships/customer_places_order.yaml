@@ -1,0 +1,12 @@
+kind: relationship
+layer: conceptual
+name: customer_places_order
+from:
+  entity: customer
+to:
+  entity: order
+cardinality: one_to_many
+role_name: places
+verb: places
+description: A customer may place many orders; every order is placed by one customer.
+

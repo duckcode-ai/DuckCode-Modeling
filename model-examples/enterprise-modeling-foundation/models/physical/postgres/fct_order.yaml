@@ -1,0 +1,31 @@
+kind: entity
+layer: physical
+dialect: postgres
+name: fct_order
+logical: order
+physical_name: fct_order
+description: Physical order fact generated from the logical order model.
+owner: sales_ops
+domain: sales
+columns:
+  - name: order_id
+    type: bigint
+    nullable: false
+    primary_key: true
+    logical: order.order_id
+  - name: customer_id
+    type: bigint
+    nullable: false
+    logical: order.customer_id
+    references:
+      entity: dim_customer
+      column: customer_id
+      relationship: many_to_one
+  - name: order_amount
+    type: decimal(18,2)
+    nullable: false
+    logical: order.order_amount
+indexes:
+  - name: fct_order_customer_idx
+    columns: [customer_id]
+

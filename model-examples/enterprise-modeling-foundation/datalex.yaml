@@ -1,0 +1,12 @@
+kind: project
+name: enterprise_modeling_foundation
+version: '1'
+description: Small enterprise modeling fixture for conceptual, logical, physical, and semantic modeling.
+dialects: [postgres, snowflake]
+default_dialect: postgres
+models: models/**/*.yaml
+relationships: relationships/**/*.yaml
+data_types: data_types/**/*.yaml
+semantic_models: semantic/**/*.yaml
+diagrams: datalex/diagrams/**/*.yaml
+

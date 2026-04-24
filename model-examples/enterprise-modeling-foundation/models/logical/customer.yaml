@@ -1,0 +1,26 @@
+kind: entity
+layer: logical
+name: customer
+logical_name: Customer
+description: Customer master record with stable business identifiers.
+owner: growth
+domain: sales
+candidate_keys:
+  - [customer_id]
+business_keys:
+  - [email]
+implements: [customer]
+columns:
+  - name: customer_id
+    type: identifier
+    nullable: false
+    description: Stable customer identifier.
+  - name: email
+    type: email
+    nullable: false
+    description: Customer email address.
+  - name: customer_name
+    type: string
+    nullable: false
+    description: Display name for the customer.
+

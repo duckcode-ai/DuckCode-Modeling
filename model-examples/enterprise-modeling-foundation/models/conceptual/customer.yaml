@@ -1,0 +1,9 @@
+kind: entity
+layer: conceptual
+name: customer
+logical_name: Customer
+description: A person or organization that can place orders and generate revenue.
+owner: growth
+domain: sales
+tags: [core]
+

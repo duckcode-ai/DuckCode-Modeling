@@ -27,14 +27,14 @@ const ITEMS_BY_TARGET = {
     { id: "delete", label: "Delete file", icon: Trash2, danger: true },
   ],
   folder: [
-    { id: "new-file", label: "New file…", icon: FilePlus },
+    { id: "new-file", label: "New modeling asset…", icon: FilePlus },
     { id: "new-folder", label: "New folder…", icon: FolderPlus },
     { id: "new-diagram", label: "New diagram here…", icon: LayoutDashboard },
     { id: "rename", label: "Rename folder…", icon: Edit3 },
     { id: "delete", label: "Delete folder", icon: Trash2, danger: true },
   ],
   root: [
-    { id: "new-file", label: "New file…", icon: FilePlus },
+    { id: "new-file", label: "New modeling asset…", icon: FilePlus },
     { id: "new-folder", label: "New folder…", icon: FolderPlus },
     { id: "new-diagram", label: "New diagram…", icon: LayoutDashboard },
   ],

@@ -89,6 +89,29 @@ test("adding a duplicate relationship returns unchanged YAML", () => {
   assert.equal(first, second, "dupe add returns same text");
 });
 
+test("conceptual diagram relationship supports entity-only endpoints", () => {
+  const next = addDiagramRelationship(DIAGRAM_EMPTY, {
+    name: "customer_places_order",
+    from: { entity: "stg_customers" },
+    to: { entity: "stg_orders" },
+    cardinality: "one_to_many",
+    verb: "places",
+    description: "Customer places orders.",
+  });
+  assert.ok(next, "addDiagramRelationship returned YAML");
+  const doc = yaml.load(next);
+  assert.equal(doc.relationships.length, 1);
+  assert.deepEqual(doc.relationships[0].from, { entity: "stg_customers" });
+  assert.deepEqual(doc.relationships[0].to, { entity: "stg_orders" });
+  assert.equal(doc.relationships[0].verb, "places");
+
+  const adapted = adaptDiagramYaml(next, PROJECT_FILES);
+  assert.equal(adapted.relationships.length, 1);
+  assert.equal(adapted.relationships[0].from.col, undefined);
+  assert.equal(adapted.relationships[0].to.col, undefined);
+  assert.equal(adapted.relationships[0].verb, "places");
+});
+
 test("relationship persists across a position patch (move + link should coexist)", async () => {
   const { setDiagramEntityDisplay } = await import("../src/design/yamlPatch.js");
   // Add relationship first.

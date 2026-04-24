@@ -1,0 +1,33 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://duckcode.dev/schemas/datalex/data_type.schema.json",
+  "title": "DataLex logical data type",
+  "type": "object",
+  "required": ["kind", "name"],
+  "additionalProperties": false,
+  "properties": {
+    "kind": { "const": "data_type" },
+    "name": { "type": "string", "pattern": "^[a-z][a-z0-9_]*$" },
+    "description": { "type": "string" },
+    "base": { "type": "string" },
+    "precision": {
+      "type": "string",
+      "enum": ["exact", "any", "none"],
+      "description": "Logical precision policy for mappings, similar to exact, wildcard, or precisionless types."
+    },
+    "physical": {
+      "type": "object",
+      "description": "Per-dialect physical type mappings.",
+      "additionalProperties": {
+        "type": "object",
+        "required": ["type"],
+        "additionalProperties": false,
+        "properties": {
+          "type": { "type": "string" },
+          "raw_ddl": { "type": "string" }
+        }
+      }
+    },
+    "meta": { "type": "object", "additionalProperties": true }
+  }
+}

@@ -28,7 +28,20 @@ from datalex_core.datalex.parse_cache import (
 )
 
 
-KINDS = ("project", "entity", "source", "model", "term", "domain", "policy", "snippet", "diagram")
+KINDS = (
+    "project",
+    "entity",
+    "source",
+    "model",
+    "term",
+    "domain",
+    "policy",
+    "snippet",
+    "diagram",
+    "relationship",
+    "data_type",
+    "semantic_model",
+)
 
 
 class _MarkedSafeLoader(yaml.SafeLoader):
@@ -328,6 +341,9 @@ def load_project(
         "snippets": (manifest or {}).get("snippets", ".datalex/snippets/**/*.yaml"),
         "policies": (manifest or {}).get("policies", "policies/**/*.yaml"),
         "diagrams": (manifest or {}).get("diagrams", "datalex/diagrams/**/*.yaml"),
+        "relationships": (manifest or {}).get("relationships", "relationships/**/*.yaml"),
+        "data_types": (manifest or {}).get("data_types", "data_types/**/*.yaml"),
+        "semantic_models": (manifest or {}).get("semantic_models", "semantic/**/*.yaml"),
     }
 
     entities: Dict[str, Dict[str, Any]] = {}
@@ -338,6 +354,9 @@ def load_project(
     policies: Dict[str, Dict[str, Any]] = {}
     snippets: Dict[str, Dict[str, Any]] = {}
     diagrams: Dict[str, Dict[str, Any]] = {}
+    relationships: Dict[str, Dict[str, Any]] = {}
+    data_types: Dict[str, Dict[str, Any]] = {}
+    semantic_models: Dict[str, Dict[str, Any]] = {}
     file_of: Dict[Tuple[str, str], str] = {}
 
     def _register(doc: Dict[str, Any], path: Path) -> None:
@@ -354,6 +373,9 @@ def load_project(
             "policy": policies,
             "snippet": snippets,
             "diagram": diagrams,
+            "relationship": relationships,
+            "data_type": data_types,
+            "semantic_model": semantic_models,
         }.get(kind)
         if bucket is None:
             return
@@ -393,6 +415,9 @@ def load_project(
         policies={k: _strip_marks(v) for k, v in policies.items()},
         snippets={k: _strip_marks(v) for k, v in snippets.items()},
         diagrams={k: _strip_marks(v) for k, v in diagrams.items()},
+        relationships={k: _strip_marks(v) for k, v in relationships.items()},
+        data_types={k: _strip_marks(v) for k, v in data_types.items()},
+        semantic_models={k: _strip_marks(v) for k, v in semantic_models.items()},
         file_of=file_of,
         errors=bag,
     )

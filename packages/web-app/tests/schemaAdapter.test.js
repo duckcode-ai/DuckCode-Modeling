@@ -68,6 +68,45 @@ test("adaptDataLexModelYaml returns null for non-model kinds", () => {
   assert.equal(adaptDataLexModelYaml(yamlText), null);
 });
 
+test("adaptDataLexModelYaml renders canonical conceptual entity without columns", () => {
+  const yamlText = `
+kind: entity
+layer: conceptual
+name: customer
+logical_name: Customer
+description: A buyer or account.
+domain: sales
+`;
+  const adapted = adaptDataLexModelYaml(yamlText);
+  assert.ok(adapted);
+  assert.equal(adapted.tables.length, 1);
+  assert.equal(adapted.tables[0].id, "customer");
+  assert.equal(adapted.tables[0].type, "concept");
+  assert.equal(adapted.tables[0].columns.length, 0);
+  assert.equal(adapted.tables[0].subject_area, "sales");
+});
+
+test("adaptDataLexModelYaml maps canonical columns references into FK edges", () => {
+  const yamlText = `
+kind: entity
+layer: physical
+dialect: postgres
+name: orders
+columns:
+  - name: id
+    type: bigint
+    primary_key: true
+  - name: customer_id
+    type: bigint
+    references:
+      entity: customers
+      column: id
+`;
+  const adapted = adaptDataLexModelYaml(yamlText);
+  const col = adapted.tables[0].columns.find((c) => c.name === "customer_id");
+  assert.equal(col.fk, "customers.id");
+});
+
 test("adaptDataLexYaml normalizes legacy foreign_key shapes into c.fk", () => {
   const yamlText = `
 entities:
@@ -112,6 +151,36 @@ entities:
 `;
   const adapted = adaptDataLexYaml(yamlText);
   assert.equal(adapted.tables[0].columns[0].type, "uuid");
+});
+
+test("adaptDataLexYaml preserves conceptual entity-level relationships", () => {
+  const yamlText = `
+model:
+  name: customer_concepts
+  kind: conceptual
+entities:
+  - name: Customer
+    type: concept
+  - name: Order
+    type: concept
+relationships:
+  - name: customer_places_order
+    from:
+      entity: Customer
+    to:
+      entity: Order
+    cardinality: one_to_many
+    verb: places
+`;
+  const adapted = adaptDataLexYaml(yamlText);
+  assert.equal(adapted.relationships.length, 1);
+  assert.equal(adapted.relationships[0].from.table, "customer");
+  assert.equal(adapted.relationships[0].from.col, undefined);
+  assert.equal(adapted.relationships[0].to.table, "order");
+  assert.equal(adapted.relationships[0].to.col, undefined);
+  assert.equal(adapted.relationships[0].verb, "places");
+  assert.equal(adapted.relationships[0].from.max, "1");
+  assert.equal(adapted.relationships[0].to.max, "N");
 });
 
 test("adaptDiagramYaml composes entities from kind:model files via the new adapter", () => {

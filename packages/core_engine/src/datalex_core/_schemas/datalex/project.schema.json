@@ -37,6 +37,22 @@
       "type": "string",
       "description": "Glob for policy files."
     },
+    "relationships": {
+      "type": "string",
+      "description": "Glob for kind:relationship files, default 'relationships/**/*.yaml'."
+    },
+    "data_types": {
+      "type": "string",
+      "description": "Glob for kind:data_type files, default 'data_types/**/*.yaml'."
+    },
+    "semantic_models": {
+      "type": "string",
+      "description": "Glob for kind:semantic_model files, default 'semantic/**/*.yaml'."
+    },
+    "diagrams": {
+      "type": "string",
+      "description": "Glob for kind:diagram files, default 'datalex/diagrams/**/*.yaml'."
+    },
     "imports": {
       "type": "array",
       "description": "Cross-repo package imports. Resolver fetches packages into ~/.datalex/packages/ and pins them in .datalex/lock.yaml.",

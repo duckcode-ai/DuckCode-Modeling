@@ -54,6 +54,7 @@ const PanelDialog         = React.lazy(() => import("../components/dialogs/Panel
 const GitBranchDialog     = React.lazy(() => import("../components/dialogs/GitBranchDialog"));
 const ImportDbtRepoDialog = React.lazy(() => import("../components/dialogs/ImportDbtRepoDialog"));
 const NewRelationshipDialog = React.lazy(() => import("../components/dialogs/NewRelationshipDialog"));
+const NewConceptDialog  = React.lazy(() => import("../components/dialogs/NewConceptDialog"));
 const EntityPickerDialog  = React.lazy(() => import("../components/dialogs/EntityPickerDialog"));
 const BulkRenameColumnDialog = React.lazy(() => import("../components/dialogs/BulkRenameColumnDialog"));
 const ShareBundleDialog   = React.lazy(() => import("../components/dialogs/ShareBundleDialog"));
@@ -78,15 +79,24 @@ import "../styles/datalex-integration.css";
 const THEME_STORAGE = "datalex.theme";
 const DENSITY_STORAGE = "datalex.density";
 
-const ALL_BOTTOM_TABS = [
+const EDITOR_BOTTOM_TABS = [
   { id: "modeler",       label: "Modeler",       icon: Wand2 },
   { id: "properties",    label: "Properties",    icon: Columns3 },
-  { id: "libraries",     label: "Libraries",     icon: LibraryBig },
-  { id: "subject-areas", label: "Subject Areas", icon: Map },
   { id: "validation",    label: "Validation",    icon: ShieldCheck, adminOnly: true },
   { id: "diff",          label: "Diff & Gate",   icon: GitCompare,  adminOnly: true },
-  { id: "impact",        label: "Impact",        icon: Activity,    adminOnly: true },
-  { id: "model-graph",   label: "Model Graph",   icon: Network },
+  { id: "dictionary",    label: "Dictionary",    icon: BookOpen },
+  { id: "history",       label: "History",       icon: Clock },
+];
+
+const CONCEPTUAL_BOTTOM_TABS = [
+  { id: "modeler",       label: "Studio",        icon: Wand2 },
+  { id: "dictionary",    label: "Dictionary",    icon: BookOpen },
+  { id: "validation",    label: "Validation",    icon: ShieldCheck, adminOnly: true },
+  { id: "history",       label: "History",       icon: Clock },
+];
+
+const VIEWER_BOTTOM_TABS = [
+  { id: "properties",    label: "Properties",    icon: Columns3 },
   { id: "dictionary",    label: "Dictionary",    icon: BookOpen },
   { id: "history",       label: "History",       icon: Clock },
 ];
@@ -242,7 +252,9 @@ export default function Shell() {
     document.documentElement.style.setProperty("--right-w", `${rightPanelWidth}px`);
   }, [rightPanelWidth]);
 
-  const { selectedEntityId } = useDiagramStore();
+  const selectedEntityId = useDiagramStore((s) => s.selectedEntityId);
+  const setDiagramGraph = useDiagramStore((s) => s.setGraph);
+  const selectDiagramEntity = useDiagramStore((s) => s.selectEntity);
 
   /* ── Keyboard shortcuts (match legacy App.jsx behavior) ────────── */
   const [showShortcuts, setShowShortcuts] = useState(false);
@@ -357,11 +369,6 @@ export default function Shell() {
     return () => window.removeEventListener("keydown", handler);
   }, [showShortcuts, cycleTheme, cycleProject, toggleBottomPanel, setCommandPaletteOpen, addToast]);
 
-  /* ── Auto-switch bottom tab when entity selected ───────────────── */
-  useEffect(() => {
-    if (selectedEntityId) setBottomPanelTab("properties");
-  }, [selectedEntityId, setBottomPanelTab]);
-
   /* ── Current git branch (displayed on project tabs bar) ───────── */
   const [branch, setBranch] = useState("main");
   useEffect(() => {
@@ -443,6 +450,77 @@ export default function Shell() {
     []
   );
   const schema = adapted || (isDemo ? DEMO_SCHEMA : emptySchema);
+  const activeModelKind = React.useMemo(() => {
+    if (!activeFileContent) return "physical";
+    try {
+      const doc = yaml.load(activeFileContent);
+      if (doc && typeof doc === "object") {
+        const kind = String(doc?.model?.kind || doc?.kind || "").toLowerCase();
+        const layer = String(doc?.layer || doc?.model?.layer || "").toLowerCase();
+        if (["conceptual", "logical", "physical"].includes(layer)) return layer;
+        if (String(doc?.kind || "").toLowerCase() === "diagram") {
+          const diagramLayer = String(doc?.layer || doc?.viz?.layer || "").toLowerCase();
+          if (["conceptual", "logical", "physical"].includes(diagramLayer)) return diagramLayer;
+        }
+        if (kind) return kind;
+      }
+    } catch (_e) {
+      // ignore parse errors and fall back below
+    }
+    return "physical";
+  }, [activeFileContent]);
+
+  React.useEffect(() => {
+    const entities = (schema.tables || []).map((t) => ({
+      name: t.name || t.id,
+      type: t.type || (activeModelKind === "conceptual" ? "concept" : "table"),
+      layer: activeModelKind,
+      logical_name: t.logical_name,
+      physical_name: t.physical_name,
+      description: t.description || "",
+      owner: t.owner || "",
+      domain: t.domain || "",
+      subject_area: t.subject_area || t.subject || t.schema || "",
+      tags: Array.isArray(t.tags) ? t.tags : [],
+      candidate_keys: Array.isArray(t.candidate_keys) ? t.candidate_keys : [],
+      business_keys: Array.isArray(t.business_keys) ? t.business_keys : [],
+      subtype_of: t.subtype_of || "",
+      subtypes: Array.isArray(t.subtypes) ? t.subtypes : [],
+      fields: (t.columns || []).map((c) => ({
+        name: c.name,
+        type: c.type,
+        nullable: !c.nn,
+        primary_key: !!c.pk,
+        unique: !!c.unique,
+        fk: c.fk,
+        description: c.description || "",
+      })),
+    }));
+    const edges = (schema.relationships || [])
+      .map((r, i) => ({
+        id: r.id || r.name || `rel-${i}`,
+        source: r.from?.table,
+        target: r.to?.table,
+        label: r.verb || r.name || r.label || "",
+        data: r,
+      }))
+      .filter((e) => e.source && e.target);
+    setDiagramGraph({
+      nodes: [],
+      edges,
+      warnings: [],
+      model: {
+        model: {
+          name: schema.name || activeFile?.name || "model",
+          kind: activeModelKind,
+          layer: activeModelKind,
+        },
+        entities,
+        relationships: schema.relationships || [],
+        subject_areas: schema.subjectAreas || [],
+      },
+    });
+  }, [schema, activeModelKind, activeFile?.name, setDiagramGraph]);
 
   /* Raw index list straight from the YAML, used by the inspector's
      IndexesView. Parsed lazily and cached per content change — js-yaml
@@ -505,27 +583,33 @@ export default function Shell() {
   React.useEffect(() => {
     if (schema.tables[0]) {
       setSelected({ type: "table", id: schema.tables[0].id });
+      selectDiagramEntity(schema.tables[0].id);
       setSelectedCol(schema.tables[0].columns[0]?.name || null);
     } else {
       setSelected(null);
+      selectDiagramEntity(null);
       setSelectedCol(null);
     }
-  }, [schema]);
+  }, [schema, selectDiagramEntity]);
 
   const activeTable = selected?.type === "table" ? tables.find((t) => t.id === selected.id) : null;
   const activeRel = selected?.type === "rel" ? schema.relationships.find((r) => r.id === selected.id) : null;
 
   const handleSelect = (sel) => {
-    if (sel == null) { setSelected(null); return; }
+    if (sel == null) { setSelected(null); selectDiagramEntity(null); return; }
     if (typeof sel === "string") {
       setSelected({ type: "table", id: sel });
+      selectDiagramEntity(sel);
       const t = tables.find((x) => x.id === sel);
       if (t) setSelectedCol(t.columns[0]?.name);
     } else {
       setSelected(sel);
       if (sel.type === "table") {
+        selectDiagramEntity(sel.id);
         const t = tables.find((x) => x.id === sel.id);
         if (t) setSelectedCol(t.columns[0]?.name);
+      } else {
+        selectDiagramEntity(null);
       }
     }
   };
@@ -815,8 +899,18 @@ export default function Shell() {
 
   /* ── Drag-to-connect handoff to NewRelationshipDialog ─────────── */
   const handleCanvasConnect = React.useCallback((payload) => {
-    openModal("newRelationship", payload);
-  }, [openModal]);
+    const conceptualLevel = String(activeModelKind || "").toLowerCase() === "conceptual" || payload?.conceptualLevel;
+    openModal("newRelationship", {
+      ...payload,
+      modelKind: conceptualLevel ? "conceptual" : payload?.modelKind,
+      conceptualLevel,
+      tables: (tables || []).map((t) => ({
+        id: t.name || t.id,
+        name: t.name || t.id,
+        columns: conceptualLevel ? [] : (t.columns || []).map((c) => ({ name: c.name })),
+      })),
+    });
+  }, [openModal, activeModelKind, tables]);
 
   /* ── Drop a YAML source onto the canvas: append its file reference
          to the active diagram's `entities:` and prefetch content. Only
@@ -838,10 +932,30 @@ export default function Shell() {
     }
   }, [isDiagramFile, addToast]);
 
-  const activeBottomTabs = React.useMemo(
-    () => ALL_BOTTOM_TABS.filter((t) => !t.adminOnly || (canEdit && canEdit())),
-    [canEdit]
-  );
+  const activeBottomTabs = React.useMemo(() => {
+    const editable = !!(canEdit && canEdit());
+    const sourceTabs = !editable
+      ? VIEWER_BOTTOM_TABS
+      : activeModelKind === "conceptual"
+        ? CONCEPTUAL_BOTTOM_TABS
+        : EDITOR_BOTTOM_TABS;
+    return sourceTabs.filter((t) => !t.adminOnly || editable);
+  }, [activeModelKind, canEdit]);
+
+  React.useEffect(() => {
+    if (!activeBottomTabs.some((tab) => tab.id === bottomPanelTab)) {
+      setBottomPanelTab(activeBottomTabs[0]?.id || "modeler");
+    }
+  }, [activeBottomTabs, bottomPanelTab, setBottomPanelTab]);
+
+  /* ── Auto-switch bottom tab when entity selected ───────────────── */
+  useEffect(() => {
+    if (!selectedEntityId) return;
+    if (activeModelKind === "conceptual") return;
+    if (activeBottomTabs.some((tab) => tab.id === "properties")) {
+      setBottomPanelTab("properties");
+    }
+  }, [selectedEntityId, setBottomPanelTab, activeModelKind, activeBottomTabs]);
 
   /* ── Shell render ──────────────────────────────────────────────── */
   return (
@@ -952,6 +1066,7 @@ export default function Shell() {
           onExport={() => openModal("exportDdl")}
           title={schema.name}
           engine={schema.engine}
+          modelKind={activeModelKind}
           legendOpen={legendOpen}
           setLegendOpen={setLegendOpen}
         />
@@ -1077,6 +1192,7 @@ export default function Shell() {
         {activeModal === "applyDdl"           && <ApplyDdlDialog />}
         {activeModal === "importDialog"       && <PanelDialog kind="import" />}
         {activeModal === "importDbtRepo"      && <ImportDbtRepoDialog />}
+        {activeModal === "newConcept"         && <NewConceptDialog />}
         {activeModal === "newRelationship"    && <NewRelationshipDialog />}
         {activeModal === "entityPicker"       && <EntityPickerDialog />}
         {activeModal === "bulkRenameColumn"   && <BulkRenameColumnDialog />}

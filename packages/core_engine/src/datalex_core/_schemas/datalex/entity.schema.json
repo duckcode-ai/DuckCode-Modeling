@@ -3,7 +3,7 @@
   "$id": "https://duckcode.dev/schemas/datalex/entity.schema.json",
   "title": "DataLex entity",
   "type": "object",
-  "required": ["kind", "name", "columns"],
+  "required": ["kind", "name"],
   "additionalProperties": false,
   "properties": {
     "kind": { "const": "entity" },
@@ -27,6 +27,15 @@
     "database": { "type": "string" },
     "schema": { "type": "string" },
     "physical_name": { "type": "string" },
+    "logical_name": {
+      "type": "string",
+      "description": "Business/logical display name. In logical view this can differ from the physical object name."
+    },
+    "visibility": {
+      "type": "string",
+      "enum": ["logical_and_physical", "logical_only", "physical_only"],
+      "description": "Controls whether this object participates in logical/conceptual or physical views and conversions."
+    },
     "description": { "type": "string" },
     "owner": { "type": "string" },
     "domain": { "type": "string", "pattern": "^[a-z][a-z0-9_]*$" },
@@ -42,8 +51,65 @@
     "raw_ddl": { "type": "string" },
     "columns": {
       "type": "array",
-      "minItems": 1,
       "items": { "$ref": "#/$defs/column" }
+    },
+    "candidate_keys": {
+      "type": "array",
+      "description": "Logical candidate or alternate keys. Each entry is a list of column names.",
+      "items": {
+        "type": "array",
+        "minItems": 1,
+        "items": { "type": "string", "pattern": "^[a-z][a-z0-9_]*$" }
+      }
+    },
+    "business_keys": {
+      "type": "array",
+      "description": "Business key sets used for logical modeling and semantic mapping.",
+      "items": {
+        "type": "array",
+        "minItems": 1,
+        "items": { "type": "string", "pattern": "^[a-z][a-z0-9_]*$" }
+      }
+    },
+    "subtype_of": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_]*$",
+      "description": "Logical supertype entity name when this entity is a subtype."
+    },
+    "subtypes": {
+      "type": "array",
+      "items": { "type": "string", "pattern": "^[a-z][a-z0-9_]*$" }
+    },
+    "discriminator": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "name": { "type": "string" },
+        "columns": {
+          "type": "array",
+          "items": { "type": "string", "pattern": "^[a-z][a-z0-9_]*$" }
+        },
+        "complete": { "type": "boolean" },
+        "exclusive": { "type": "boolean" },
+        "physical_strategy": {
+          "type": "string",
+          "enum": ["inheritance", "rollup_to_supertype", "rolldown_to_subtypes", "separate_tables"]
+        }
+      }
+    },
+    "normalization": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "target_form": { "type": "string" },
+        "denormalization_reason": { "type": "string" },
+        "physical_strategy": { "type": "string" }
+      }
+    },
+    "implements": {
+      "type": "array",
+      "description": "Names of upstream conceptual/logical objects this entity implements.",
+      "items": { "type": "string" }
     },
     "indexes": {
       "type": "array",
@@ -153,6 +219,10 @@
     {
       "if": { "properties": { "layer": { "const": "physical" } }, "required": ["layer"] },
       "then": { "required": ["dialect"] }
+    },
+    {
+      "if": { "properties": { "layer": { "enum": ["logical", "physical"] } }, "required": ["layer"] },
+      "then": { "required": ["columns"] }
     }
   ]
 }

@@ -1,0 +1,19 @@
+kind: semantic_model
+name: customer_order_metrics
+entity: order
+description: Semantic overlay for order metrics used by BI tools.
+measures:
+  - name: total_order_amount
+    expr: order_amount
+    agg: sum
+    description: Sum of order amount.
+dimensions:
+  - name: customer_id
+    type: categorical
+    description: Customer identifier for slicing order metrics.
+metrics:
+  - name: gross_revenue
+    type: simple
+    label: Gross Revenue
+    description: Gross order revenue before adjustments.
+

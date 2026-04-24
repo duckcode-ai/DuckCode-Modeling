@@ -14,7 +14,7 @@ const DIFF_COLORS = {
   removed:  { stroke: "#ef4444", fill: "rgba(239,68,68,0.10)",  label: "DEL", title: "Removed since baseline" },
 };
 
-function TableCard({ table, selected, onSelect, onMove, onMoveEnd, onStartConnect, diffStatus }) {
+function TableCard({ table, selected, onSelect, onMove, onMoveEnd, onStartConnect, diffStatus, conceptualMode, onOpenDetails }) {
   const I = Icon;
   const cardRef = React.useRef(null);
   const drag = React.useRef(null);
@@ -23,6 +23,14 @@ function TableCard({ table, selected, onSelect, onMove, onMoveEnd, onStartConnec
     // Dragging from a column's key dot starts a relationship draw instead
     // of a table move. The row click-target is still the card; only the
     // tc-key glyph triggers the connect gesture.
+    const conceptHandle = e.target.closest(".tc-concept-link");
+    if (conceptualMode && conceptHandle && onStartConnect) {
+      e.preventDefault();
+      e.stopPropagation();
+      onSelect({ type: "table", id: table.id });
+      onStartConnect({ fromTable: table.id, fromEntityName: table.name || table.id, conceptual: true }, e);
+      return;
+    }
     const keyEl = e.target.closest(".tc-key");
     if (keyEl && onStartConnect) {
       const row = keyEl.closest(".tc-row");
@@ -82,11 +90,14 @@ function TableCard({ table, selected, onSelect, onMove, onMoveEnd, onStartConnec
       id={`tc-${table.id}`}
       style={{ left: table.x, top: table.y, ...(diffStyle || {}) }}
       onMouseDown={onMouseDown}
+      onDoubleClick={() => {
+        if (conceptualMode) onOpenDetails?.(table);
+      }}
     >
       <div className="tc-header">
         {table.kind === "ENUM" ? <I.Enum /> : table.junction ? <I.Junction /> : <I.Table />}
         <span className="tc-name">{table.name}</span>
-        <span className="tc-schema">{table.schema}</span>
+        <span className="tc-schema">{conceptualMode ? "concept" : table.schema}</span>
         <div className="tc-badges">
           {diffTheme && (
             <span
@@ -106,39 +117,96 @@ function TableCard({ table, selected, onSelect, onMove, onMoveEnd, onStartConnec
           ))}
         </div>
       </div>
-      <div className="tc-rows">
-        {table.columns.map((c) => {
-          const isPk = c.pk;
-          const isFk = !!c.fk;
-          const flags = colFlags(c);
-          return (
-            <div key={c.name} className={`tc-row ${isPk ? "pk" : ""}`} data-col={c.name}>
-              <div className={`tc-key ${isPk ? "pk" : ""} ${isFk ? "fk" : ""}`}>
-                {isPk ? <I.Key /> : isFk ? <I.Link /> : (
-                  <span style={{ width: 3, height: 3, borderRadius: "50%", background: "var(--text-muted)" }} />
-                )}
-              </div>
-              <div className="tc-col">{c.name}</div>
-              <div className="tc-type">{c.type}</div>
-              <div className="tc-colflags">
-                {flags.map((f) => (
-                  <span key={f.k} className={`tc-cf tc-cf-${f.k.toLowerCase()}`} title={f.title}>
-                    <f.I />
-                  </span>
-                ))}
-                <span className={`tc-nn ${c.nn ? "required" : ""}`} title={c.nn ? "NOT NULL" : "nullable"}>
-                  {c.nn ? "NN" : "·"}
-                </span>
-              </div>
+      {conceptualMode ? (
+        <>
+          <div style={{ padding: "10px 12px 8px", display: "flex", flexWrap: "wrap", gap: 6 }}>
+            {[table.type || "concept", table.subject_area || "", table.domain || ""].filter(Boolean).map((badge) => (
+              <span
+                key={badge}
+                style={{
+                  fontSize: 10,
+                  padding: "2px 6px",
+                  borderRadius: 999,
+                  background: "rgba(148,163,184,0.12)",
+                  border: "1px solid var(--border-default)",
+                  color: "var(--text-secondary)",
+                }}
+              >
+                {badge}
+              </span>
+            ))}
+          </div>
+          <div style={{ padding: "0 12px 12px", display: "grid", gap: 6 }}>
+            <div style={{ fontSize: 11, color: "var(--text-secondary)", lineHeight: 1.45 }}>
+              {table.description || "Business concept. Add definition, owner, glossary terms, and subject area in Details."}
             </div>
-          );
-        })}
-      </div>
-      {table.kind !== "ENUM" && (
-        <div className="tc-footer">
-          <span>{table.columns.length} cols</span>
-          <span>{table.rowCount}{typeof table.rowCount === "number" ? " rows" : ""}</span>
-        </div>
+          </div>
+          <div className="tc-footer">
+            <span>{Array.isArray(table.columns) ? table.columns.length : 0} attributes</span>
+            <span>{Array.isArray(table.tags) ? table.tags.length : 0} tags</span>
+          </div>
+          <button
+            type="button"
+            className="tc-concept-link"
+            title="Drag from here to another concept to create a relationship"
+            style={{
+              position: "absolute",
+              right: 10,
+              bottom: 10,
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 6,
+              padding: "5px 8px",
+              borderRadius: 999,
+              border: "1px solid var(--border-default)",
+              background: "rgba(15,23,42,0.78)",
+              color: "var(--text-secondary)",
+              fontSize: 10,
+              cursor: "crosshair",
+            }}
+            onMouseDown={onMouseDown}
+          >
+            <I.Relation />
+            Connect
+          </button>
+        </>
+      ) : (
+        <>
+          <div className="tc-rows">
+            {table.columns.map((c) => {
+              const isPk = c.pk;
+              const isFk = !!c.fk;
+              const flags = colFlags(c);
+              return (
+                <div key={c.name} className={`tc-row ${isPk ? "pk" : ""}`} data-col={c.name}>
+                  <div className={`tc-key ${isPk ? "pk" : ""} ${isFk ? "fk" : ""}`}>
+                    {isPk ? <I.Key /> : isFk ? <I.Link /> : (
+                      <span style={{ width: 3, height: 3, borderRadius: "50%", background: "var(--text-muted)" }} />
+                    )}
+                  </div>
+                  <div className="tc-col">{c.name}</div>
+                  <div className="tc-type">{c.type}</div>
+                  <div className="tc-colflags">
+                    {flags.map((f) => (
+                      <span key={f.k} className={`tc-cf tc-cf-${f.k.toLowerCase()}`} title={f.title}>
+                        <f.I />
+                      </span>
+                    ))}
+                    <span className={`tc-nn ${c.nn ? "required" : ""}`} title={c.nn ? "NOT NULL" : "nullable"}>
+                      {c.nn ? "NN" : "·"}
+                    </span>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+          {table.kind !== "ENUM" && (
+            <div className="tc-footer">
+              <span>{table.columns.length} cols</span>
+              <span>{table.rowCount}{typeof table.rowCount === "number" ? " rows" : ""}</span>
+            </div>
+          )}
+        </>
       )}
     </div>
   );
@@ -234,6 +302,7 @@ function Relationships({ tables, relationships, selected, onSelect, hovered, set
   const autoPorts = (fromEp, toEp) => {
     const A = anchors[fromEp.table], B = anchors[toEp.table];
     if (!A || !B) return null;
+    const conceptual = !fromEp?.col && !toEp?.col;
     const aColY = anchors[`${fromEp.table}.${fromEp.col}`]?.cy;
     const bColY = anchors[`${toEp.table}.${toEp.col}`]?.cy;
     const Acx = A.x + A.w / 2, Acy = A.y + A.h / 2;
@@ -244,6 +313,22 @@ function Relationships({ tables, relationships, selected, onSelect, hovered, set
         a: { x: A.x + A.w, y: aColY ?? Acy, side: "right" },
         b: { x: A.x + A.w, y: bColY ?? Acy, side: "right" },
         selfJoin: true,
+      };
+    }
+    if (conceptual) {
+      const horizontal = Math.abs(dx) >= Math.abs(dy);
+      const aSide = horizontal ? (dx >= 0 ? "right" : "left") : (dy >= 0 ? "bottom" : "top");
+      const bSide = horizontal ? (dx >= 0 ? "left" : "right") : (dy >= 0 ? "top" : "bottom");
+      const portOf = (box, side) => {
+        if (side === "left")   return { x: box.x, y: box.y + box.h / 2, side };
+        if (side === "right")  return { x: box.x + box.w, y: box.y + box.h / 2, side };
+        if (side === "top")    return { x: box.x + box.w / 2, y: box.y, side };
+        return { x: box.x + box.w / 2, y: box.y + box.h, side };
+      };
+      return {
+        a: portOf(A, aSide),
+        b: portOf(B, bSide),
+        selfJoin: false,
       };
     }
     const horizontal = Math.abs(dx) > A.w * 0.35 || Math.abs(dx) > Math.abs(dy) * 0.8;
@@ -299,6 +384,7 @@ function Relationships({ tables, relationships, selected, onSelect, hovered, set
         const ports = autoPorts(r.from, r.to);
         if (!ports) return null;
         const { a, b, selfJoin } = ports;
+        const conceptual = !r?.from?.col && !r?.to?.col;
         const isActive = selected?.type === "rel" && selected.id === r.id;
         const isHover = hovered === r.id;
         const touchesSelTable = selected?.type === "table" && (r.from.table === selected.id || r.to.table === selected.id);
@@ -320,7 +406,16 @@ function Relationships({ tables, relationships, selected, onSelect, hovered, set
               <text x={(a.x + b.x) / 2} y={(a.y + b.y) / 2 - 4}
                     className={`rel-label ${emphasize ? "active" : ""} ${dimmed ? "dimmed" : ""}`}
                     textAnchor="middle">
-                {NOTATION.cardinalityLabel(r.from.min, r.from.max)} : {NOTATION.cardinalityLabel(r.to.min, r.to.max)}
+                {conceptual && (r.verb || r.name || r.description) ? (
+                  <>
+                    <tspan x={(a.x + b.x) / 2} dy="0">{r.verb || r.name || r.description}</tspan>
+                    <tspan x={(a.x + b.x) / 2} dy="12">
+                      {NOTATION.cardinalityLabel(r.from.min, r.from.max)} : {NOTATION.cardinalityLabel(r.to.min, r.to.max)}
+                    </tspan>
+                  </>
+                ) : (
+                  `${NOTATION.cardinalityLabel(r.from.min, r.from.max)} : ${NOTATION.cardinalityLabel(r.to.min, r.to.max)}`
+                )}
               </text>
             )}
             {fkColor && emphasize && (
@@ -442,15 +537,19 @@ function Legend({ open, onToggle }) {
   );
 }
 
-export default function Canvas({ tables, setTables, relationships, areas, selected, onSelect, onMoveEnd, onConnect, onDropYamlSource, onDeleteEntity, onDeleteRelationship, onAutoLayout, onFit, onExport, title, engine, legendOpen, setLegendOpen }) {
+export default function Canvas({ tables, setTables, relationships, areas, selected, onSelect, onMoveEnd, onConnect, onDropYamlSource, onDeleteEntity, onDeleteRelationship, onAutoLayout, onFit, onExport, title, engine, modelKind = "physical", legendOpen, setLegendOpen }) {
   // Git-diff overlay (v0.4.2). Subscribe to the entity→status map so each
   // TableCard can render an ADD/MOD/DEL decoration. Pulled here at the
   // Canvas level (not individual TableCards) so every card reads the same
   // snapshot per render pass, avoiding N subscriptions for large diagrams.
   const diffEntities = useUiStore((s) => s.diffState?.entities) || {};
+  const openModal = useUiStore((s) => s.openModal);
+  const setRightPanelOpen = useUiStore((s) => s.setRightPanelOpen);
+  const setRightPanelTab = useUiStore((s) => s.setRightPanelTab);
   const I = Icon;
   const [hovered, setHovered] = React.useState(null);
   const innerRef = React.useRef(null);
+  const conceptualMode = String(modelKind || "").toLowerCase() === "conceptual";
 
   // Live connect-drag state: set on mousedown over a column key, cleared on
   // mouseup. While active, we draw a temporary rubber-band line from the
@@ -462,6 +561,34 @@ export default function Canvas({ tables, setTables, relationships, areas, select
   const onMoveTable = (id, x, y) => {
     setTables((ts) => ts.map((t) => (t.id === id ? { ...t, x: Math.max(0, x), y: Math.max(0, y) } : t)));
   };
+
+  const openConceptDetails = React.useCallback(() => {
+    setRightPanelOpen(true);
+    setRightPanelTab("DETAILS");
+  }, [setRightPanelOpen, setRightPanelTab]);
+
+  const openNewConcept = React.useCallback((coords) => {
+    openModal("newConcept", {
+      x: Number.isFinite(coords?.x) ? coords.x : 120,
+      y: Number.isFinite(coords?.y) ? coords.y : 120,
+    });
+  }, [openModal]);
+
+  const openConceptRelationshipDialog = React.useCallback(() => {
+    const first = tables[0];
+    const second = tables[1];
+    openModal("newRelationship", {
+      modelKind: "conceptual",
+      conceptualLevel: true,
+      tables: (tables || []).map((table) => ({
+        id: table.name || table.id,
+        name: table.name || table.id,
+        columns: [],
+      })),
+      fromEntity: first?.name || first?.id || "",
+      toEntity: second?.name || second?.id || "",
+    });
+  }, [openModal, tables]);
 
   const handleStartConnect = React.useCallback((seed, downEvent) => {
     const inner = innerRef.current;
@@ -488,6 +615,26 @@ export default function Canvas({ tables, setTables, relationships, areas, select
       window.removeEventListener("mouseup", onUp);
       // Pick the element under the cursor and walk up for a .tc-key ancestor.
       const hit = document.elementFromPoint(ev.clientX, ev.clientY);
+      if (seed.conceptual) {
+        const cardHit = hit?.closest?.(".table-card");
+        const toTableId = cardHit?.id?.replace(/^tc-/, "") || null;
+        const targetTable = (tables || []).find((table) => table.id === toTableId);
+        setConnectDrag(null);
+        if (
+          toTableId &&
+          targetTable &&
+          toTableId !== seed.fromTable &&
+          onConnect
+        ) {
+          onConnect({
+            modelKind: "conceptual",
+            conceptualLevel: true,
+            fromEntity: seed.fromEntityName || seed.fromTable,
+            toEntity: targetTable.name || targetTable.id,
+          });
+        }
+        return;
+      }
       const keyHit = hit?.closest?.(".tc-key");
       const rowHit = keyHit?.closest?.(".tc-row");
       const cardHit = keyHit?.closest?.(".table-card");
@@ -509,7 +656,7 @@ export default function Canvas({ tables, setTables, relationships, areas, select
     };
     window.addEventListener("mousemove", onMove);
     window.addEventListener("mouseup", onUp);
-  }, [onConnect]);
+  }, [onConnect, tables]);
 
   // Fit: scroll the .canvas viewport so the bounding box of all tables is in
   // view. We use the prop-provided onFit if the host wants to do something
@@ -567,16 +714,34 @@ export default function Canvas({ tables, setTables, relationships, areas, select
           <p>
             <span className="engine">{engine}</span>
             <span className="dot" />
+            {conceptualMode && (
+              <>
+                <span>conceptual</span>
+                <span className="dot" />
+              </>
+            )}
             <span>{tables.length} objects</span>
             <span className="dot" />
             <span>{relationships.length} relationships</span>
           </p>
         </div>
         <div className="canvas-actions">
+          {conceptualMode && (
+            <>
+              <button className="canvas-btn" onClick={() => openNewConcept({ x: 140, y: 120 })} title="Create a new concept box">
+                <I.Plus />Add Concept
+              </button>
+              <button className="canvas-btn" onClick={() => openConceptRelationshipDialog()} title="Create a relationship between concept boxes" disabled={tables.length < 2}>
+                <I.Relation />Add Relationship
+              </button>
+              <button className="canvas-btn" onClick={() => openConceptDetails()} title="Open business details for the selected concept" disabled={selected?.type !== "table"}>
+                <I.Edit />Edit Details
+              </button>
+            </>
+          )}
           <button className="canvas-btn" onClick={() => handleFit()} title="Fit all entities into view"><I.Fit />Fit</button>
           <button className="canvas-btn" onClick={() => onAutoLayout && onAutoLayout()} title="Auto-layout (ELK)"><I.Grid />Auto-layout</button>
-          <button className="canvas-btn" onClick={() => onExport && onExport()} title="Export DDL / SQL"><I.Download />Export</button>
-          <button className="canvas-btn primary" onClick={() => onExport && onExport()}><I.Sparkle />Generate SQL</button>
+          {onExport && <button className="canvas-btn" onClick={() => onExport && onExport()} title="Export DDL / SQL"><I.Download />Export</button>}
         </div>
       </div>
 
@@ -586,6 +751,15 @@ export default function Canvas({ tables, setTables, relationships, areas, select
           ref={innerRef}
           onClick={(e) => {
             if (e.target.classList.contains("canvas-inner")) onSelect(null);
+          }}
+          onDoubleClick={(e) => {
+            if (!conceptualMode) return;
+            if (!e.target.classList.contains("canvas-inner")) return;
+            const inner = innerRef.current;
+            const rect = inner?.getBoundingClientRect();
+            const x = rect ? Math.max(40, e.clientX - rect.left - 120) : 120;
+            const y = rect ? Math.max(40, e.clientY - rect.top - 70) : 120;
+            openNewConcept({ x, y });
           }}
           onDragOver={onDropYamlSource ? (e) => {
             // Accept the drag only if it advertises a YAML source payload —
@@ -609,6 +783,42 @@ export default function Canvas({ tables, setTables, relationships, areas, select
             onDropYamlSource({ path: payload.path, x, y });
           } : undefined}
         >
+          {conceptualMode && tables.length === 0 && (
+            <div
+              style={{
+                position: "absolute",
+                left: 48,
+                top: 72,
+                zIndex: 1,
+                width: 360,
+                padding: 18,
+                borderRadius: 14,
+                border: "1px solid var(--border-strong)",
+                background: "color-mix(in srgb, var(--bg-2) 92%, transparent)",
+                boxShadow: "var(--shadow-pop)",
+                display: "grid",
+                gap: 10,
+              }}
+            >
+              <div style={{ fontSize: 11, letterSpacing: "0.12em", textTransform: "uppercase", color: "var(--text-tertiary)" }}>
+                Conceptual Flow
+              </div>
+              <div style={{ fontSize: 16, fontWeight: 700, color: "var(--text-primary)" }}>
+                Start by adding your first concept box
+              </div>
+              <div style={{ fontSize: 12, lineHeight: 1.5, color: "var(--text-secondary)" }}>
+                Add a concept, connect it to other concepts, then edit the business meaning in Details. Double-click empty canvas space to create a concept where you are working.
+              </div>
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                <button className="canvas-btn" onClick={() => openNewConcept({ x: 140, y: 120 })}>
+                  <I.Plus />Add Concept
+                </button>
+                <button className="canvas-btn" onClick={() => openConceptDetails()} disabled={selected?.type !== "table"}>
+                  <I.Edit />Edit Details
+                </button>
+              </div>
+            </div>
+          )}
           <SubjectAreas areas={areas} />
           <Relationships tables={tables} relationships={relationships}
                          selected={selected} onSelect={onSelect}
@@ -625,7 +835,9 @@ export default function Canvas({ tables, setTables, relationships, areas, select
                          onMove={onMoveTable}
                          onMoveEnd={onMoveEnd}
                          onStartConnect={handleStartConnect}
-                         diffStatus={diffEntities[t.name] || diffEntities[t.id] || null} />
+                         diffStatus={diffEntities[t.name] || diffEntities[t.id] || null}
+                         conceptualMode={conceptualMode}
+                         onOpenDetails={openConceptDetails} />
             </NodeErrorBoundary>
           ))}
           {connectDrag && (

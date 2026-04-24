@@ -70,7 +70,7 @@ export function TopBar({
       </div>
       <div className="toolbar">
         <div className="tool-group">
-          <button className="tool-btn" title="New file" onClick={onNewFile}><I.Plus /></button>
+          <button className="tool-btn" title="New modeling asset" onClick={onNewFile}><I.Plus /></button>
           <button className="tool-btn" title="Open project" onClick={onOpenFile}><I.Folder /></button>
           <button className="tool-btn" title="Import schema (dbt / SQL / DBML)" onClick={onImport}><I.Download style={{ transform: "rotate(180deg)" }} /></button>
           {onImportDbt && (
@@ -96,7 +96,7 @@ export function TopBar({
           )}
         </div>
         <div className="tool-group">
-          <button className="tool-btn" onClick={onNewTable} title="Create a new table / entity"><I.Plus /><I.Table />Table</button>
+          <button className="tool-btn" onClick={onNewTable} title="Create conceptual, logical, or physical model"><I.Plus /><I.Table />Model</button>
           <button className="tool-btn" onClick={onConnections} title="Manage connections"><I.Db />Connect</button>
         </div>
         <div className="tool-group">

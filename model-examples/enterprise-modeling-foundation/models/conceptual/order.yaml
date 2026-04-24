@@ -1,0 +1,9 @@
+kind: entity
+layer: conceptual
+name: order
+logical_name: Order
+description: A commercial commitment made by a customer for one or more products.
+owner: sales_ops
+domain: sales
+tags: [core]
+

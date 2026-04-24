@@ -1,0 +1,60 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://duckcode.dev/schemas/datalex/semantic_model.schema.json",
+  "title": "DataLex semantic model overlay",
+  "type": "object",
+  "required": ["kind", "name"],
+  "additionalProperties": false,
+  "properties": {
+    "kind": { "const": "semantic_model" },
+    "name": { "type": "string", "pattern": "^[a-z][a-z0-9_]*$" },
+    "description": { "type": "string" },
+    "entity": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_]*$",
+      "description": "DataLex entity/model this semantic overlay describes."
+    },
+    "measures": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["name"],
+        "additionalProperties": true,
+        "properties": {
+          "name": { "type": "string", "pattern": "^[a-z][a-z0-9_]*$" },
+          "expr": { "type": "string" },
+          "agg": { "type": "string" },
+          "description": { "type": "string" }
+        }
+      }
+    },
+    "dimensions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["name"],
+        "additionalProperties": true,
+        "properties": {
+          "name": { "type": "string", "pattern": "^[a-z][a-z0-9_]*$" },
+          "type": { "type": "string" },
+          "description": { "type": "string" }
+        }
+      }
+    },
+    "metrics": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["name"],
+        "additionalProperties": true,
+        "properties": {
+          "name": { "type": "string", "pattern": "^[a-z][a-z0-9_]*$" },
+          "type": { "type": "string" },
+          "label": { "type": "string" },
+          "description": { "type": "string" }
+        }
+      }
+    },
+    "meta": { "type": "object", "additionalProperties": true }
+  }
+}

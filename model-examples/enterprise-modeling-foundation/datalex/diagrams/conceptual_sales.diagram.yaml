@@ -1,0 +1,55 @@
+kind: diagram
+name: conceptual_sales
+title: Sales Conceptual Model
+layer: conceptual
+entities:
+  - file: models/conceptual/customer.yaml
+    entity: customer
+    x: 80
+    'y': 100
+  - file: models/conceptual/order.yaml
+    entity: order
+    x: 420
+    'y': 100
+  - file: models/conceptual/customer_details.yaml
+    entity: customer_details
+    x: 140
+    'y': 120
+  - file: Users/Kranthi_1/DataLex/model-examples/enterprise-modeling-foundation/models/conceptual/customer_details.yaml
+    entity: '*'
+    x: 287
+    'y': 328
+  - file: Users/Kranthi_1/DataLex/model-examples/enterprise-modeling-foundation/models/conceptual/customer_details.yaml
+    entity: customer_details
+    x: 119
+    'y': 183
+  - file: Users/Kranthi_1/DataLex/model-examples/enterprise-modeling-foundation/models/conceptual/order.yaml
+    entity: '*'
+    x: 536
+    'y': 291
+  - file: Users/Kranthi_1/DataLex/model-examples/enterprise-modeling-foundation/models/conceptual/order.yaml
+    entity: order
+    x: 667
+    'y': 149
+  - file: Users/Kranthi_1/DataLex/model-examples/enterprise-modeling-foundation/models/logical/customer.yaml
+    entity: '*'
+    x: 569
+    'y': 460
+  - file: Users/Kranthi_1/DataLex/model-examples/enterprise-modeling-foundation/models/logical/customer.yaml
+    entity: customer
+    x: 375
+    'y': 329
+relationships:
+  - name: customer_places_order
+    from:
+      entity: customer
+    to:
+      entity: order
+    cardinality: one_to_many
+    verb: places
+  - name: customer_details_to_order
+    from:
+      entity: customer_details
+    to:
+      entity: order
+    cardinality: one_to_one

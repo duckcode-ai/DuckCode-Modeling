@@ -402,7 +402,7 @@ export function addDiagramRelationship(yamlText, rel) {
   const fromFld = String(rel?.from?.field || "").trim();
   const toEnt = String(rel?.to?.entity || "").trim();
   const toFld = String(rel?.to?.field || "").trim();
-  if (!fromEnt || !fromFld || !toEnt || !toFld) return null;
+  if (!fromEnt || !toEnt) return null;
 
   if (!Array.isArray(doc.relationships)) doc.relationships = [];
   const dupe = doc.relationships.some((r) =>
@@ -415,12 +415,16 @@ export function addDiagramRelationship(yamlText, rel) {
 
   const entry = {
     name: rel?.name ? String(rel.name) : `${fromEnt}_to_${toEnt}`.toLowerCase(),
-    from: { entity: fromEnt, field: fromFld },
-    to: { entity: toEnt, field: toFld },
+    from: { entity: fromEnt, ...(fromFld ? { field: fromFld } : {}) },
+    to: { entity: toEnt, ...(toFld ? { field: toFld } : {}) },
   };
   if (rel?.cardinality) entry.cardinality = String(rel.cardinality);
   if (rel?.identifying) entry.identifying = true;
+  if (rel?.optional) entry.optional = true;
+  if (rel?.on_delete) entry.on_delete = String(rel.on_delete);
   if (rel?.label) entry.label = String(rel.label);
+  if (rel?.verb) entry.verb = String(rel.verb);
+  if (rel?.description) entry.description = String(rel.description);
   doc.relationships.push(entry);
   return dump(doc);
 }
@@ -534,6 +538,10 @@ export function patchRelationship(yamlText, relName, patch) {
   if (patch.description !== undefined) {
     if (patch.description) rel.description = String(patch.description);
     else delete rel.description;
+  }
+  if (patch.verb !== undefined) {
+    if (patch.verb) rel.verb = String(patch.verb);
+    else delete rel.verb;
   }
   if (patch.on_delete !== undefined) {
     const v = String(patch.on_delete || "").trim();

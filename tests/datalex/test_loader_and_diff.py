@@ -63,6 +63,74 @@ class ProjectLoaderTests(unittest.TestCase):
             self.assertEqual("pii-email", email_col.get("sensitivity"))
             self.assertIn("pii", email_col.get("tags", []))
 
+    def test_loads_canonical_modeling_primitives(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _write(
+                root / "datalex.yaml",
+                "kind: project\nname: t\nversion: '1'\ndialects: [postgres]\ndefault_dialect: postgres\n",
+            )
+            _write(
+                root / "models" / "conceptual" / "customer.yaml",
+                "kind: entity\nlayer: conceptual\nname: customer\n"
+                "logical_name: Customer\ndescription: A buyer or account.\ndomain: sales\n",
+            )
+            _write(
+                root / "models" / "conceptual" / "order.yaml",
+                "kind: entity\nlayer: conceptual\nname: order\ndescription: A commercial order.\ndomain: sales\n",
+            )
+            _write(
+                root / "relationships" / "customer_places_order.yaml",
+                "kind: relationship\nlayer: conceptual\nname: customer_places_order\n"
+                "from: {entity: customer}\nto: {entity: order}\n"
+                "cardinality: one_to_many\nrole_name: places\n",
+            )
+            _write(
+                root / "data_types" / "email.yaml",
+                "kind: data_type\nname: email\nbase: string\nprecision: any\n"
+                "physical:\n  postgres: {type: varchar(320)}\n",
+            )
+            _write(
+                root / "semantic" / "customer_metrics.yaml",
+                "kind: semantic_model\nname: customer_metrics\nentity: customer\n"
+                "metrics:\n  - name: customer_count\n    type: simple\n",
+            )
+
+            project = load_project(root, strict=True)
+
+            self.assertEqual("Customer", project.entity("customer", layer="conceptual")["logical_name"])
+            self.assertIn("customer_places_order", project.relationships)
+            self.assertIn("email", project.data_types)
+            self.assertIn("customer_metrics", project.semantic_models)
+
+    def test_relationship_validation_is_layer_aware(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _write(root / "datalex.yaml", "kind: project\nname: t\nversion: '1'\n")
+            _write(
+                root / "models" / "logical" / "customer.yaml",
+                "kind: entity\nlayer: logical\nname: customer\ncolumns:\n  - name: id\n    type: string\n",
+            )
+            _write(
+                root / "relationships" / "bad.yaml",
+                "kind: relationship\nlayer: logical\nname: bad_rel\n"
+                "from: {entity: customer, column: missing_id}\nto: {entity: order, column: id}\n",
+            )
+
+            project = load_project(root, strict=False)
+            codes = {err["code"] for err in project.errors.to_list()}
+            self.assertIn("REL_COLUMN_MISSING", codes)
+            self.assertIn("REL_TARGET_MISSING", codes)
+
+    def test_enterprise_modeling_fixture_loads(self) -> None:
+        fixture = ROOT / "model-examples" / "enterprise-modeling-foundation"
+        project = load_project(fixture, strict=True)
+        self.assertEqual(6, len(project.entities))
+        self.assertEqual(2, len(project.relationships))
+        self.assertEqual(3, len(project.data_types))
+        self.assertEqual(1, len(project.semantic_models))
+        self.assertEqual(3, len(project.diagrams))
+
 
 class DiffTests(unittest.TestCase):
     def test_explicit_rename_is_not_drop_add(self) -> None:

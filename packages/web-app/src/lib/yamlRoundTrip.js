@@ -312,6 +312,16 @@ export function addEntityWithOptions(yamlText, options = {}) {
     };
     if (options.subjectArea) entity.subject_area = String(options.subjectArea).trim();
     if (options.schema) entity.schema = String(options.schema).trim();
+    if (options.display && typeof options.display === "object") {
+      const x = Number(options.display.x);
+      const y = Number(options.display.y);
+      const width = Number(options.display.width);
+      entity.display = {
+        ...(Number.isFinite(x) ? { x: Math.round(x) } : {}),
+        ...(Number.isFinite(y) ? { y: Math.round(y) } : {}),
+        ...(Number.isFinite(width) ? { width: Math.round(width) } : {}),
+      };
+    }
     model.entities.push(entity);
   });
 }

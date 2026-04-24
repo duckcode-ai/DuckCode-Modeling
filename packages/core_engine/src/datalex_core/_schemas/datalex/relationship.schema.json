@@ -1,0 +1,53 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://duckcode.dev/schemas/datalex/relationship.schema.json",
+  "title": "DataLex relationship",
+  "type": "object",
+  "required": ["kind", "name", "layer", "from", "to"],
+  "additionalProperties": false,
+  "properties": {
+    "kind": { "const": "relationship" },
+    "name": { "type": "string", "pattern": "^[a-z][a-z0-9_]*$" },
+    "previous_name": { "type": "string", "pattern": "^[a-z][a-z0-9_]*$" },
+    "layer": { "type": "string", "enum": ["conceptual", "logical", "physical"] },
+    "type": {
+      "type": "string",
+      "enum": ["reference", "associative", "subtype", "supertype"],
+      "default": "reference"
+    },
+    "from": { "$ref": "#/$defs/endpoint" },
+    "to": { "$ref": "#/$defs/endpoint" },
+    "cardinality": {
+      "type": "string",
+      "enum": ["one_to_one", "one_to_many", "many_to_one", "many_to_many"]
+    },
+    "optional": { "type": "boolean" },
+    "identifying": { "type": "boolean" },
+    "role_name": {
+      "type": "string",
+      "description": "Logical role name shown on logical/conceptual diagrams."
+    },
+    "logical_name": { "type": "string" },
+    "verb": { "type": "string" },
+    "description": { "type": "string" },
+    "on_delete": { "type": "string", "enum": ["restrict", "cascade", "set_null", "no_action"] },
+    "on_update": { "type": "string", "enum": ["restrict", "cascade", "set_null", "no_action"] },
+    "visibility": {
+      "type": "string",
+      "enum": ["logical_and_physical", "logical_only", "physical_only"]
+    },
+    "meta": { "type": "object", "additionalProperties": true }
+  },
+  "$defs": {
+    "endpoint": {
+      "type": "object",
+      "required": ["entity"],
+      "additionalProperties": false,
+      "properties": {
+        "entity": { "type": "string", "pattern": "^[a-z][a-z0-9_]*$" },
+        "column": { "type": "string", "pattern": "^[a-z][a-z0-9_]*$" },
+        "role": { "type": "string" }
+      }
+    }
+  }
+}
