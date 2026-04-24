@@ -33,7 +33,7 @@ with contracts, lineage, ERDs, and clean round-trip back to dbt.
 ## Quickstart — two commands
 
 ```bash
-pip install 'datalex-cli[serve]'       # CLI + bundled Node — one command, no prereqs
+pip install -U 'datalex-cli[serve]'    # CLI + bundled Node — one command, no prereqs
 datalex serve                          # opens http://localhost:3030
 ```
 
@@ -56,8 +56,8 @@ original `.yml` files — `git status` shows real diffs.
 
 1. Click **Import dbt repo → Local folder** → pick your project root
 2. Click **New modeling asset** and choose Conceptual, Logical, or
-   Physical. New diagrams use the domain-first structure
-   `DataLex/<domain>/<Conceptual|Logical|Physical>/...`.
+   Physical. New assets use the domain-first structure
+   `DataLex/<domain>/<conceptual|logical|physical>/...`.
 3. Open the new `.diagram.yaml`. Conceptual and logical diagrams can
    create boxes directly; physical diagrams are dbt-first, so drag any
    `schema.yml` / `.model.yaml` from the Explorer onto the canvas.
@@ -167,16 +167,28 @@ per-dialect over time).
 **For users** — from [PyPI](https://pypi.org/project/datalex-cli/):
 
 ```bash
-pip install 'datalex-cli[serve]'                 # CLI + UI (recommended)
-pip install 'datalex-cli[serve,postgres]'        # add a warehouse driver
-pip install 'datalex-cli[serve,all]'             # every driver + UI
-pip install datalex-cli                          # CLI-only, no UI
+pip install -U 'datalex-cli[serve]'                 # CLI + UI (recommended)
+pip install -U 'datalex-cli[serve,postgres]'        # add a warehouse driver
+pip install -U 'datalex-cli[serve,all]'             # every driver + UI
+pip install -U datalex-cli                          # CLI-only, no UI
 ```
 
 Available extras: `serve`, `duckdb`, `postgres`, `mysql`, `snowflake`,
 `bigquery`, `databricks`, `sqlserver`, `redshift`, `all`.
 
 **Prereqs:** Python 3.9+ and Git. That's it — `[serve]` bundles Node.
+
+Verify the installed package:
+
+```bash
+datalex --version
+```
+
+For the local DuckDB-based example repo, install the matching driver too:
+
+```bash
+pip install -U 'datalex-cli[serve,duckdb]'
+```
 
 **For contributors** — from source:
 

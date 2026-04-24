@@ -7,6 +7,42 @@ from `v0.1.0` onward.
 
 ## [Unreleased]
 
+## [1.2.0] — 2026-04-24
+
+Minor release — turns the open-source modeling loop into a clearer
+three-layer workbench and cleans up the package/docs path for first-time
+users.
+
+### Added
+
+- **Conceptual, logical, and physical now behave like separate modeling
+  modes.** Conceptual relationships are entity-level with business
+  wording, logical mode has its own entity/details flow, and physical
+  mode gets a dbt-YAML picker plus direct drag/drop from the Explorer.
+- **Physical dbt import is now discoverable in the UI.** Empty physical
+  diagrams show an explicit import/picker flow, and Explorer search +
+  drag/drop make it practical to assemble a dbt-backed diagram without
+  re-importing a whole repo every time.
+
+### Changed
+
+- **The canonical DataLex workspace is domain-first.** New assets now
+  land under `DataLex/<domain>/<conceptual|logical|physical>/...`
+  instead of splitting users between separate top-level `diagrams/` and
+  `models/` trees.
+- **Install and onboarding docs now match the shipped flow.** The PyPI
+  README, quickstart, and example walkthroughs now show the current
+  package install path, `datalex --version`, and the domain-first
+  workspace layout users see in the Explorer.
+
+### Fixed
+
+- **Legacy path writers no longer create mixed folder layouts for new
+  files.** Bootstrap scaffolding, physical dbt import, and diagram
+  creation now normalize to the same workspace structure instead of
+  recreating old `.../Logical`, `.../Physical/postgres`, or split
+  diagram/model folders.
+
 ## [1.1.1] — 2026-04-22
 
 Patch release — restores a standard CLI affordance that was missing from
@@ -1046,7 +1082,8 @@ Labs** (company).
   root; a `pip install`ed package run outside the repo needs
   `--schemas-root` or the repo on disk.
 
-[Unreleased]: https://github.com/duckcode-ai/DataLex/compare/v1.1.1...HEAD
+[Unreleased]: https://github.com/duckcode-ai/DataLex/compare/v1.2.0...HEAD
+[1.2.0]: https://github.com/duckcode-ai/DataLex/compare/v1.1.1...v1.2.0
 [1.1.1]: https://github.com/duckcode-ai/DataLex/compare/v1.1.0...v1.1.1
 [1.1.0]: https://github.com/duckcode-ai/DataLex/compare/v1.0.6...v1.1.0
 [1.0.6]: https://github.com/duckcode-ai/DataLex/compare/v1.0.5...v1.0.6
