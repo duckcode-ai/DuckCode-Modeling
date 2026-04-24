@@ -139,6 +139,9 @@ streaming-safe for 10K+ entities), it gives you:
   Databricks, MySQL, SQL Server, Redshift. Same source, all dialects.
 - **`datalex datalex diff`** — semantic diff with explicit rename tracking
   (`previous_name:`), breaking-change gate for CI.
+- **`datalex datalex mesh check <repo> --strict`** — verifies dbt mesh
+  Interface readiness for shared models declared with
+  `meta.datalex.interface`. See [docs/mesh-interfaces.md](docs/mesh-interfaces.md).
 - **Cross-repo package imports** — pin `acme/warehouse-core@1.4.0` in
   `imports:`, lockfile + content hash drift detection, Git-or-path
   resolution, on-disk parse cache for large projects.
