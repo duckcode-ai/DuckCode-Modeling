@@ -198,6 +198,8 @@ def _model_to_dict(m: Dict[str, Any]) -> Dict[str, Any]:
         },
     )
     if meta:
+        if m.get("interface"):
+            meta.setdefault("datalex", {})["interface"] = dict(m["interface"])
         doc["meta"] = meta
 
     if m.get("tags"):

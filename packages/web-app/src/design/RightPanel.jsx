@@ -232,6 +232,7 @@ export default function RightPanel({
         relationships={relationships}
         onSelect={onSelectRel}
         tables={tables}
+        modelKind={modelKind}
       />
     );
   } else if (tab === "INDEXES") {

@@ -140,6 +140,84 @@ export function lintDoc(doc, opts = {}) {
 }
 
 /**
+ * Validate DataLex/dbt Interface metadata in the active YAML document.
+ * Mirrors the Python mesh checker enough to give immediate Workbench feedback;
+ * CI remains authoritative through `datalex datalex mesh check --strict`.
+ */
+export function lintMeshInterfaces(doc, opts = {}) {
+  if (!doc || typeof doc !== "object") return [];
+  const filePath = opts.filePath || "";
+  const models = [];
+  if (doc.kind === "model") models.push(doc);
+  if (Array.isArray(doc.models)) models.push(...doc.models);
+  if (Array.isArray(doc.entities)) models.push(...doc.entities);
+
+  const out = [];
+  for (const model of models) {
+    const iface = interfaceMeta(model);
+    if (!interfaceEnabled(iface)) continue;
+    const name = model?.name || model?.entity || "(unnamed)";
+    const pathBase = filePath ? `${filePath}#${name}` : name;
+    const status = iface.status;
+    const stability = iface.stability;
+    const owner = iface.owner || model.owner;
+    const domain = iface.domain || model.domain;
+    const description = iface.description || model.description;
+    const freshness = iface.freshness || model.freshness;
+    const uniqueKey = iface.unique_key;
+    const columns = pickColumns(model);
+    const columnNames = new Set(columns.map((c) => c.name).filter(Boolean));
+    const uniqueKeyCols = uniqueKeyColumns(uniqueKey);
+
+    const required = [
+      ["MESH_INTERFACE_MISSING_OWNER", owner, "owner"],
+      ["MESH_INTERFACE_MISSING_DOMAIN", domain, "domain"],
+      ["MESH_INTERFACE_MISSING_STATUS", status, "status"],
+      ["MESH_INTERFACE_MISSING_VERSION", iface.version, "version"],
+      ["MESH_INTERFACE_MISSING_DESCRIPTION", description, "description"],
+      ["MESH_INTERFACE_MISSING_UNIQUE_KEY", uniqueKey, "unique key"],
+      ["MESH_INTERFACE_MISSING_FRESHNESS", freshness, "freshness"],
+      ["MESH_INTERFACE_MISSING_STABILITY", stability, "stability"],
+    ];
+    for (const [code, value, label] of required) {
+      if (!hasValue(value)) {
+        out.push({ code, severity: "warn", path: pathBase, message: `Interface \`${name}\` is missing ${label}.` });
+      }
+    }
+    if (status && !["draft", "active", "deprecated"].includes(status)) {
+      out.push({ code: "MESH_INTERFACE_INVALID_STATUS", severity: "error", path: pathBase, message: `Interface \`${name}\` has invalid status \`${status}\`.` });
+    }
+    if (stability && !["internal", "shared", "contracted"].includes(stability)) {
+      out.push({ code: "MESH_INTERFACE_INVALID_STABILITY", severity: "error", path: pathBase, message: `Interface \`${name}\` has invalid stability \`${stability}\`.` });
+    }
+    if (!materialization(model)) {
+      out.push({ code: "MESH_INTERFACE_MISSING_MATERIALIZATION", severity: "warn", path: pathBase, message: `Interface \`${name}\` should declare a dbt materialization.` });
+    }
+    if (!model?.contract?.enforced && !model?.config?.contract?.enforced) {
+      out.push({ code: "MESH_INTERFACE_CONTRACT_NOT_ENFORCED", severity: "warn", path: pathBase, message: `Interface \`${name}\` should enable a dbt contract before promotion.` });
+    }
+    for (const keyCol of uniqueKeyCols) {
+      if (!columnNames.has(keyCol)) {
+        out.push({ code: "MESH_INTERFACE_UNIQUE_KEY_NOT_FOUND", severity: "error", path: `${pathBase}.${keyCol}`, message: `Interface unique key \`${keyCol}\` is not a declared column.` });
+      }
+    }
+    for (const col of columns) {
+      if (!col?.name) continue;
+      if (!hasValue(col.description)) {
+        out.push({ code: "MESH_INTERFACE_COLUMN_DESCRIPTION_MISSING", severity: "warn", path: `${pathBase}.${col.name}`, field: col.name, message: `Interface column \`${col.name}\` needs a consumer-facing description.` });
+      }
+      if (uniqueKeyCols.includes(col.name) && !(hasNamedTest(col, "unique") && hasNamedTest(col, "not_null"))) {
+        out.push({ code: "MESH_INTERFACE_UNIQUE_KEY_TESTS_MISSING", severity: "warn", path: `${pathBase}.${col.name}`, field: col.name, message: `Unique key column \`${col.name}\` should have unique and not_null tests.` });
+      }
+      if (String(col.name).endsWith("_id") && !uniqueKeyCols.includes(col.name) && !hasRelationshipTest(col)) {
+        out.push({ code: "MESH_INTERFACE_RELATIONSHIP_TEST_MISSING", severity: "warn", path: `${pathBase}.${col.name}`, field: col.name, message: `Foreign-key-like column \`${col.name}\` should have a relationships test.` });
+      }
+    }
+  }
+  return out;
+}
+
+/**
  * Summarise a findings array into the counts the UI header needs.
  * Small helper so callers don't re-implement the same reduce.
  */
@@ -193,4 +271,40 @@ function hasTestCoverage(col) {
   if (Array.isArray(tests)) return tests.length > 0;
   if (typeof tests === "object") return Object.keys(tests).length > 0;
   return Boolean(tests);
+}
+
+function interfaceMeta(model) {
+  if (model?.interface && typeof model.interface === "object") return model.interface;
+  const meta = model?.meta;
+  const iface = meta?.datalex?.interface;
+  return iface && typeof iface === "object" ? iface : {};
+}
+
+function interfaceEnabled(iface) {
+  if (!iface || typeof iface !== "object") return false;
+  return iface.enabled === true || ["shared", "contracted"].includes(String(iface.stability || "").toLowerCase());
+}
+
+function uniqueKeyColumns(value) {
+  if (typeof value === "string" && value.trim()) return [value.trim()];
+  if (Array.isArray(value)) return value.map((v) => String(v || "").trim()).filter(Boolean);
+  return [];
+}
+
+function materialization(model) {
+  return model?.materialization || model?.config?.materialized || "";
+}
+
+function hasNamedTest(col, name) {
+  const tests = Array.isArray(col?.tests) ? col.tests : [];
+  if (tests.some((t) => t === name || (t && typeof t === "object" && Object.prototype.hasOwnProperty.call(t, name)))) return true;
+  const constraints = Array.isArray(col?.constraints) ? col.constraints : [];
+  return constraints.some((c) => c?.type === name);
+}
+
+function hasRelationshipTest(col) {
+  const tests = Array.isArray(col?.tests) ? col.tests : [];
+  if (tests.some((t) => t && typeof t === "object" && Object.prototype.hasOwnProperty.call(t, "relationships"))) return true;
+  const constraints = Array.isArray(col?.constraints) ? col.constraints : [];
+  return constraints.some((c) => c?.type === "foreign_key");
 }

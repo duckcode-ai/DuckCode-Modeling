@@ -25,7 +25,7 @@ import yaml from "js-yaml";
 import useWorkspaceStore from "../../stores/workspaceStore";
 import useUiStore from "../../stores/uiStore";
 import { runModelChecks } from "../../modelQuality";
-import { lintDoc as lintDbtDoc } from "../../lib/dbtLint";
+import { lintDoc as lintDbtDoc, lintMeshInterfaces } from "../../lib/dbtLint";
 import { scanDangling, pruneDangling } from "../../lib/danglingScan";
 import {
   PanelFrame,
@@ -757,6 +757,18 @@ export default function ValidationPanel() {
     }
   }, [activeFileContent, activeFile]);
 
+  const interfaceFindings = useMemo(() => {
+    if (!activeFileContent) return [];
+    try {
+      const doc = yaml.load(activeFileContent);
+      if (!doc || typeof doc !== "object") return [];
+      const filePath = activeFile?.fullPath || activeFile?.name || "";
+      return lintMeshInterfaces(doc, { filePath });
+    } catch (_err) {
+      return [];
+    }
+  }, [activeFileContent, activeFile]);
+
   const layerFindings = useMemo(() => {
     if (!activeFileContent) return [];
     return runLayerChecks(activeFileContent, activeFile);
@@ -768,14 +780,16 @@ export default function ValidationPanel() {
   const dimensionalIssues = allNudges.filter((w) => DIMENSIONAL_CODES.has(w.code));
   const gaps = allNudges.filter((w) => !DIMENSIONAL_CODES.has(w.code));
   const completeness = currentCheck?.completeness || null;
-  const modelQualityIssues = [...warnings, ...dimensionalIssues, ...layerFindings.filter((issue) => issue.severity !== "info")];
-  const coverageIssues = [...gaps, ...dbtFindings, ...layerFindings.filter((issue) => issue.severity === "info")];
+  const interfaceBlockers = interfaceFindings.filter((issue) => issue.severity === "error");
+  const interfaceGuidance = interfaceFindings.filter((issue) => issue.severity !== "error");
+  const modelQualityIssues = [...warnings, ...dimensionalIssues, ...interfaceBlockers, ...layerFindings.filter((issue) => issue.severity !== "info")];
+  const coverageIssues = [...gaps, ...dbtFindings, ...interfaceGuidance, ...layerFindings.filter((issue) => issue.severity === "info")];
 
   /* Summary cluster shown in the header's `actions` slot. One status
      pill per category; zero-count categories collapse to a single
      "No errors" success pill so the header never feels empty. */
   const totalIssues =
-    errors.length + warnings.length + dimensionalIssues.length + gaps.length + dbtFindings.length + layerFindings.length;
+    errors.length + warnings.length + dimensionalIssues.length + gaps.length + dbtFindings.length + interfaceFindings.length + layerFindings.length;
   const blockerCount = errors.length + danglingFindings.length;
   const headerStatus = activeFileContent ? (
     <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>

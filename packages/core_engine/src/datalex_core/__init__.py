@@ -12,6 +12,7 @@ from datalex_core.completion import generate_bash_completion, generate_fish_comp
 from datalex_core.doctor import diagnostics_as_json, format_diagnostics, run_diagnostics
 from datalex_core.generators import dbt_scaffold_files, generate_sql_ddl, write_dbt_scaffold
 from datalex_core.migrate import generate_migration, write_migration
+from datalex_core.mesh import interface_enabled, interface_metadata, mesh_issues, mesh_report
 from datalex_core.modeling import (
     apply_standards_fixes,
     merge_models_preserving_docs,
@@ -67,10 +68,14 @@ __all__ = [
     "import_spark_schema",
     "import_sql_ddl",
     "lint_issues",
+    "interface_enabled",
+    "interface_metadata",
     "load_policy_pack",
     "load_policy_pack_with_inheritance",
     "merge_policy_packs",
     "merge_models_preserving_docs",
+    "mesh_issues",
+    "mesh_report",
     "load_schema",
     "load_yaml_model",
     "ModelCompleteness",

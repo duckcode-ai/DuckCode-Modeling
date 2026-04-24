@@ -19,14 +19,27 @@ const DIFF_COLORS = {
 const DEFAULT_WORLD_WIDTH = 2400;
 const DEFAULT_WORLD_HEIGHT = 1600;
 const WORLD_PADDING = 180;
-const MIN_ZOOM = 0.5;
+const MIN_ZOOM = 0.25;
 const MAX_ZOOM = 2.25;
+const CONCEPT_CARD_WIDTH = 220;
+const CONCEPT_CARD_HEIGHT = 128;
 
-function estimateTableBounds(table) {
-  const width = Number.isFinite(Number(table?.width)) ? Number(table.width) : 240;
-  if (String(table?.modelKind || "").toLowerCase() === "conceptual") {
-    return { width, height: 164 };
+function isConceptTable(table, modelKind = "") {
+  return String(modelKind || table?.modelKind || "").toLowerCase() === "conceptual"
+    || String(table?.type || "").toLowerCase() === "concept";
+}
+
+function conceptualCardWidth(table) {
+  const storedWidth = Number(table?.width);
+  if (!Number.isFinite(storedWidth)) return CONCEPT_CARD_WIDTH;
+  return Math.min(Math.max(storedWidth, 190), CONCEPT_CARD_WIDTH);
+}
+
+function estimateTableBounds(table, modelKind = "") {
+  if (isConceptTable(table, modelKind)) {
+    return { width: conceptualCardWidth(table), height: CONCEPT_CARD_HEIGHT };
   }
+  const width = Number.isFinite(Number(table?.width)) ? Number(table.width) : 240;
   const rowCount = Array.isArray(table?.columns) ? table.columns.length : 0;
   const bodyHeight = Math.max(1, rowCount) * 26;
   const footerHeight = table?.kind === "ENUM" ? 0 : 28;
@@ -36,7 +49,7 @@ function estimateTableBounds(table) {
   };
 }
 
-function getWorldBounds(tables) {
+function getWorldBounds(tables, modelKind = "") {
   if (!Array.isArray(tables) || tables.length === 0) {
     return {
       minX: 0,
@@ -54,7 +67,7 @@ function getWorldBounds(tables) {
   tables.forEach((table) => {
     const x = Number.isFinite(Number(table?.x)) ? Number(table.x) : 0;
     const y = Number.isFinite(Number(table?.y)) ? Number(table.y) : 0;
-    const bounds = estimateTableBounds(table);
+    const bounds = estimateTableBounds(table, modelKind);
     minX = Math.min(minX, x);
     minY = Math.min(minY, y);
     maxX = Math.max(maxX, x + bounds.width);
@@ -76,7 +89,7 @@ function TableCard({ table, selected, onSelect, onMove, onMoveEnd, onStartConnec
   const I = Icon;
   const cardRef = React.useRef(null);
   const drag = React.useRef(null);
-  const conceptual = String(modelKind || table?.modelKind || "").toLowerCase() === "conceptual";
+  const conceptual = isConceptTable(table, modelKind);
   const logical = String(modelKind || table?.modelKind || "").toLowerCase() === "logical";
 
   const hasValue = (value) => value != null && String(value).trim() !== "";
@@ -143,16 +156,20 @@ function TableCard({ table, selected, onSelect, onMove, onMoveEnd, onStartConnec
     outline: `2px solid ${diffTheme.stroke}`,
     outlineOffset: 2,
   } : null;
-  const summaryBadges = [
-    table?.type || table?.kind || (conceptual ? "concept" : logical ? "logical" : "table"),
-    table?.subject_area || table?.subject || "",
-    table?.domain || "",
-  ].filter(Boolean);
+  const conceptDomain = table?.domain || table?.subject_area || table?.subject || "";
+  const summaryBadges = conceptual
+    ? [
+        conceptDomain,
+        table?.owner ? `owner ${table.owner}` : "",
+      ].filter(Boolean)
+    : [
+        table?.type || table?.kind || (logical ? "logical" : "table"),
+        table?.subject_area || table?.subject || "",
+        table?.domain || "",
+      ].filter(Boolean);
   const conceptPreview = [
     table?.description || "",
-    table?.owner ? `Owner: ${table.owner}` : "",
     Array.isArray(table?.terms) && table.terms.length ? `Terms: ${table.terms.slice(0, 2).join(", ")}` : "",
-    Array.isArray(table?.tags) && table.tags.length ? `Tags: ${table.tags.slice(0, 3).join(", ")}` : "",
   ].filter(Boolean);
   const keySetCount = (value) => Array.isArray(value) ? value.length : 0;
   const keyBadges = logical ? [
@@ -172,9 +189,9 @@ function TableCard({ table, selected, onSelect, onMove, onMoveEnd, onStartConnec
   return (
     <div
       ref={cardRef}
-      className={`table-card cat-${table.cat} ${selected ? "selected" : ""} ${table.junction ? "junction" : ""}`}
+      className={`table-card cat-${table.cat} ${conceptual ? "concept-card" : ""} ${selected ? "selected" : ""} ${table.junction ? "junction" : ""}`}
       id={`tc-${table.id}`}
-      style={{ left: table.x, top: table.y, ...(diffStyle || {}) }}
+      style={{ left: table.x, top: table.y, ...(conceptual ? { width: conceptualCardWidth(table) } : {}), ...(diffStyle || {}) }}
       onMouseDown={onMouseDown}
     >
       <div className="tc-header">
@@ -216,44 +233,32 @@ function TableCard({ table, selected, onSelect, onMove, onMoveEnd, onStartConnec
               }}
             >{diffTheme.label}</span>
           )}
-          {(table.badges || []).map((b) => (
+          {!conceptual && (table.badges || []).map((b) => (
             <span key={b} className={`tc-badge ${b.toLowerCase()}`}>{b}</span>
           ))}
         </div>
       </div>
       {conceptual ? (
         <>
-          <div style={{ padding: "10px 12px 8px", display: "flex", flexWrap: "wrap", gap: 6 }}>
-            {summaryBadges.map((badge) => (
-              <span
-                key={badge}
-                style={{
-                  fontSize: 10,
-                  padding: "2px 6px",
-                  borderRadius: 999,
-                  background: "rgba(148,163,184,0.12)",
-                  border: "1px solid var(--border-default)",
-                  color: "var(--text-secondary)",
-                }}
-              >
-                {badge}
-              </span>
+          <div className="concept-card-tags">
+            {summaryBadges.slice(0, 2).map((badge) => (
+              <span key={badge} className="concept-card-tag" title={badge}>{badge}</span>
             ))}
           </div>
-          <div style={{ padding: "0 12px 12px", display: "grid", gap: 6 }}>
-            {conceptPreview.length ? conceptPreview.slice(0, 3).map((line) => (
-              <div key={line} style={{ fontSize: 11, color: "var(--text-secondary)", lineHeight: 1.4 }}>
+          <div className="concept-card-body">
+            {conceptPreview.length ? conceptPreview.slice(0, 2).map((line) => (
+              <div key={line} className="concept-card-line" title={line}>
                 {line}
               </div>
             )) : (
-              <div style={{ fontSize: 11, color: "var(--text-tertiary)", lineHeight: 1.4 }}>
-                Business concept card. Add description, owner, terms, and domain context in the inspector.
+              <div className="concept-card-line muted">
+                Add definition, owner, and terms in Details.
               </div>
             )}
           </div>
           <div className="tc-footer">
-            <span>business concept</span>
-            <span>{table.domain || table.subject_area || "unassigned"}</span>
+            <span>concept</span>
+            <span>{conceptDomain || "unassigned"}</span>
           </div>
         </>
       ) : (
@@ -378,7 +383,7 @@ function drawEnd(x, y, side, spec, idPrefix, active, dimmed) {
   );
 }
 
-function Relationships({ tables, relationships, selected, onSelect, hovered, setHovered, width, height, zoom, stageRef }) {
+function Relationships({ tables, relationships, selected, onSelect, hovered, setHovered, width, height, zoom, stageRef, modelKind }) {
   const [anchors, setAnchors] = React.useState({});
   const openModal = useUiStore((s) => s.openModal);
 
@@ -496,7 +501,7 @@ function Relationships({ tables, relationships, selected, onSelect, hovered, set
              onDoubleClick={(e) => {
                e.stopPropagation();
                onSelect({ type: "rel", id: r.id });
-               openRelationshipEditor(openModal, r, tables);
+               openRelationshipEditor(openModal, r, tables, modelKind);
              }}
              onMouseEnter={() => setHovered(r.id)}
              onMouseLeave={() => setHovered(null)}
@@ -655,7 +660,7 @@ export default function Canvas({ tables, setTables, relationships, areas, select
   const stageRef = React.useRef(null);
   const [zoom, setZoom] = React.useState(1);
   const [viewportState, setViewportState] = React.useState({ left: 0, top: 0, width: 1, height: 1 });
-  const world = React.useMemo(() => getWorldBounds(tables), [tables]);
+  const world = React.useMemo(() => getWorldBounds(tables, modelKind), [tables, modelKind]);
   const conceptualMode = String(modelKind || "").toLowerCase() === "conceptual";
   const renderedAreas = React.useMemo(
     () => conceptualMode
@@ -1049,7 +1054,8 @@ export default function Canvas({ tables, setTables, relationships, areas, select
                            selected={selected} onSelect={onSelect}
                            hovered={hovered} setHovered={setHovered}
                            width={world.width} height={world.height}
-                           zoom={zoom} stageRef={stageRef} />
+                           zoom={zoom} stageRef={stageRef}
+                           modelKind={modelKind} />
             {tables.map((t) => (
               <NodeErrorBoundary
                 key={t.id}

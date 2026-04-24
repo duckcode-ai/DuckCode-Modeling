@@ -989,7 +989,7 @@ export function patchRelationship(yamlText, relName, patch) {
   if (patch.name != null && patch.name !== rel.name) rel.name = String(patch.name);
   if (patch.from != null) {
     if (rel.from && typeof rel.from === "object" && !Array.isArray(rel.from)) {
-      const parsed = parseRelationshipEndpoint(patch.from);
+      const parsed = normalizedRelationshipEndpoint(patch.from);
       if (parsed) {
         if (Object.prototype.hasOwnProperty.call(rel.from, "entity")) rel.from.entity = parsed.entity;
         else if (Object.prototype.hasOwnProperty.call(rel.from, "table")) rel.from.table = parsed.entity;
@@ -1008,12 +1008,13 @@ export function patchRelationship(yamlText, relName, patch) {
         rel.from = String(patch.from);
       }
     } else {
-      rel.from = String(patch.from);
+      const parsed = normalizedRelationshipEndpoint(patch.from);
+      rel.from = parsed ? (parsed.field ? `${parsed.entity}.${parsed.field}` : parsed.entity) : String(patch.from);
     }
   }
   if (patch.to != null) {
     if (rel.to && typeof rel.to === "object" && !Array.isArray(rel.to)) {
-      const parsed = parseRelationshipEndpoint(patch.to);
+      const parsed = normalizedRelationshipEndpoint(patch.to);
       if (parsed) {
         if (Object.prototype.hasOwnProperty.call(rel.to, "entity")) rel.to.entity = parsed.entity;
         else if (Object.prototype.hasOwnProperty.call(rel.to, "table")) rel.to.table = parsed.entity;
@@ -1032,7 +1033,8 @@ export function patchRelationship(yamlText, relName, patch) {
         rel.to = String(patch.to);
       }
     } else {
-      rel.to = String(patch.to);
+      const parsed = normalizedRelationshipEndpoint(patch.to);
+      rel.to = parsed ? (parsed.field ? `${parsed.entity}.${parsed.field}` : parsed.entity) : String(patch.to);
     }
   }
   if (patch.cardinality != null) rel.cardinality = String(patch.cardinality);

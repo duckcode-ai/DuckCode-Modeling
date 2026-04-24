@@ -58,6 +58,15 @@ function endpointPatchValue(entity, column, entityLevel) {
   return { entity, field: column };
 }
 
+function optionValues(table) {
+  return [
+    table?.id,
+    table?.name,
+    table?.nodeId,
+    table?._entityName,
+  ].map((value) => String(value || "").trim().toLowerCase()).filter(Boolean);
+}
+
 export default function NewRelationshipDialog() {
   const { closeModal, addToast, modalPayload } = useUiStore();
   const editMode = modalPayload?.mode === "edit";
@@ -72,10 +81,18 @@ export default function NewRelationshipDialog() {
   // click paths send `tables:[{id,name,columns:[{name}]}]` in the payload and
   // leave endpoints empty — the user picks them with dropdowns here.
   const pickableTables = Array.isArray(modalPayload?.tables) ? modalPayload.tables : null;
+  const tableOptions = pickableTables || [];
+  const findTableOption = React.useCallback((entityId) => {
+    const key = String(entityId || "").trim().toLowerCase();
+    if (!key) return null;
+    return tableOptions.find((table) => optionValues(table).includes(key)) || null;
+  }, [tableOptions]);
+  const canonicalEntity = React.useCallback((entityId) => {
+    const hit = findTableOption(entityId);
+    return String(hit?.id || hit?._entityName || hit?.name || entityId || "").trim();
+  }, [findTableOption]);
   const defaultColumnForEntity = React.useCallback((entityId) => {
-    const hit = (pickableTables || []).find(
-      (t) => (t?.id || t?.name || "").toLowerCase() === String(entityId || "").toLowerCase()
-    );
+    const hit = findTableOption(entityId);
     const cols = (hit?.columns || []).filter(Boolean);
     return (
       cols.find((col) => col?.pk || col?.primary_key)?.name ||
@@ -83,7 +100,7 @@ export default function NewRelationshipDialog() {
       cols[0]?.name ||
       ""
     );
-  }, [pickableTables]);
+  }, [findTableOption]);
   const initFromEntity = String(modalPayload?.fromEntity || "");
   const initFromColumn = entityLevelEndpoints ? String(modalPayload?.fromColumn || "") : String(modalPayload?.fromColumn || defaultColumnForEntity(initFromEntity));
   const initToEntity = String(modalPayload?.toEntity || "");
@@ -127,18 +144,14 @@ export default function NewRelationshipDialog() {
   }, [fromEntity, toEntity, pickableTables, initFromEntity, initToEntity]);
 
   const fromCols = React.useMemo(() => {
-    const hit = (pickableTables || []).find(
-      (t) => (t?.id || t?.name || "").toLowerCase() === fromEntity.toLowerCase()
-    );
+    const hit = findTableOption(fromEntity);
     return (hit?.columns || []).map((c) => c.name).filter(Boolean);
-  }, [pickableTables, fromEntity]);
+  }, [findTableOption, fromEntity]);
 
   const toCols = React.useMemo(() => {
-    const hit = (pickableTables || []).find(
-      (t) => (t?.id || t?.name || "").toLowerCase() === toEntity.toLowerCase()
-    );
+    const hit = findTableOption(toEntity);
     return (hit?.columns || []).map((c) => c.name).filter(Boolean);
-  }, [pickableTables, toEntity]);
+  }, [findTableOption, toEntity]);
 
   const canSubmit = !!name.trim() && !!fromEntity && !!toEntity && (entityLevelEndpoints || (!!fromColumn && !!toColumn));
 
@@ -150,16 +163,14 @@ export default function NewRelationshipDialog() {
   // gesture so we skip validation there.
   const validateEndpoint = React.useCallback((entityId, column, side) => {
     if (!pickableTables) return null;
-    const hit = pickableTables.find(
-      (t) => (t?.id || t?.name || "").toLowerCase() === String(entityId || "").toLowerCase(),
-    );
+    const hit = findTableOption(entityId);
     if (!hit) return `${side} entity "${entityId}" is not on this diagram.`;
     const cols = (hit.columns || []).map((c) => c.name).filter(Boolean);
     if (!entityLevelEndpoints && column && !cols.includes(column)) {
       return `${side} column "${column}" does not exist on ${hit.name || entityId}.`;
     }
     return null;
-  }, [entityLevelEndpoints, pickableTables]);
+  }, [entityLevelEndpoints, findTableOption, pickableTables]);
 
   const endpointError = React.useMemo(() => {
     if (!fromEntity || !toEntity) return "";
@@ -177,7 +188,9 @@ export default function NewRelationshipDialog() {
     setError("");
 
     const s = useWorkspaceStore.getState();
-    const targetName = name.trim() || editingRelationship?.name || defaultRelName(fromEntity, toEntity);
+    const nextFromEntity = canonicalEntity(fromEntity);
+    const nextToEntity = canonicalEntity(toEntity);
+    const targetName = name.trim() || editingRelationship?.name || defaultRelName(nextFromEntity, nextToEntity);
     // Detect diagram mode: when the active file is a .diagram.yaml, the FK
     // should land in the diagram's top-level `relationships:` block — not
     // injected into whichever referenced model file. Diagram YAML doesn't
@@ -197,8 +210,8 @@ export default function NewRelationshipDialog() {
       }
       const patch = {
         name: targetName,
-        from: endpointPatchValue(fromEntity, fromColumn, entityLevelEndpoints),
-        to: endpointPatchValue(toEntity, toColumn, entityLevelEndpoints),
+        from: endpointPatchValue(nextFromEntity, fromColumn, entityLevelEndpoints),
+        to: endpointPatchValue(nextToEntity, toColumn, entityLevelEndpoints),
         cardinality,
         identifying: conceptualLevel ? undefined : identifying,
         optional: conceptualLevel ? undefined : optional,
@@ -212,12 +225,12 @@ export default function NewRelationshipDialog() {
         source_of_truth: sourceOfTruth.trim() || undefined,
         _match: {
           from: endpointPatchValue(
-            editingRelationship?._fromEntityName || editingRelationship?.from?.table || "",
+            canonicalEntity(editingRelationship?._fromEntityName || editingRelationship?.from?.table || ""),
             editingRelationship?.from?.col || "",
             !editingRelationship?.from?.col && !editingRelationship?.to?.col,
           ),
           to: endpointPatchValue(
-            editingRelationship?._toEntityName || editingRelationship?.to?.table || "",
+            canonicalEntity(editingRelationship?._toEntityName || editingRelationship?.to?.table || ""),
             editingRelationship?.to?.col || "",
             !editingRelationship?.from?.col && !editingRelationship?.to?.col,
           ),
@@ -235,8 +248,8 @@ export default function NewRelationshipDialog() {
             addToast({
               type: "success",
               message: entityLevelEndpoints
-                ? `Updated ${fromEntity} → ${toEntity}.`
-                : `Updated ${fromEntity}.${fromColumn} → ${toEntity}.${toColumn}.`,
+                ? `Updated ${nextFromEntity} → ${nextToEntity}.`
+                : `Updated ${nextFromEntity}.${fromColumn} → ${nextToEntity}.${toColumn}.`,
             });
             closeModal();
           })
@@ -262,8 +275,8 @@ export default function NewRelationshipDialog() {
       addToast({
         type: "success",
         message: entityLevelEndpoints
-          ? `Updated ${fromEntity} → ${toEntity}.`
-          : `Updated ${fromEntity}.${fromColumn} → ${toEntity}.${toColumn}.`,
+          ? `Updated ${nextFromEntity} → ${nextToEntity}.`
+          : `Updated ${nextFromEntity}.${fromColumn} → ${nextToEntity}.${toColumn}.`,
       });
       closeModal();
       return;
@@ -272,8 +285,8 @@ export default function NewRelationshipDialog() {
     if (isDiagram) {
       const next = addDiagramRelationship(s.activeFileContent, {
         name: targetName,
-        from: endpointPatchValue(fromEntity, fromColumn, entityLevelEndpoints),
-        to: endpointPatchValue(toEntity, toColumn, entityLevelEndpoints),
+        from: endpointPatchValue(nextFromEntity, fromColumn, entityLevelEndpoints),
+        to: endpointPatchValue(nextToEntity, toColumn, entityLevelEndpoints),
         cardinality,
         identifying: conceptualLevel ? undefined : identifying,
         label: "",
@@ -299,8 +312,8 @@ export default function NewRelationshipDialog() {
       addToast({
         type: "success",
         message: entityLevelEndpoints
-          ? `Linked ${fromEntity} → ${toEntity} (diagram).`
-          : `Linked ${fromEntity}.${fromColumn} → ${toEntity}.${toColumn} (diagram).`,
+          ? `Linked ${nextFromEntity} → ${nextToEntity} (diagram).`
+          : `Linked ${nextFromEntity}.${fromColumn} → ${nextToEntity}.${toColumn} (diagram).`,
       });
       closeModal();
       return;
@@ -308,8 +321,8 @@ export default function NewRelationshipDialog() {
 
     // Model-file mode: fall through to the existing addRelationship path,
     // which writes into `relationships:` inside the model YAML itself.
-    const from = endpointValue(fromEntity, fromColumn, entityLevelEndpoints);
-    const to = endpointValue(toEntity, toColumn, entityLevelEndpoints);
+    const from = endpointValue(nextFromEntity, fromColumn, entityLevelEndpoints);
+    const to = endpointValue(nextToEntity, toColumn, entityLevelEndpoints);
     const { yaml: next, error: err } = addRelationship(
       s.activeFileContent,
       targetName,
@@ -349,8 +362,8 @@ export default function NewRelationshipDialog() {
     addToast({
       type: "success",
       message: entityLevelEndpoints
-        ? `Linked ${fromEntity} → ${toEntity}.`
-        : `Linked ${fromEntity}.${fromColumn} → ${toEntity}.${toColumn}.`,
+        ? `Linked ${nextFromEntity} → ${nextToEntity}.`
+        : `Linked ${nextFromEntity}.${fromColumn} → ${nextToEntity}.${toColumn}.`,
     });
     closeModal();
   };
@@ -422,7 +435,7 @@ export default function NewRelationshipDialog() {
                   }}
                 >
                   <option value="">Choose entity…</option>
-                  {pickableTables.map((t) => {
+                  {tableOptions.map((t) => {
                     const id = t?.id || t?.name;
                     const label = t?.name || t?.id;
                     return <option key={id} value={id}>{label}</option>;
@@ -467,7 +480,7 @@ export default function NewRelationshipDialog() {
                   }}
                 >
                   <option value="">Choose entity…</option>
-                  {pickableTables.map((t) => {
+                  {tableOptions.map((t) => {
                     const id = t?.id || t?.name;
                     const label = t?.name || t?.id;
                     return <option key={id} value={id}>{label}</option>;

@@ -368,8 +368,12 @@ def _build_model_doc(
     }
     # user-owned fields preserved
     _merge_preserving_user_fields(
-        doc, prior, keys=("description", "owner", "domain", "tags", "materialization", "contract"),
+        doc, prior, keys=("description", "owner", "domain", "tags", "materialization", "contract", "interface"),
     )
+
+    interface_meta = ((node.get("meta") or {}).get("datalex") or {}).get("interface")
+    if interface_meta and "interface" not in doc:
+        doc["interface"] = interface_meta
 
     # manifest-owned fields
     config = node.get("config") or {}

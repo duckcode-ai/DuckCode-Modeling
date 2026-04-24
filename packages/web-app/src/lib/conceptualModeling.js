@@ -71,8 +71,8 @@ export function buildConceptualAreas(tables = [], declaredAreas = []) {
     groupTables.forEach((table) => {
       const x = Number.isFinite(Number(table?.x)) ? Number(table.x) : 0;
       const y = Number.isFinite(Number(table?.y)) ? Number(table.y) : 0;
-      const width = Number.isFinite(Number(table?.width)) ? Number(table.width) : 240;
-      const height = String(table?.modelKind || "").toLowerCase() === "conceptual" ? 180 : 240;
+      const width = Math.min(Math.max(Number.isFinite(Number(table?.width)) ? Number(table.width) : 220, 190), 220);
+      const height = 128;
       minX = Math.min(minX, x);
       minY = Math.min(minY, y);
       maxX = Math.max(maxX, x + width);
@@ -84,10 +84,10 @@ export function buildConceptualAreas(tables = [], declaredAreas = []) {
       id: `concept-area-${label.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`,
       label,
       cat: first.cat || "users",
-      x: Math.max(0, minX - 40),
-      y: Math.max(0, minY - 44),
-      w: Math.max(260, maxX - minX + 80),
-      h: Math.max(180, maxY - minY + 88),
+      x: Math.max(0, minX - 24),
+      y: Math.max(0, minY - 30),
+      w: Math.max(230, maxX - minX + 48),
+      h: Math.max(142, maxY - minY + 54),
       count: groupTables.length,
     });
   });

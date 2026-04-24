@@ -164,6 +164,34 @@ test("patchRelationship updates diagram relationship object endpoints and cardin
   assert.equal(doc.relationships[0].cardinality, "one_to_one");
 });
 
+test("patchRelationship accepts object endpoints from relationship dialog edits", () => {
+  const src = yaml.dump({
+    kind: "diagram",
+    relationships: [
+      {
+        name: "customer_to_order",
+        from: { entity: "Customer" },
+        to: { entity: "Sales Order" },
+        cardinality: "one_to_many",
+      },
+    ],
+  });
+  const out = patchRelationship(src, "customer_to_order", {
+    from: { entity: "Customer" },
+    to: { entity: "Sales Order" },
+    cardinality: "many_to_many",
+    _match: {
+      from: { entity: "Customer" },
+      to: { entity: "Sales Order" },
+    },
+  });
+  assert.ok(out, "returns patched YAML");
+  const doc = parse(out);
+  assert.deepEqual(doc.relationships[0].from, { entity: "Customer" });
+  assert.deepEqual(doc.relationships[0].to, { entity: "Sales Order" });
+  assert.equal(doc.relationships[0].cardinality, "many_to_many");
+});
+
 test("patchRelationship preserves conceptual relationship semantics", () => {
   const src = yaml.dump({
     kind: "diagram",

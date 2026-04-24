@@ -29,6 +29,10 @@
           "domain": { "type": "string" },
           "subject_area": { "type": "string" },
           "owner": { "type": "string" },
+          "interface": {
+            "type": "object",
+            "additionalProperties": true
+          },
           "terms": { "type": "array", "items": { "type": "string" } },
           "tags": { "type": "array", "items": { "type": "string" } },
           "fields": {

@@ -10,24 +10,62 @@ export function relationCardinalityValue(rel) {
   );
 }
 
-export function buildRelationshipEditorPayload(rel, tables = []) {
+function normalizeKey(value) {
+  return String(value || "").trim().toLowerCase();
+}
+
+function canonicalTableName(table) {
+  return String(table?.name || table?._entityName || table?.id || "").trim();
+}
+
+function resolveEndpointEntity(endpointValue, tables = []) {
+  const raw = String(endpointValue || "").trim();
+  if (!raw) return "";
+  const rawKey = normalizeKey(raw);
+  const hit = tables.find((table) => {
+    const candidates = [
+      table?.id,
+      table?.name,
+      table?._entityName,
+      table?.logical_name,
+    ].map(normalizeKey).filter(Boolean);
+    return candidates.includes(rawKey);
+  });
+  return canonicalTableName(hit) || raw;
+}
+
+function relationshipTableOption(table) {
+  const canonical = canonicalTableName(table);
+  const displayName = String(table?.name || table?._entityName || table?.id || "").trim();
+  return {
+    id: canonical || displayName,
+    nodeId: table?.id,
+    name: displayName || canonical,
+    _entityName: canonical || displayName,
+    columns: (table?.columns || []).map((column) => ({
+      name: column.name,
+      pk: column.pk,
+      primary_key: column.primary_key,
+    })),
+  };
+}
+
+export function buildRelationshipEditorPayload(rel, tables = [], modelKind = "") {
   if (!rel) return null;
-  const conceptual = !rel.from?.col && !rel.to?.col;
   const entityList = Array.isArray(tables) ? tables : [];
+  const layer = normalizeKey(modelKind || rel.modelKind || rel.layer);
+  const entityLevel = !rel.from?.col && !rel.to?.col;
+  const inferredKind = layer || (entityLevel ? "conceptual" : undefined);
   return {
     mode: "edit",
     relationship: rel,
-    modelKind: conceptual ? "conceptual" : undefined,
-    fromEntity: rel._fromEntityName || rel.from?.table || "",
+    modelKind: inferredKind,
+    fromEntity: resolveEndpointEntity(rel._fromEntityName || rel.from?.table || "", entityList),
     fromColumn: rel.from?.col || "",
-    toEntity: rel._toEntityName || rel.to?.table || "",
+    toEntity: resolveEndpointEntity(rel._toEntityName || rel.to?.table || "", entityList),
     toColumn: rel.to?.col || "",
-    conceptualLevel: conceptual,
-    tables: entityList.map((table) => ({
-      id: table.name || table.id,
-      name: table.name || table.id,
-      columns: (table.columns || []).map((column) => ({ name: column.name })),
-    })),
+    conceptualLevel: inferredKind === "conceptual" || (entityLevel && !layer),
+    tables: entityList.map(relationshipTableOption),
     name: rel.name || "",
     cardinality: relationCardinalityValue(rel),
     identifying: !!rel.identifying,
@@ -43,7 +81,7 @@ export function buildRelationshipEditorPayload(rel, tables = []) {
   };
 }
 
-export function openRelationshipEditor(openModal, rel, tables = []) {
+export function openRelationshipEditor(openModal, rel, tables = [], modelKind = "") {
   if (!openModal || !rel) return;
-  openModal("newRelationship", buildRelationshipEditorPayload(rel, tables));
+  openModal("newRelationship", buildRelationshipEditorPayload(rel, tables, modelKind));
 }

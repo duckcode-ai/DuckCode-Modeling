@@ -73,7 +73,7 @@ function ActionPicker({ label, value, onChange }) {
 }
 
 /* Single-relationship inspector (selection is a relationship) */
-function RelationshipInspector({ rel, tables }) {
+function RelationshipInspector({ rel, tables, modelKind }) {
   const openModal = useUiStore((s) => s.openModal);
   const kind = relKindLabel(rel);
   const conceptual = !rel?.from?.col && !rel?.to?.col;
@@ -105,7 +105,7 @@ function RelationshipInspector({ rel, tables }) {
           <div className="panel-btn-row">
             <button
               className="panel-btn"
-              onClick={() => openRelationshipEditor(openModal, rel, tables)}
+              onClick={() => openRelationshipEditor(openModal, rel, tables, modelKind)}
               title="Edit relationship"
             >
               <Pencil size={12} /> Edit
@@ -292,8 +292,8 @@ function TableRelationships({ table, relationships, onSelect, tables }) {
   );
 }
 
-export default function RelationsView({ table, rel, relationships, onSelect, tables }) {
-  if (rel) return <RelationshipInspector rel={rel} tables={tables} />;
+export default function RelationsView({ table, rel, relationships, onSelect, tables, modelKind }) {
+  if (rel) return <RelationshipInspector rel={rel} tables={tables} modelKind={modelKind} />;
   if (table) return <TableRelationships table={table} relationships={relationships} onSelect={onSelect} tables={tables} />;
   return (
     <PanelEmpty

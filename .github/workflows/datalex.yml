@@ -32,6 +32,7 @@ jobs:
             [ -z "$root" ] && continue
             echo "::group::DataLex project: $root"
             ./datalex datalex validate "$root"
+            ./datalex datalex mesh check "$root" --strict
             if [ "${{ github.event_name }}" = "pull_request" ]; then
               base_ref="origin/${{ github.base_ref }}"
               git fetch origin "${{ github.base_ref }}" --depth=1 || true

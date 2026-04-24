@@ -3,6 +3,7 @@
 Subcommands:
   migrate to-datalex-layout <v3-model.yaml>   split legacy v3 model into DataLex tree
   validate <project-root>                     load + validate a DataLex project
+  mesh check <project-root>                   check dbt mesh Interface standards
   emit ddl <project-root> --dialect ...       emit per-dialect DDL for every physical entity
   diff <old-root> <new-root>                  semantic diff with explicit rename tracking
   info <project-root>                         print a summary (entity/term/domain counts)
@@ -25,6 +26,7 @@ import datalex_core.dialects  # noqa: F401  — side-effect registers built-in d
 from datalex_core.dialects.registry import get_dialect, known_dialects
 from datalex_core.dbt import emit_dbt, import_manifest, write_import_result
 from datalex_core.dbt.sync import sync_dbt_project, report_to_json
+from datalex_core.mesh import mesh_issues, mesh_report
 from datalex_core.packages import PackageResolveError, load_imports_for, resolve_imports
 
 
@@ -75,6 +77,26 @@ def register_datalex(parent_sub: argparse._SubParsersAction) -> None:
         help="Do not exit non-zero on errors; just print them",
     )
     validate_parser.set_defaults(func=_cmd_validate)
+
+    # mesh
+    mesh_parser = dsub.add_parser("mesh", help="dbt mesh Interface standards")
+    mesh_sub = mesh_parser.add_subparsers(dest="mesh_command", required=True)
+    mesh_check = mesh_sub.add_parser(
+        "check",
+        help="Check DataLex/dbt Interface metadata and readiness standards",
+    )
+    mesh_check.add_argument("root", help="Project root or dbt repo root")
+    mesh_check.add_argument(
+        "--strict",
+        action="store_true",
+        help="Treat Interface readiness blockers as errors for CI",
+    )
+    mesh_check.add_argument(
+        "--output-json",
+        action="store_true",
+        help="Emit machine-readable results for CI annotations",
+    )
+    mesh_check.set_defaults(func=_cmd_mesh_check)
 
     # emit ddl
     emit_parser = dsub.add_parser("emit", help="Emit artifacts from a DataLex project")
@@ -315,6 +337,49 @@ def _cmd_validate(args: argparse.Namespace) -> int:
             for err in project.errors.errors:
                 print(f"  {err}")
     return 1 if project.errors.has_errors() else 0
+
+
+def _cmd_mesh_check(args: argparse.Namespace) -> int:
+    try:
+        project = load_project(args.root, strict=False)
+    except DataLexLoadError as e:
+        if args.output_json:
+            print(json.dumps({"errors": [err.to_dict() for err in e.errors]}, indent=2))
+        else:
+            for err in e.errors:
+                print(str(err), file=sys.stderr)
+        return 1
+
+    report = mesh_report(project, strict=args.strict)
+    issues = mesh_issues(project, strict=args.strict)
+    load_errors = project.errors.to_list()
+
+    if args.output_json:
+        payload = {
+            **report,
+            "load_diagnostics": load_errors,
+        }
+        print(json.dumps(payload, indent=2))
+    else:
+        print(f"DataLex mesh Interface check: {project.root}")
+        print(f"  strict: {'yes' if args.strict else 'no'}")
+        if not issues:
+            print("  interfaces: ready")
+        else:
+            print(f"  diagnostics: {len(issues)}")
+            for issue in issues:
+                print(f"  [{issue.severity.upper()}] {issue.code} {issue.path}: {issue.message}")
+        if load_errors:
+            print(f"\n  load diagnostics: {len(load_errors)}")
+            for err in load_errors:
+                sev = str(err.get("severity") or "error").upper()
+                code = err.get("code") or "LOAD"
+                path = err.get("location", {}).get("file") or project.root
+                msg = err.get("message") or ""
+                print(f"  [{sev}] {code} {path}: {msg}")
+
+    has_mesh_errors = any(issue.severity == "error" for issue in issues)
+    return 1 if has_mesh_errors or project.errors.has_errors() else 0
 
 
 def _cmd_emit_ddl(args: argparse.Namespace) -> int:

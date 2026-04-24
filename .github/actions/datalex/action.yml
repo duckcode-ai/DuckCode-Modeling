@@ -30,6 +30,12 @@ inputs:
       `dbt-out-dir`).
     required: false
     default: "false"
+  mesh-check:
+    description: >-
+      If "true", run `datalex datalex mesh check --strict` and emit GitHub
+      annotations for Interface standards failures.
+    required: false
+    default: "false"
   python-version:
     description: "Python version to use."
     required: false
@@ -88,6 +94,19 @@ runs:
           flags="--non-strict"
         fi
         ${{ steps.dm.outputs.cmd }} datalex validate "${{ inputs.root }}" $flags
+
+    - name: Mesh Interface standards
+      if: ${{ inputs.mesh-check == 'true' }}
+      shell: bash
+      run: |
+        set -euo pipefail
+        tmp="$(mktemp)"
+        if ! ${{ steps.dm.outputs.cmd }} datalex mesh check "${{ inputs.root }}" --strict --output-json > "$tmp"; then
+          python3 -c 'import json,sys; p=json.load(open(sys.argv[1])); [print("::error file={},title={}::{}".format(i.get("path") or ".", i.get("code") or "MESH_INTERFACE", i.get("message") or i.get("code"))) for i in p.get("issues", []) if i.get("severity")=="error"]' "$tmp"
+          cat "$tmp"
+          exit 1
+        fi
+        cat "$tmp"
 
     - name: Breaking-change diff against base-ref
       if: ${{ inputs.base-ref != '' }}
