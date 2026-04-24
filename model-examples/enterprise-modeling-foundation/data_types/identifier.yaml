@@ -1,0 +1,11 @@
+kind: data_type
+name: identifier
+description: Stable warehouse identifier.
+base: bigint
+precision: none
+physical:
+  postgres:
+    type: bigint
+  snowflake:
+    type: number(38,0)
+

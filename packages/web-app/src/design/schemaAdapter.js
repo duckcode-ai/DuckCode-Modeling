@@ -109,19 +109,20 @@ function cardinalityToEnds(cardinality) {
 
 function parseEndpoint(value) {
   const s = String(value || "");
-  if (!s.includes(".")) return { table: s.toLowerCase(), col: "" };
+  if (!s.includes(".")) return { table: s.toLowerCase(), col: undefined };
   const [table, col] = s.split(".");
-  return { table: (table || "").toLowerCase(), col: col || "" };
+  return { table: (table || "").toLowerCase(), col: col ? String(col).toLowerCase() : undefined };
 }
 
 function parseRelationshipSide(value) {
   if (typeof value === "string") return parseEndpoint(value);
   if (value && typeof value === "object") {
     const table = String(value.table || value.entity || "").toLowerCase();
-    const col = String(value.col || value.field || value.column || "");
+    const rawCol = value.col || value.field || value.column;
+    const col = rawCol ? String(rawCol).toLowerCase() : undefined;
     return { table, col };
   }
-  return { table: "", col: "id" };
+  return { table: "", col: undefined };
 }
 
 function inferSchemaModelKind(doc) {
@@ -739,6 +740,12 @@ function dataLexColumnToField(c) {
   if (c.default != null) out.default = c.default;
   if (c.description) out.description = String(c.description);
   if (c.foreign_key && typeof c.foreign_key === "object") out.foreign_key = c.foreign_key;
+  else if (c.references && typeof c.references === "object") {
+    out.foreign_key = {
+      entity: c.references.entity || c.references.table || c.references.references,
+      field: c.references.field || c.references.column,
+    };
+  }
   else if (typeof c.fk === "string") out.fk = c.fk;
   // Fold dbt-style `tests: [{relationships: {to, field}}]` into a synthetic
   // foreign_key so FK edges render for imported models without us needing
@@ -764,12 +771,17 @@ function dataLexModelDocToEntity(doc) {
   if (!name) return null;
   const cols = Array.isArray(doc?.columns) ? doc.columns : [];
   const fields = cols.map(dataLexColumnToField).filter(Boolean);
+  const layer = String(doc?.layer || "").toLowerCase();
   const entity = {
     name,
-    type: String(doc?.type || "table"),
+    type: layer === "conceptual" ? "concept" : (layer === "logical" ? "logical_entity" : String(doc?.type || "table")),
     description: doc?.description ? String(doc.description) : "",
     fields,
   };
+  if (doc?.logical_name) entity.logical_name = String(doc.logical_name);
+  if (doc?.physical_name) entity.physical_name = String(doc.physical_name);
+  if (doc?.owner) entity.owner = String(doc.owner);
+  if (doc?.domain) entity.subject_area = String(doc.domain);
   if (doc?.display && typeof doc.display === "object") entity.display = doc.display;
   if (Array.isArray(doc?.tags)) entity.tags = doc.tags;
   if (Array.isArray(doc?.terms)) entity.terms = doc.terms;
@@ -1096,9 +1108,9 @@ export function adaptDiagramYaml(yamlText, projectFiles) {
   const diagramRels = Array.isArray(diagram.relationships) ? diagram.relationships : [];
   diagramRels.forEach((r, index) => {
     const fromEnt = String(r?.from?.entity || r?.from?.table || "").toLowerCase();
-    const fromCol = String(r?.from?.field || r?.from?.col || "").toLowerCase();
+    const fromCol = r?.from?.field || r?.from?.col ? String(r?.from?.field || r?.from?.col).toLowerCase() : undefined;
     const toEnt = String(r?.to?.entity || r?.to?.table || "").toLowerCase();
-    const toCol = String(r?.to?.field || r?.to?.col || "").toLowerCase();
+    const toCol = r?.to?.field || r?.to?.col ? String(r?.to?.field || r?.to?.col).toLowerCase() : undefined;
     if (!fromEnt || !toEnt) return;
     const fromId = resolveDiagramNodeId(fromEnt);
     const toId = resolveDiagramNodeId(toEnt);

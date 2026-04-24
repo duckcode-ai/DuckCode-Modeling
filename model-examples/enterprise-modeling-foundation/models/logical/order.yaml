@@ -1,0 +1,24 @@
+kind: entity
+layer: logical
+name: order
+logical_name: Order
+description: Customer order with one row per commercial transaction.
+owner: sales_ops
+domain: sales
+candidate_keys:
+  - [order_id]
+implements: [order]
+columns:
+  - name: order_id
+    type: identifier
+    nullable: false
+    description: Stable order identifier.
+  - name: customer_id
+    type: identifier
+    nullable: false
+    description: Customer that placed the order.
+  - name: order_amount
+    type: money
+    nullable: false
+    description: Total order value.
+

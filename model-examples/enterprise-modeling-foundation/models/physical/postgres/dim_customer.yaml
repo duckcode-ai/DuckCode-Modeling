@@ -1,0 +1,28 @@
+kind: entity
+layer: physical
+dialect: postgres
+name: dim_customer
+logical: customer
+physical_name: dim_customer
+description: Physical customer dimension generated from the logical customer model.
+owner: growth
+domain: sales
+columns:
+  - name: customer_id
+    type: bigint
+    nullable: false
+    primary_key: true
+    logical: customer.customer_id
+  - name: email
+    type: varchar(320)
+    nullable: false
+    logical: customer.email
+  - name: customer_name
+    type: varchar(255)
+    nullable: false
+    logical: customer.customer_name
+indexes:
+  - name: dim_customer_email_idx
+    columns: [email]
+    unique: true
+

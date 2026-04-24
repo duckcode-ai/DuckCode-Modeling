@@ -8,6 +8,7 @@
   "properties": {
     "kind": { "const": "diagram" },
     "name": { "type": "string", "pattern": "^[a-z][a-z0-9_]*$" },
+    "layer": { "type": "string", "enum": ["conceptual", "logical", "physical"] },
     "title": { "type": "string" },
     "description": { "type": "string" },
     "entities": {
@@ -49,7 +50,7 @@
           "name": { "type": "string" },
           "from": {
             "type": "object",
-            "required": ["entity", "field"],
+            "required": ["entity"],
             "additionalProperties": false,
             "properties": {
               "entity": { "type": "string" },
@@ -58,7 +59,7 @@
           },
           "to": {
             "type": "object",
-            "required": ["entity", "field"],
+            "required": ["entity"],
             "additionalProperties": false,
             "properties": {
               "entity": { "type": "string" },
@@ -70,7 +71,12 @@
             "enum": ["one_to_one", "one_to_many", "many_to_one", "many_to_many"]
           },
           "identifying": { "type": "boolean" },
-          "label": { "type": "string" }
+          "optional": { "type": "boolean" },
+          "label": { "type": "string" },
+          "verb": { "type": "string" },
+          "description": { "type": "string" },
+          "on_delete": { "type": "string" },
+          "on_update": { "type": "string" }
         }
       }
     },

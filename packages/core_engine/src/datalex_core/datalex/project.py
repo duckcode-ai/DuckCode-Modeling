@@ -34,6 +34,9 @@ class DataLexProject:
     policies: Dict[str, Dict[str, Any]]
     snippets: Dict[str, Dict[str, Any]]
     diagrams: Dict[str, Dict[str, Any]] = field(default_factory=dict)
+    relationships: Dict[str, Dict[str, Any]] = field(default_factory=dict)
+    data_types: Dict[str, Dict[str, Any]] = field(default_factory=dict)
+    semantic_models: Dict[str, Dict[str, Any]] = field(default_factory=dict)
     file_of: Dict[Tuple[str, str], str] = field(default_factory=dict)
     errors: DataLexErrorBag = field(default_factory=DataLexErrorBag)
     # Phase C: imported packages. Each key is the package's alias; value is a
@@ -90,6 +93,9 @@ class DataLexProject:
         self._check_logical_backrefs()
         self._check_term_refs()
         self._check_reference_targets()
+        self._check_model_relationships()
+        self._check_type_mappings()
+        self._check_semantic_model_refs()
 
     def _expand_snippets(self) -> None:
         """Inline `use: <snippet>` on columns with snippet.apply content.
@@ -184,6 +190,79 @@ class DataLexProject:
                         )
                     )
 
+    def _check_model_relationships(self) -> None:
+        for rel in self.relationships.values():
+            layer = rel.get("layer", "physical")
+            for side in ("from", "to"):
+                endpoint = rel.get(side) or {}
+                if not isinstance(endpoint, dict):
+                    continue
+                entity_name = endpoint.get("entity")
+                column_name = endpoint.get("column")
+                if not entity_name:
+                    continue
+                ent = self.entities.get(f"{layer}:{entity_name}")
+                if ent is None:
+                    self.errors.add(
+                        DataLexError(
+                            code="REL_TARGET_MISSING",
+                            message=f"Relationship '{rel.get('name')}' references missing {side} entity '{entity_name}' at layer '{layer}'",
+                            location=self._loc_for("relationship", rel),
+                            suggested_fix="Create the referenced entity at the same layer or update the relationship endpoint.",
+                        )
+                    )
+                    continue
+                if column_name and layer != "conceptual":
+                    columns = {c.get("name") for c in ent.get("columns", []) or []}
+                    if column_name not in columns:
+                        self.errors.add(
+                            DataLexError(
+                                code="REL_COLUMN_MISSING",
+                                message=f"Relationship '{rel.get('name')}' references missing {side} column '{entity_name}.{column_name}'",
+                                location=self._loc_for("relationship", rel),
+                                suggested_fix="Choose an existing column or remove the column-level endpoint.",
+                            )
+                        )
+
+    def _check_type_mappings(self) -> None:
+        manifest_dialects = set((self.manifest or {}).get("dialects") or [])
+        default_dialect = (self.manifest or {}).get("default_dialect")
+        if default_dialect:
+            manifest_dialects.add(default_dialect)
+        if not manifest_dialects:
+            return
+        for type_name, data_type in self.data_types.items():
+            physical = data_type.get("physical") or {}
+            missing = sorted(d for d in manifest_dialects if d not in physical)
+            if missing:
+                self.errors.add(
+                    DataLexError(
+                        code="DATA_TYPE_MAPPING_MISSING",
+                        severity="warn",
+                        message=f"Logical data type '{type_name}' has no physical mapping for: {', '.join(missing)}",
+                        location=self._loc_for("data_type", data_type),
+                        suggested_fix="Add physical mappings for every enabled dialect or remove unused dialects from datalex.yaml.",
+                    )
+                )
+
+    def _check_semantic_model_refs(self) -> None:
+        entity_names = {ent.get("name") for ent in self.entities.values()}
+        model_names = set(self.models.keys())
+        for semantic_model in self.semantic_models.values():
+            ref = semantic_model.get("entity")
+            if not ref:
+                continue
+            if ref not in entity_names and ref not in model_names:
+                self.errors.add(
+                    DataLexError(
+                        code="SEMANTIC_ENTITY_MISSING",
+                        severity="warn",
+                        message=f"Semantic model '{semantic_model.get('name')}' references missing entity/model '{ref}'",
+                        location=self._loc_for("semantic_model", semantic_model),
+                        suggested_fix="Point entity: at a loaded DataLex entity or dbt model.",
+                    )
+                )
+
     def _loc_for(self, kind: str, obj: Dict[str, Any]) -> SourceLocation:
         name = obj.get("name", "")
         layer = obj.get("layer", "physical") if kind == "entity" else ""
@@ -204,6 +283,9 @@ class DataLexProject:
             "policies": self.policies,
             "snippets": self.snippets,
             "diagrams": self.diagrams,
+            "relationships": self.relationships,
+            "data_types": self.data_types,
+            "semantic_models": self.semantic_models,
             "imports": {
                 alias: {
                     "root": str(sub.root),

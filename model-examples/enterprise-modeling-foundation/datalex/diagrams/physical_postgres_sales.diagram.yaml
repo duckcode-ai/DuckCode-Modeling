@@ -1,0 +1,14 @@
+kind: diagram
+name: physical_postgres_sales
+title: Sales Physical Model - Postgres
+layer: physical
+entities:
+  - file: models/physical/postgres/dim_customer.yaml
+    entity: dim_customer
+    x: 80
+    y: 100
+  - file: models/physical/postgres/fct_order.yaml
+    entity: fct_order
+    x: 480
+    y: 100
+

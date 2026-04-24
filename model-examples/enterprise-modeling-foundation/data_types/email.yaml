@@ -1,0 +1,11 @@
+kind: data_type
+name: email
+description: Email address logical type.
+base: string
+precision: any
+physical:
+  postgres:
+    type: varchar(320)
+  snowflake:
+    type: varchar(320)
+

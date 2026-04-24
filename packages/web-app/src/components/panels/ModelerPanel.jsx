@@ -1,12 +1,11 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { Boxes, ArrowRightLeft, Shapes, Layers3, Wand2, Sparkles, MousePointerClick, PencilLine } from "lucide-react";
+import { Boxes, ArrowRightLeft, Shapes, Layers3, Wand2, Plus, Info, KeyRound, Database } from "lucide-react";
 import useWorkspaceStore from "../../stores/workspaceStore";
 import useDiagramStore from "../../stores/diagramStore";
 import useUiStore from "../../stores/uiStore";
 import useAuthStore from "../../stores/authStore";
 import { addEntityWithOptions, addRelationship } from "../../lib/yamlRoundTrip";
-import { transformActiveModel } from "../../lib/api";
-import { PanelFrame, PanelSection, PanelEmpty, PanelCard, StatusPill } from "./PanelFrame";
+import { PanelFrame, PanelSection, PanelEmpty } from "./PanelFrame";
 
 const VIEW_MODES = [
   { id: "conceptual", label: "Conceptual", description: "Business concepts and high-level relationships." },
@@ -47,39 +46,21 @@ function allowedTypes(viewMode) {
   return ["table", "view", "materialized_view", "fact_table", "dimension_table", "bridge_table", "hub", "link", "satellite"];
 }
 
-function sanitizePathSegment(value, fallback) {
-  const cleaned = String(value || "")
-    .trim()
-    .toLowerCase()
-    .replace(/[^a-z0-9._-]+/g, "-")
-    .replace(/-+/g, "-")
-    .replace(/^[-.]+|[-.]+$/g, "");
-  return cleaned || fallback;
-}
-
-function layeredModelPath({ layer, domain, fileName, dialect }) {
-  const safeLayer = sanitizePathSegment(layer, "logical");
-  const safeDomain = sanitizePathSegment(domain, "shared");
-  const safeName = sanitizePathSegment(fileName, "untitled");
-  if (safeLayer === "physical") {
-    return `models/physical/${sanitizePathSegment(dialect, "postgres")}/${safeDomain}/${safeName}.model.yaml`;
-  }
-  return `models/${safeLayer}/${safeDomain}/${safeName}.model.yaml`;
-}
-
 export default function ModelerPanel() {
-  const { activeFile, activeFileContent, updateContent, createNewFile } = useWorkspaceStore();
+  const { activeFile, activeFileContent, updateContent } = useWorkspaceStore();
   const {
     model,
+    selectedEntity,
+    selectEntity,
     modelingViewMode,
     setModelingViewMode,
     requestLayoutRefresh,
   } = useDiagramStore();
-  const { addToast, setRightPanelOpen, setRightPanelTab } = useUiStore();
+  const { addToast, openModal } = useUiStore();
   const { canEdit: canEditFn } = useAuthStore();
   const canEdit = canEditFn();
 
-  const modelKind = model?.model?.kind || "physical";
+  const modelKind = model?.model?.layer || model?.model?.kind || "physical";
   const entities = Array.isArray(model?.entities) ? model.entities : [];
   const subjectAreas = Array.isArray(model?.subject_areas) ? model.subject_areas : [];
   const entityOptions = useMemo(() => allowedTypes(modelingViewMode), [modelingViewMode]);
@@ -94,7 +75,6 @@ export default function ModelerPanel() {
   const [toEntity, setToEntity] = useState("");
   const [toField, setToField] = useState("");
   const [cardinality, setCardinality] = useState("one_to_many");
-  const [promoting, setPromoting] = useState(false);
 
   useEffect(() => {
     const nextType = defaultEntityType(modelingViewMode, modelKind);
@@ -112,17 +92,6 @@ export default function ModelerPanel() {
 
   const fromEntityFields = entities.find((entity) => entity.name === fromEntity)?.fields || [];
   const toEntityFields = entities.find((entity) => entity.name === toEntity)?.fields || [];
-  const conceptualMode = modelingViewMode === "conceptual" || modelKind === "conceptual";
-  const selectedEntity = entities.find((entity) => entity.name === fromEntity) || entities[0] || null;
-  const panelTitle = conceptualMode ? "Concept Studio" : "Modeler";
-  const panelSubtitle = conceptualMode
-    ? `${entities.length} ${entities.length === 1 ? "concept" : "concepts"} · business-first`
-    : `${entities.length} ${entities.length === 1 ? "entity" : "entities"} · ${modelKind}`;
-
-  const focusConceptDetails = React.useCallback(() => {
-    setRightPanelOpen(true);
-    setRightPanelTab("DETAILS");
-  }, [setRightPanelOpen, setRightPanelTab]);
 
   useEffect(() => {
     if (!fromEntityFields.some((field) => field.name === fromField)) {
@@ -148,6 +117,126 @@ export default function ModelerPanel() {
     );
   }
 
+  const activeIsDiagram = /\.diagram\.ya?ml$/i.test(activeFile?.name || activeFile?.path || "");
+
+  if (modelKind === "conceptual") {
+    const relationshipCount = Array.isArray(model?.relationships) ? model.relationships.length : 0;
+    return (
+      <PanelFrame
+        icon={<Wand2 size={14} />}
+        eyebrow="Conceptual Studio"
+        title="Business Model"
+        subtitle={`${entities.length} ${entities.length === 1 ? "concept" : "concepts"} · ${relationshipCount} relationships`}
+      >
+        <PanelSection title="Process" icon={<Layers3 size={11} />}>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 8 }}>
+            {[
+              ["1", "Define", "Capture business concepts, owners, domains, and definitions."],
+              ["2", "Relate", "Connect concepts with business verbs and cardinality."],
+              ["3", "Promote", "Use the logical layer for attributes, keys, and type intent."],
+            ].map(([n, title, text]) => (
+              <div key={n} style={{ border: "1px solid var(--border-default)", borderRadius: 8, padding: 10, background: "var(--bg-1)" }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11, fontWeight: 700, color: "var(--text-primary)" }}>
+                  <span style={{ width: 18, height: 18, borderRadius: 999, display: "inline-grid", placeItems: "center", background: "rgba(22,163,74,0.14)", color: "#22c55e", fontFamily: "var(--font-mono)" }}>{n}</span>
+                  {title}
+                </div>
+                <div style={{ marginTop: 6, fontSize: 10.5, lineHeight: 1.4, color: "var(--text-tertiary)" }}>{text}</div>
+              </div>
+            ))}
+          </div>
+        </PanelSection>
+
+        <PanelSection title="Actions" icon={<Plus size={11} />}>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            <button
+              className="panel-btn primary"
+              disabled={!canEdit}
+              onClick={() => openModal("newConcept")}
+            >
+              <Plus size={12} /> Add Concept
+            </button>
+            <button
+              className="panel-btn"
+              disabled={!canEdit || entities.length < 2}
+              onClick={() => openModal("newRelationship", {
+                modelKind: "conceptual",
+                conceptualLevel: true,
+                tables: entities.map((entity) => ({ id: entity.name, name: entity.name, columns: [] })),
+                fromEntity: entities[0]?.name || "",
+                toEntity: entities[1]?.name || "",
+              })}
+            >
+              <ArrowRightLeft size={12} /> Add Relationship
+            </button>
+            {!activeIsDiagram && (
+              <button
+                className="panel-btn"
+                disabled={!canEdit}
+                onClick={() => openModal("newFile")}
+              >
+                <Boxes size={12} /> New Layer Asset
+              </button>
+            )}
+          </div>
+        </PanelSection>
+
+        <PanelSection title="Selected Concept" icon={<Info size={11} />}>
+          {selectedEntity ? (
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(0, 1fr))", gap: 8 }}>
+              {[
+                ["Name", selectedEntity.logical_name || selectedEntity.name],
+                ["Domain", selectedEntity.domain || selectedEntity.subject_area || "unassigned"],
+                ["Owner", selectedEntity.owner || "unassigned"],
+                ["Tags", (selectedEntity.tags || []).join(", ") || "none"],
+              ].map(([label, value]) => (
+                <div key={label} style={{ border: "1px solid var(--border-default)", borderRadius: 8, padding: "8px 10px", background: "var(--bg-1)", minWidth: 0 }}>
+                  <div style={{ fontSize: 10, textTransform: "uppercase", letterSpacing: "0.08em", color: "var(--text-tertiary)" }}>{label}</div>
+                  <div style={{ marginTop: 3, fontSize: 12, color: "var(--text-primary)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{value}</div>
+                </div>
+              ))}
+              <div style={{ gridColumn: "1 / -1", border: "1px solid var(--border-default)", borderRadius: 8, padding: "8px 10px", background: "var(--bg-1)" }}>
+                <div style={{ fontSize: 10, textTransform: "uppercase", letterSpacing: "0.08em", color: "var(--text-tertiary)" }}>Definition</div>
+                <div style={{ marginTop: 3, fontSize: 12, lineHeight: 1.45, color: "var(--text-secondary)" }}>
+                  {selectedEntity.description || "No business definition yet. Open Details to add one."}
+                </div>
+              </div>
+            </div>
+          ) : (
+            <PanelEmpty icon={Boxes} title="No concept selected" description="Select a concept on the canvas to inspect its business details here." />
+          )}
+        </PanelSection>
+
+        <PanelSection title="Concept Inventory" icon={<Boxes size={11} />}>
+          {entities.length ? (
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(180px, 1fr))", gap: 8 }}>
+              {entities.map((entity) => (
+                <button
+                  key={entity.name}
+                  type="button"
+                  onClick={() => selectEntity(entity.name)}
+                  style={{
+                    textAlign: "left",
+                    border: `1px solid ${selectedEntity?.name === entity.name ? "#22c55e" : "var(--border-default)"}`,
+                    borderRadius: 8,
+                    padding: 10,
+                    background: selectedEntity?.name === entity.name ? "rgba(22,163,74,0.10)" : "var(--bg-1)",
+                    color: "var(--text-primary)",
+                    cursor: "pointer",
+                  }}
+                >
+                  <div style={{ fontSize: 12, fontWeight: 700 }}>{entity.logical_name || entity.name}</div>
+                  <div style={{ marginTop: 4, fontSize: 10.5, color: "var(--text-tertiary)" }}>{entity.domain || entity.subject_area || "No domain"}</div>
+                </button>
+              ))}
+            </div>
+          ) : (
+            <PanelEmpty icon={Boxes} title="No concepts" description="Use Add Concept to start the conceptual model." />
+          )}
+        </PanelSection>
+      </PanelFrame>
+    );
+  }
+
   const handleCreateEntity = () => {
     if (!entityName.trim()) {
       addToast?.({ type: "error", message: "Entity name is required." });
@@ -169,18 +258,12 @@ export default function ModelerPanel() {
   };
 
   const handleCreateRelationship = () => {
-    if (!fromEntity || !toEntity || (!conceptualMode && (!fromField || !toField))) {
+    if (!fromEntity || !fromField || !toEntity || !toField) {
       addToast?.({ type: "error", message: "Choose both relationship endpoints." });
       return;
     }
     const proposedName = relationshipName.trim() || `${fromEntity}_${toEntity}`.replace(/([a-z0-9])([A-Z])/g, "$1_$2").toLowerCase();
-    const result = addRelationship(
-      activeFileContent,
-      proposedName,
-      conceptualMode ? { entity: fromEntity } : `${fromEntity}.${fromField}`,
-      conceptualMode ? { entity: toEntity } : `${toEntity}.${toField}`,
-      cardinality,
-    );
+    const result = addRelationship(activeFileContent, proposedName, `${fromEntity}.${fromField}`, `${toEntity}.${toField}`, cardinality);
     if (result.error) {
       addToast?.({ type: "error", message: result.error });
       return;
@@ -191,51 +274,12 @@ export default function ModelerPanel() {
     addToast?.({ type: "success", message: `Added relationship ${proposedName}.` });
   };
 
-  const handlePromote = async (targetLayer) => {
-    if (!activeFileContent) {
-      addToast?.({ type: "error", message: "Open a model file first." });
-      return;
-    }
-    const transform =
-      modelKind === "conceptual" && targetLayer === "logical"
-        ? "conceptual-to-logical"
-        : modelKind === "logical" && targetLayer === "physical"
-          ? "logical-to-physical"
-          : modelKind === "conceptual" && targetLayer === "physical"
-            ? "conceptual-to-physical"
-            : "";
-    if (!transform) {
-      addToast?.({ type: "info", message: `No promotion path from ${modelKind} to ${targetLayer}.` });
-      return;
-    }
-    setPromoting(true);
-    try {
-      const response = await transformActiveModel({
-        modelContent: activeFileContent,
-        modelPath: activeFile?.fullPath || "",
-        transform,
-      });
-      const targetPath = layeredModelPath({
-        layer: targetLayer,
-        domain: model?.model?.domain || model?.domain || "shared",
-        dialect: targetLayer === "physical" ? "postgres" : undefined,
-        fileName: `${model?.model?.name || model?.name || "untitled"}_${targetLayer}`,
-      });
-      await createNewFile(targetPath, response?.transformedYaml || "");
-      addToast?.({ type: "success", message: `Created ${targetLayer} model at ${targetPath}.` });
-    } catch (err) {
-      addToast?.({ type: "error", message: err?.message || String(err) });
-    } finally {
-      setPromoting(false);
-    }
-  };
-
   return (
     <PanelFrame
       icon={<Wand2 size={14} />}
       eyebrow="Workspace"
-      title={panelTitle}
-      subtitle={panelSubtitle}
+      title="Modeler"
+      subtitle={`${entities.length} ${entities.length === 1 ? "entity" : "entities"} · ${modelKind}`}
     >
       <PanelSection title="Model Views" icon={<Layers3 size={11} />}>
         <div className="grid grid-cols-3 gap-2">
@@ -259,63 +303,34 @@ export default function ModelerPanel() {
         </div>
       </PanelSection>
 
-      {conceptualMode && (
-        <PanelSection
-          title="Start Here"
-          icon={<Sparkles size={11} />}
-          description="Conceptual modeling should feel like business architecture, not table design. Use this flow to create boxes, connect them, and then fill in meaning on the right."
-        >
-          <div className="grid gap-2 md:grid-cols-3">
-            <PanelCard
-              tone="accent"
-              dense
-              icon={<Boxes size={12} />}
-              eyebrow="Step 1"
-              title="Add Concept Box"
-              subtitle="Create a new business concept on the canvas."
-            >
-              <div className="flex flex-wrap gap-2">
-                <StatusPill tone="accent">Name</StatusPill>
-                <StatusPill tone="neutral">Type</StatusPill>
-                <StatusPill tone="neutral">Subject area</StatusPill>
-              </div>
-            </PanelCard>
-            <PanelCard
-              tone="info"
-              dense
-              icon={<ArrowRightLeft size={12} />}
-              eyebrow="Step 2"
-              title="Create Relationship"
-              subtitle="Draw the business link and set the relationship meaning."
-            >
-              <div className="flex flex-wrap gap-2">
-                <StatusPill tone="info">Verb</StatusPill>
-                <StatusPill tone="neutral">Type</StatusPill>
-                <StatusPill tone="neutral">1:1 / 1:N</StatusPill>
-              </div>
-            </PanelCard>
-            <PanelCard
-              tone="success"
-              dense
-              icon={<PencilLine size={12} />}
-              eyebrow="Step 3"
-              title="Edit Meaning"
-              subtitle="Select a concept and complete the business metadata."
-              actions={
-                <button
-                  onClick={focusConceptDetails}
-                  className="px-2 py-1 rounded-md text-[10px] font-medium border border-border-primary text-text-secondary hover:bg-bg-hover transition-colors"
-                >
-                  Open Details
-                </button>
-              }
-            >
-              <div className="flex flex-wrap gap-2">
-                <StatusPill tone="success">Owner</StatusPill>
-                <StatusPill tone="neutral">Description</StatusPill>
-                <StatusPill tone="neutral">Terms</StatusPill>
-              </div>
-            </PanelCard>
+      {modelKind === "logical" && (
+        <PanelSection title="Logical Readiness" icon={<KeyRound size={11} />}>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 8 }}>
+            <div className="rounded-lg bg-bg-primary border border-border-primary px-2 py-2 text-[10px] text-text-muted leading-snug">
+              Entities: {entities.length}
+            </div>
+            <div className="rounded-lg bg-bg-primary border border-border-primary px-2 py-2 text-[10px] text-text-muted leading-snug">
+              Candidate keys: {entities.reduce((n, e) => n + (Array.isArray(e.candidate_keys) ? e.candidate_keys.length : 0), 0)}
+            </div>
+            <div className="rounded-lg bg-bg-primary border border-border-primary px-2 py-2 text-[10px] text-text-muted leading-snug">
+              Business keys: {entities.reduce((n, e) => n + (Array.isArray(e.business_keys) ? e.business_keys.length : 0), 0)}
+            </div>
+          </div>
+        </PanelSection>
+      )}
+
+      {modelKind === "physical" && (
+        <PanelSection title="Physical Readiness" icon={<Database size={11} />}>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 8 }}>
+            <div className="rounded-lg bg-bg-primary border border-border-primary px-2 py-2 text-[10px] text-text-muted leading-snug">
+              Tables: {entities.length}
+            </div>
+            <div className="rounded-lg bg-bg-primary border border-border-primary px-2 py-2 text-[10px] text-text-muted leading-snug">
+              Columns: {entities.reduce((n, e) => n + ((e.fields || []).length), 0)}
+            </div>
+            <div className="rounded-lg bg-bg-primary border border-border-primary px-2 py-2 text-[10px] text-text-muted leading-snug">
+              Constraints: {(model?.relationships || []).length}
+            </div>
           </div>
         </PanelSection>
       )}
@@ -339,65 +354,33 @@ export default function ModelerPanel() {
         </div>
       </PanelSection>
 
-      <PanelSection
-        title={conceptualMode ? "Add Concept Box" : "Quick Create"}
-        icon={<Boxes size={11} />}
-        description={conceptualMode ? "This creates a new concept box on the canvas. Keep it lightweight here, then enrich description, owner, and glossary terms in the right-side Details panel." : undefined}
-      >
+      <PanelSection title="Quick Create" icon={<Boxes size={11} />}>
         <div className="space-y-2">
-          {conceptualMode && (
-            <PanelCard
-              tone="accent"
-              dense
-              icon={<MousePointerClick size={12} />}
-              title="What happens next"
-              subtitle="A new concept box appears on the canvas immediately after you click Create concept box."
-            >
-              Start with the concept name and subject area. Use the right-side Details panel for richer business meaning after the box exists.
-            </PanelCard>
-          )}
-          <div className="grid gap-2 md:grid-cols-2">
-            <label className="grid gap-1">
-              <span className="text-[10px] font-semibold uppercase tracking-[0.16em] text-text-muted">
-                {conceptualMode ? "Concept name" : "Entity name"}
-              </span>
-              <input
-                value={entityName}
-                onChange={(e) => setEntityName(e.target.value)}
-                placeholder={conceptualMode ? "Customer" : "Entity name"}
-                className="w-full bg-bg-primary border border-border-primary rounded-md px-3 py-2 text-xs text-text-primary outline-none focus:border-accent-blue"
-                disabled={!canEdit}
-              />
-            </label>
-            <label className="grid gap-1">
-              <span className="text-[10px] font-semibold uppercase tracking-[0.16em] text-text-muted">
-                {conceptualMode ? "Concept type" : "Entity type"}
-              </span>
-              <select
-                value={entityType}
-                onChange={(e) => setEntityType(e.target.value)}
-                className="w-full bg-bg-primary border border-border-primary rounded-md px-3 py-2 text-xs text-text-primary outline-none focus:border-accent-blue"
-                disabled={!canEdit}
-              >
-                {entityOptions.map((type) => (
-                  <option key={type} value={type}>{ENTITY_TYPES[type]?.label || type}</option>
-                ))}
-              </select>
-            </label>
-          </div>
-          <label className="grid gap-1">
-            <span className="text-[10px] font-semibold uppercase tracking-[0.16em] text-text-muted">
-              Subject area
-            </span>
-            <input
-              value={entitySubjectArea}
-              onChange={(e) => setEntitySubjectArea(e.target.value)}
-              list="subject-area-options"
-              placeholder="Customer, Orders, Billing…"
-              className="w-full bg-bg-primary border border-border-primary rounded-md px-3 py-2 text-xs text-text-primary outline-none focus:border-accent-blue"
-              disabled={!canEdit}
-            />
-          </label>
+          <input
+            value={entityName}
+            onChange={(e) => setEntityName(e.target.value)}
+            placeholder="Entity name"
+            className="w-full bg-bg-primary border border-border-primary rounded-md px-3 py-2 text-xs text-text-primary outline-none focus:border-accent-blue"
+            disabled={!canEdit}
+          />
+          <select
+            value={entityType}
+            onChange={(e) => setEntityType(e.target.value)}
+            className="w-full bg-bg-primary border border-border-primary rounded-md px-3 py-2 text-xs text-text-primary outline-none focus:border-accent-blue"
+            disabled={!canEdit}
+          >
+            {entityOptions.map((type) => (
+              <option key={type} value={type}>{ENTITY_TYPES[type]?.label || type}</option>
+            ))}
+          </select>
+          <input
+            value={entitySubjectArea}
+            onChange={(e) => setEntitySubjectArea(e.target.value)}
+            list="subject-area-options"
+            placeholder="Subject area (optional)"
+            className="w-full bg-bg-primary border border-border-primary rounded-md px-3 py-2 text-xs text-text-primary outline-none focus:border-accent-blue"
+            disabled={!canEdit}
+          />
           <datalist id="subject-area-options">
             {subjectAreas.map((area) => (
               <option key={area.name} value={area.name} />
@@ -411,28 +394,13 @@ export default function ModelerPanel() {
             disabled={!canEdit}
             className="w-full px-3 py-2 rounded-md text-xs font-medium bg-accent-blue text-white hover:bg-accent-blue/80 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
           >
-            {conceptualMode ? "Create concept box" : `Add ${ENTITY_TYPES[entityType]?.label || entityType}`}
+            Add {ENTITY_TYPES[entityType]?.label || entityType}
           </button>
         </div>
       </PanelSection>
 
-      <PanelSection
-        title={conceptualMode ? "Connect Concepts" : "Relationship Tool"}
-        icon={<ArrowRightLeft size={11} />}
-        description={conceptualMode ? "This creates the arrow between two concept boxes. Use verb, type, and cardinality to make the business meaning explicit." : undefined}
-      >
+      <PanelSection title="Relationship Tool" icon={<ArrowRightLeft size={11} />}>
         <div className="space-y-2">
-          {conceptualMode && (
-            <PanelCard
-              tone="info"
-              dense
-              icon={<ArrowRightLeft size={12} />}
-              title="Relationship meaning"
-              subtitle="Use relationship details for business language, not physical foreign keys."
-            >
-              Example: <span className="text-text-primary font-medium">Customer places Order</span> or <span className="text-text-primary font-medium">Policy produces Claim</span>.
-            </PanelCard>
-          )}
           <input
             value={relationshipName}
             onChange={(e) => setRelationshipName(e.target.value)}
@@ -440,45 +408,19 @@ export default function ModelerPanel() {
             className="w-full bg-bg-primary border border-border-primary rounded-md px-3 py-2 text-xs text-text-primary outline-none focus:border-accent-blue"
             disabled={!canEdit}
           />
-          <div className={`grid gap-2 ${conceptualMode ? "md:grid-cols-3" : "grid-cols-2"}`}>
-            <label className="grid gap-1">
-              <span className="text-[10px] font-semibold uppercase tracking-[0.16em] text-text-muted">From</span>
-              <select value={fromEntity} onChange={(e) => setFromEntity(e.target.value)} className="bg-bg-primary border border-border-primary rounded-md px-3 py-2 text-xs text-text-primary outline-none focus:border-accent-blue" disabled={!canEdit}>
-                {entities.map((entity) => <option key={entity.name} value={entity.name}>{entity.name}</option>)}
-              </select>
-            </label>
-            {!conceptualMode && (
-              <label className="grid gap-1">
-                <span className="text-[10px] font-semibold uppercase tracking-[0.16em] text-text-muted">From field</span>
-                <select value={fromField} onChange={(e) => setFromField(e.target.value)} className="bg-bg-primary border border-border-primary rounded-md px-3 py-2 text-xs text-text-primary outline-none focus:border-accent-blue" disabled={!canEdit}>
-                  {fromEntityFields.map((field) => <option key={field.name} value={field.name}>{field.name}</option>)}
-                </select>
-              </label>
-            )}
-            <label className="grid gap-1">
-              <span className="text-[10px] font-semibold uppercase tracking-[0.16em] text-text-muted">To</span>
-              <select value={toEntity} onChange={(e) => setToEntity(e.target.value)} className="bg-bg-primary border border-border-primary rounded-md px-3 py-2 text-xs text-text-primary outline-none focus:border-accent-blue" disabled={!canEdit}>
-                {entities.map((entity) => <option key={entity.name} value={entity.name}>{entity.name}</option>)}
-              </select>
-            </label>
-            {!conceptualMode && (
-              <label className="grid gap-1">
-                <span className="text-[10px] font-semibold uppercase tracking-[0.16em] text-text-muted">To field</span>
-                <select value={toField} onChange={(e) => setToField(e.target.value)} className="bg-bg-primary border border-border-primary rounded-md px-3 py-2 text-xs text-text-primary outline-none focus:border-accent-blue" disabled={!canEdit}>
-                  {toEntityFields.map((field) => <option key={field.name} value={field.name}>{field.name}</option>)}
-                </select>
-              </label>
-            )}
-            {conceptualMode && selectedEntity && (
-              <PanelCard
-                dense
-                tone="neutral"
-                title="Selected concept"
-                subtitle={`${selectedEntity.name}${selectedEntity.subject_area ? ` · ${selectedEntity.subject_area}` : ""}`}
-              >
-                Choose both endpoints here, then open the right-side Relationships tab to enrich verb, rationale, and source of truth.
-              </PanelCard>
-            )}
+          <div className="grid grid-cols-2 gap-2">
+            <select value={fromEntity} onChange={(e) => setFromEntity(e.target.value)} className="bg-bg-primary border border-border-primary rounded-md px-3 py-2 text-xs text-text-primary outline-none focus:border-accent-blue" disabled={!canEdit}>
+              {entities.map((entity) => <option key={entity.name} value={entity.name}>{entity.name}</option>)}
+            </select>
+            <select value={fromField} onChange={(e) => setFromField(e.target.value)} className="bg-bg-primary border border-border-primary rounded-md px-3 py-2 text-xs text-text-primary outline-none focus:border-accent-blue" disabled={!canEdit}>
+              {fromEntityFields.map((field) => <option key={field.name} value={field.name}>{field.name}</option>)}
+            </select>
+            <select value={toEntity} onChange={(e) => setToEntity(e.target.value)} className="bg-bg-primary border border-border-primary rounded-md px-3 py-2 text-xs text-text-primary outline-none focus:border-accent-blue" disabled={!canEdit}>
+              {entities.map((entity) => <option key={entity.name} value={entity.name}>{entity.name}</option>)}
+            </select>
+            <select value={toField} onChange={(e) => setToField(e.target.value)} className="bg-bg-primary border border-border-primary rounded-md px-3 py-2 text-xs text-text-primary outline-none focus:border-accent-blue" disabled={!canEdit}>
+              {toEntityFields.map((field) => <option key={field.name} value={field.name}>{field.name}</option>)}
+            </select>
           </div>
           <select
             value={cardinality}
@@ -495,48 +437,8 @@ export default function ModelerPanel() {
             disabled={!canEdit || entities.length < 2}
             className="w-full px-3 py-2 rounded-md text-xs font-medium border border-border-primary text-text-secondary hover:bg-bg-hover disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
           >
-            {conceptualMode ? "Create relationship arrow" : "Create Relationship"}
+            Create Relationship
           </button>
-        </div>
-      </PanelSection>
-
-      <PanelSection title="Promote" icon={<Wand2 size={11} />}>
-        <div className="space-y-2">
-          <div className="rounded-lg bg-bg-primary border border-border-primary px-2 py-2 text-[10px] text-text-muted leading-snug">
-            Promote conceptual models into logical structures, then into physical warehouse-ready models with preserved lineage.
-          </div>
-          {modelKind === "conceptual" && (
-            <>
-              <button
-                onClick={() => handlePromote("logical")}
-                disabled={!canEdit || promoting}
-                className="w-full px-3 py-2 rounded-md text-xs font-medium bg-accent-blue text-white hover:bg-accent-blue/80 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
-              >
-                {promoting ? "Promoting…" : "Promote to Logical"}
-              </button>
-              <button
-                onClick={() => handlePromote("physical")}
-                disabled={!canEdit || promoting}
-                className="w-full px-3 py-2 rounded-md text-xs font-medium border border-border-primary text-text-secondary hover:bg-bg-hover disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
-              >
-                Promote to Physical
-              </button>
-            </>
-          )}
-          {modelKind === "logical" && (
-            <button
-              onClick={() => handlePromote("physical")}
-              disabled={!canEdit || promoting}
-              className="w-full px-3 py-2 rounded-md text-xs font-medium bg-accent-blue text-white hover:bg-accent-blue/80 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
-            >
-              {promoting ? "Promoting…" : "Promote to Physical"}
-            </button>
-          )}
-          {modelKind === "physical" && (
-            <div className="rounded-lg bg-bg-primary border border-border-primary px-2 py-2 text-[10px] text-text-muted leading-snug">
-              Physical models are the terminal forward-engineering layer.
-            </div>
-          )}
         </div>
       </PanelSection>
     </PanelFrame>

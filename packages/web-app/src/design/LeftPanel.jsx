@@ -1,4 +1,4 @@
-/* Left panel — Object List / Explorer / Database Browser. Ported from DataLex design prototype.
+/* Left panel — Object List / Explorer / Themes. Ported from DataLex design prototype.
  *
  * The EXPLORER tab renders the active project's file tree. We build it on the
  * fly with `buildFileTree` (pure, memo-friendly) so adding a file anywhere in
@@ -9,13 +9,54 @@
  */
 import React from "react";
 import Icon from "./icons";
+import { THEMES } from "./notation";
 import { buildFileTree, countFiles } from "../lib/fileTree";
 import useWorkspaceStore from "../stores/workspaceStore";
 import useUiStore from "../stores/uiStore";
 import ExplorerContextMenu from "../components/panels/ExplorerContextMenu";
-import DatabaseBrowserPanel from "../components/panels/DatabaseBrowserPanel";
 
-export default function LeftPanel({ activeTable, onSelectTable, tables, subjectAreas = [], connectionLabel = "workspace", connectionDsn = "", schemas = [], onAddEntity, projects = [], activeProjectId = null, onSelectProject = null, onOpenConnectors = null, onManageConnections = null }) {
+function artifactMeta(path, name, kind = "file") {
+  const p = String(path || "").toLowerCase();
+  const n = String(name || "").toLowerCase();
+  if (kind === "folder") {
+    if (p.includes("conceptual")) return { tone: "conceptual", label: "conceptual", icon: "folder" };
+    if (p.includes("logical")) return { tone: "logical", label: "logical", icon: "folder" };
+    if (p.includes("physical")) return { tone: "physical", label: "physical", icon: "folder" };
+    if (p === "models" || p.startsWith("models/")) return { tone: "models", label: "models", icon: "folder" };
+    if (p.startsWith("datalex/diagrams") || p.endsWith("diagrams")) return { tone: "diagram", label: "diagrams", icon: "diagram" };
+    if (p.startsWith("semantic")) return { tone: "semantic", label: "semantic", icon: "semantic" };
+    if (p.startsWith("relationships")) return { tone: "relationship", label: "relationships", icon: "relationship" };
+    if (p.startsWith("data_types")) return { tone: "datatype", label: "types", icon: "datatype" };
+    return { tone: "folder", label: "", icon: "folder" };
+  }
+  if (/\.diagram\.ya?ml$/i.test(n)) return { tone: "diagram", label: "diagram", icon: "diagram" };
+  if (p.includes("/conceptual/")) return { tone: "conceptual", label: "concept", icon: "entity" };
+  if (p.includes("/logical/")) return { tone: "logical", label: "logical", icon: "entity" };
+  if (p.includes("/physical/")) return { tone: "physical", label: "physical", icon: "entity" };
+  if (p.startsWith("semantic/")) return { tone: "semantic", label: "semantic", icon: "semantic" };
+  if (p.startsWith("relationships/")) return { tone: "relationship", label: "relation", icon: "relationship" };
+  if (p.startsWith("data_types/")) return { tone: "datatype", label: "type", icon: "datatype" };
+  if (n === "dbt_project.yml" || n === "dbt_project.yaml" || n === "schema.yml" || n === "schema.yaml" || p.includes("/schema.y")) {
+    return { tone: "dbt", label: "dbt", icon: "dbt" };
+  }
+  if (/\.ya?ml$/i.test(n) && /^(models|seeds|snapshots|analyses|macros)\//i.test(p)) {
+    return { tone: "dbt", label: "dbt", icon: "dbt" };
+  }
+  return { tone: "file", label: "yaml", icon: "entity" };
+}
+
+function ArtifactIcon({ I, meta }) {
+  const key = meta?.icon || "entity";
+  if (key === "diagram") return <I.Layers />;
+  if (key === "relationship") return <I.Relation />;
+  if (key === "datatype") return <I.Enum />;
+  if (key === "semantic") return <I.View />;
+  if (key === "dbt") return <I.Dep />;
+  if (key === "folder") return <I.Folder />;
+  return <I.Table />;
+}
+
+export default function LeftPanel({ activeTable, onSelectTable, tables, theme, setTheme, subjectAreas = [], connectionLabel = "workspace", connectionDsn = "", schemas = [], onAddEntity, projects = [], activeProjectId = null, onSelectProject = null }) {
   const I = Icon;
   const [tab, setTab] = React.useState("OBJECTS");
   const [query, setQuery] = React.useState("");
@@ -43,8 +84,7 @@ export default function LeftPanel({ activeTable, onSelectTable, tables, subjectA
   const deleteFileAction = useWorkspaceStore((s) => s.deleteFile);
   const deleteFolderAction = useWorkspaceStore((s) => s.deleteFolder);
   const addToast = useUiStore((s) => s.addToast);
-  const createNewFile = useWorkspaceStore((s) => s.createNewFile);
-  const createNewDiagram = useWorkspaceStore((s) => s.createNewDiagram);
+  const openModal = useUiStore((s) => s.openModal);
   const fileTree = React.useMemo(
     () => buildFileTree(projectFiles || [], optimisticFolders || []),
     [projectFiles, optimisticFolders]
@@ -76,23 +116,14 @@ export default function LeftPanel({ activeTable, onSelectTable, tables, subjectA
   const handleCtxAction = React.useCallback(async (actionId, menu) => {
     try {
       if (actionId === "new-file") {
-        const name = window.prompt("New file name (e.g. stg_orders.yml):", "new_model.yml");
-        if (!name) return;
-        const fullRel = joinChild(menu.target === "folder" ? menu.path : "", name);
-        // createNewFile treats `name` as a POSIX subpath relative to project model root.
-        await createNewFile(fullRel, "");
+        openModal("newFile", { targetFolder: menu.target === "folder" ? menu.path : "" });
       } else if (actionId === "new-folder") {
         const name = window.prompt("New folder name:", "new_folder");
         if (!name) return;
         const fullRel = joinChild(menu.target === "folder" ? menu.path : "", name);
         await createFolderAction(fullRel);
       } else if (actionId === "new-diagram") {
-        const name = window.prompt("New diagram name:", "untitled");
-        if (!name) return;
-        // Drop the new .diagram.yaml into the clicked folder. Root target
-        // falls through to the default diagrams/ location inside DataLex.
-        const folder = menu.target === "folder" ? menu.path || "" : "";
-        await createNewDiagram(name, folder);
+        openModal("newFile", { artifact: "diagram", targetFolder: menu.target === "folder" ? menu.path : "" });
       } else if (actionId === "rename") {
         const current = menu.path || "";
         const next = window.prompt("Rename to (full path from model root):", current);
@@ -159,8 +190,6 @@ export default function LeftPanel({ activeTable, onSelectTable, tables, subjectA
     }
   }, [
     joinChild,
-    createNewFile,
-    createNewDiagram,
     createFolderAction,
     renameFileAction,
     renameFolderAction,
@@ -168,6 +197,7 @@ export default function LeftPanel({ activeTable, onSelectTable, tables, subjectA
     deleteFileAction,
     deleteFolderAction,
     addToast,
+    openModal,
   ]);
 
   // Drag-and-drop: drop a file onto a folder to move it there.
@@ -206,10 +236,12 @@ export default function LeftPanel({ activeTable, onSelectTable, tables, subjectA
     </div>
   );
 
+  const schemaList = schemas.length ? schemas : [{ name: "public", count: tables.length }];
+
   return (
     <div className="left">
       <div className="left-tabs">
-        {["OBJECTS", "EXPLORER", "DATABASE"].map((t) => (
+        {["OBJECTS", "EXPLORER", "THEMES"].map((t) => (
           <button key={t} className={`left-tab ${tab === t ? "active" : ""}`} onClick={() => setTab(t)}>{t}</button>
         ))}
       </div>
@@ -315,7 +347,7 @@ export default function LeftPanel({ activeTable, onSelectTable, tables, subjectA
                 <>
                   <button
                     className="icon-btn"
-                    title="New file"
+                    title="New modeling asset"
                     onClick={() => handleCtxAction("new-file", { target: "root", path: "" })}
                     style={{ padding: 2 }}
                   >
@@ -333,18 +365,7 @@ export default function LeftPanel({ activeTable, onSelectTable, tables, subjectA
                     data-tour="new-diagram"
                     className="icon-btn"
                     title="New diagram"
-                    onClick={async () => {
-                      const name = window.prompt(
-                        "Diagram name (saved as DataLex/diagrams/<name>.diagram.yaml):",
-                        "untitled"
-                      );
-                      if (!name || !name.trim()) return;
-                      try {
-                        await createNewDiagram(name.trim());
-                      } catch (err) {
-                        window.alert(`Could not create diagram: ${err?.message || err}`);
-                      }
-                    }}
+                    onClick={() => openModal("newFile", { artifact: "diagram" })}
                     style={{ padding: 2 }}
                   >
                     <I.Layers />
@@ -381,12 +402,45 @@ export default function LeftPanel({ activeTable, onSelectTable, tables, subjectA
         </div>
       )}
 
-      {tab === "DATABASE" && (
-        <DatabaseBrowserPanel
-          I={I}
-          onOpenConnectors={onOpenConnectors}
-          onManageConnections={onManageConnections}
-        />
+      {tab === "THEMES" && (
+        <div style={{ padding: "14px 16px", overflowY: "auto" }}>
+          <div style={{ fontSize: 10, color: "var(--text-tertiary)", marginBottom: 10, letterSpacing: "0.08em", textTransform: "uppercase", fontWeight: 600 }}>Appearance</div>
+          {THEMES.map((t) => {
+            const active = t.id === theme;
+            return (
+              <button key={t.id} onClick={() => setTheme(t.id)}
+                style={{
+                  width: "100%", textAlign: "left",
+                  display: "flex", alignItems: "center", gap: 10,
+                  padding: "10px 10px", marginBottom: 6,
+                  border: `1px solid ${active ? "var(--accent)" : "var(--border-default)"}`,
+                  borderRadius: 8,
+                  background: active ? "var(--accent-dim)" : "var(--bg-2)",
+                  cursor: "pointer", transition: "all 120ms var(--ease)",
+                }}>
+                <div style={{ display: "flex", gap: 0, borderRadius: 4, overflow: "hidden", border: "1px solid var(--border-default)" }}>
+                  {t.colors.map((c, i) => <div key={i} style={{ width: 12, height: 28, background: c }} />)}
+                </div>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontSize: 12, fontWeight: 600, color: "var(--text-primary)", display: "flex", alignItems: "center", gap: 6 }}>
+                    {t.name}
+                    <span style={{
+                      fontSize: 9, fontFamily: "var(--font-mono)", letterSpacing: "0.06em", textTransform: "uppercase",
+                      padding: "1px 5px", borderRadius: 3, background: "var(--bg-3)", color: "var(--text-tertiary)",
+                    }}>{t.mode}</span>
+                  </div>
+                  <div style={{ fontSize: 11, color: "var(--text-tertiary)", marginTop: 2 }}>{t.sub}</div>
+                </div>
+                {active && <I.Check />}
+              </button>
+            );
+          })}
+          <div style={{ fontSize: 10, color: "var(--text-tertiary)", margin: "18px 0 8px", letterSpacing: "0.08em", textTransform: "uppercase", fontWeight: 600 }}>Keyboard</div>
+          <div style={{ fontSize: 11, color: "var(--text-secondary)", display: "flex", alignItems: "center", justifyContent: "space-between", padding: "6px 2px" }}>
+            <span>Cycle themes</span>
+            <span style={{ fontFamily: "var(--font-mono)", fontSize: 10, padding: "2px 6px", background: "var(--bg-3)", borderRadius: 4, border: "1px solid var(--border-default)" }}>⌘⇧T</span>
+          </div>
+        </div>
       )}
     </div>
   );
@@ -425,10 +479,11 @@ function TreeRender({
           const isFolded = !!folded[n.path];
           const count = countFiles(n);
           const isDragOver = dragOverPath === n.path;
+          const meta = artifactMeta(n.path, n.name, "folder");
           return (
             <div key={`f:${n.path}`}>
               <div
-                className="tree-item"
+                className={`tree-item tree-artifact tree-artifact-${meta.tone}`}
                 onClick={() => toggleFolder(n.path)}
                 onContextMenu={onContextMenu ? (e) => onContextMenu(e, "folder", n.path) : undefined}
                 title={n.path}
@@ -465,7 +520,7 @@ function TreeRender({
                 >
                   <path d="M3 2l4 3-4 3" fill="currentColor" />
                 </svg>
-                <I.Folder />
+                <span className="tree-artifact-icon"><ArtifactIcon I={I} meta={meta} /></span>
                 <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{n.name}</span>
                 <span className="badge">{count}</span>
               </div>
@@ -489,10 +544,11 @@ function TreeRender({
         const fd = n.file || {};
         const fullPath = fd.fullPath || fd.path || n.path;
         const isActive = activeFullPath && fullPath === activeFullPath;
+        const meta = artifactMeta(n.path, n.name, "file");
         return (
           <div
             key={`l:${n.path}`}
-            className={`tree-item ${isActive ? "active" : ""}`}
+            className={`tree-item tree-artifact tree-artifact-${meta.tone} ${isActive ? "active" : ""}`}
             onClick={() => onOpenFile && fd && onOpenFile(fd)}
             onContextMenu={onContextMenu ? (e) => onContextMenu(e, "file", n.path) : undefined}
             draggable={!!onDropOnFolder}
@@ -516,10 +572,7 @@ function TreeRender({
             title={fullPath || n.path}
             style={{ paddingLeft: indent + 10, cursor: onDropOnFolder ? "grab" : undefined }}
           >
-            {/* Distinct icon for diagram files so the Explorer surfaces them
-                at a glance — same column as table icons, but a Layers glyph
-                signals "multi-file composition". */}
-            {/\.diagram\.ya?ml$/i.test(n.name || "") ? <I.Layers /> : <I.Table />}
+            <span className="tree-artifact-icon"><ArtifactIcon I={I} meta={meta} /></span>
             <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{n.name}</span>
           </div>
         );

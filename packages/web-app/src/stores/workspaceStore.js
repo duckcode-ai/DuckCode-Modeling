@@ -1671,7 +1671,7 @@ const useWorkspaceStore = create((set, get) => ({
         openTabs: [...get().openTabs, doc],
       });
       get().saveOfflineDocs();
-      return;
+      return doc;
     }
 
     if (!activeProjectId) return;
@@ -1708,6 +1708,7 @@ const useWorkspaceStore = create((set, get) => ({
       if (file.fullPath) {
         await get().openFile(desc);
       }
+      return desc;
     } catch (err) {
       set({ error: err.message });
       throw err;

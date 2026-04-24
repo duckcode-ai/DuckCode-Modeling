@@ -1,0 +1,11 @@
+kind: data_type
+name: money
+description: Currency amount with enterprise default precision.
+base: decimal
+precision: exact
+physical:
+  postgres:
+    type: numeric(18,2)
+  snowflake:
+    type: number(18,2)
+
