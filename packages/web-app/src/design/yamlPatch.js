@@ -618,6 +618,70 @@ export function setDiagramEntityDisplay(yamlText, file, entityName, { x, y, widt
   return dump(doc);
 }
 
+export function setInlineDiagramEntityDisplay(yamlText, entityName, { x, y, width } = {}) {
+  const doc = loadDoc(yamlText);
+  if (!doc || !Array.isArray(doc.entities)) return null;
+  const entityKey = String(entityName || "").trim().toLowerCase();
+  if (!entityKey) return null;
+  const entry = doc.entities.find((e) => {
+    if (!e || typeof e !== "object" || e.file) return false;
+    return String(e.name || e.entity || "").trim().toLowerCase() === entityKey;
+  });
+  if (!entry) return null;
+
+  const applyNum = (key, value) => {
+    if (value === undefined) return;
+    if (value === null) { delete entry[key]; return; }
+    const n = Number(value);
+    if (!Number.isFinite(n)) return;
+    entry[key] = Math.round(n);
+  };
+  applyNum("x", x);
+  applyNum("y", y);
+  applyNum("width", width);
+  return dump(doc);
+}
+
+export function addInlineDiagramEntity(yamlText, entity) {
+  const doc = loadDoc(yamlText);
+  if (!doc) return null;
+  if (!Array.isArray(doc.entities)) doc.entities = [];
+
+  const name = String(entity?.name || "").trim();
+  if (!name) return null;
+  const key = name.toLowerCase();
+  const dupe = doc.entities.some((entry) => {
+    if (!entry || typeof entry !== "object" || entry.file) return false;
+    return String(entry.name || entry.entity || "").trim().toLowerCase() === key;
+  });
+  if (dupe) return yamlText;
+
+  const entry = {
+    name,
+    type: String(entity?.type || "concept"),
+  };
+  if (entity?.logical_name && String(entity.logical_name).trim() !== name) {
+    entry.logical_name = String(entity.logical_name).trim();
+  }
+  if (entity?.description) entry.description = String(entity.description);
+  if (entity?.domain) entry.domain = String(entity.domain);
+  if (entity?.subject_area) entry.subject_area = String(entity.subject_area);
+  if (entity?.owner) entry.owner = String(entity.owner);
+  if (Array.isArray(entity?.terms)) entry.terms = entity.terms;
+  if (Array.isArray(entity?.tags)) entry.tags = entity.tags;
+  if (Array.isArray(entity?.fields)) entry.fields = entity.fields;
+  if (Array.isArray(entity?.candidate_keys)) entry.candidate_keys = entity.candidate_keys;
+  if (Array.isArray(entity?.business_keys)) entry.business_keys = entity.business_keys;
+  if (entity?.subtype_of) entry.subtype_of = String(entity.subtype_of);
+  if (entity?.discriminator) entry.discriminator = String(entity.discriminator);
+  if (Number.isFinite(Number(entity?.x))) entry.x = Math.round(Number(entity.x));
+  if (Number.isFinite(Number(entity?.y))) entry.y = Math.round(Number(entity.y));
+  if (Number.isFinite(Number(entity?.width))) entry.width = Math.round(Number(entity.width));
+
+  doc.entities.push(entry);
+  return dump(doc);
+}
+
 /* Append a batch of `{file, entity}` references to a .diagram.yaml's
    `entities:` array. Dedupes by `(file, entity)` so dropping the same
    file twice is idempotent. Creates `entities: []` if absent. Used by
@@ -666,7 +730,27 @@ export function deleteDiagramEntity(yamlText, file, entityName, referencedYamlTe
 
   const fileKey = normalizePathLike(file);
   const entityKey = String(entityName || "").trim().toLowerCase();
-  if (!fileKey || !entityKey) return null;
+  if (!entityKey) return null;
+
+  if (!fileKey) {
+    const before = doc.entities.length;
+    doc.entities = doc.entities.filter((entry) => {
+      if (entry?.file) return true;
+      return String(entry?.name || entry?.entity || "").trim().toLowerCase() !== entityKey;
+    });
+    if (doc.entities.length === before) return null;
+    let relationships = 0;
+    if (Array.isArray(doc.relationships)) {
+      const relBefore = doc.relationships.length;
+      doc.relationships = doc.relationships.filter((rel) => {
+        const from = String(rel?.from?.entity || rel?.from?.table || "").toLowerCase();
+        const to = String(rel?.to?.entity || rel?.to?.table || "").toLowerCase();
+        return from !== entityKey && to !== entityKey;
+      });
+      relationships = relBefore - doc.relationships.length;
+    }
+    return { yaml: dump(doc), impact: { entity: true, relationships } };
+  }
 
   const impact = { entity: false, relationships: 0 };
   const kept = [];
@@ -778,6 +862,8 @@ export function addDiagramRelationship(yamlText, rel) {
   if (rel?.description) entry.description = String(rel.description);
   if (rel?.verb) entry.verb = String(rel.verb);
   if (rel?.relationship_type) entry.relationship_type = String(rel.relationship_type);
+  if (rel?.from_role) entry.from_role = String(rel.from_role);
+  if (rel?.to_role) entry.to_role = String(rel.to_role);
   if (rel?.rationale) entry.rationale = String(rel.rationale);
   if (rel?.source_of_truth) entry.source_of_truth = String(rel.source_of_truth);
   doc.relationships.push(entry);
@@ -961,6 +1047,14 @@ export function patchRelationship(yamlText, relName, patch) {
   if (patch.relationship_type !== undefined) {
     if (patch.relationship_type) rel.relationship_type = String(patch.relationship_type);
     else delete rel.relationship_type;
+  }
+  if (patch.from_role !== undefined) {
+    if (patch.from_role) rel.from_role = String(patch.from_role);
+    else delete rel.from_role;
+  }
+  if (patch.to_role !== undefined) {
+    if (patch.to_role) rel.to_role = String(patch.to_role);
+    else delete rel.to_role;
   }
   if (patch.rationale !== undefined) {
     if (patch.rationale) rel.rationale = String(patch.rationale);

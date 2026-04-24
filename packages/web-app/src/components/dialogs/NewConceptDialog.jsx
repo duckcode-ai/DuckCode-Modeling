@@ -5,7 +5,7 @@ import useUiStore from "../../stores/uiStore";
 import useWorkspaceStore from "../../stores/workspaceStore";
 import useDiagramStore from "../../stores/diagramStore";
 import { addEntityWithOptions } from "../../lib/yamlRoundTrip";
-import { addDiagramEntries } from "../../design/yamlPatch";
+import { addDiagramEntries, addInlineDiagramEntity } from "../../design/yamlPatch";
 
 function conceptSlug(value) {
   return String(value || "concept")
@@ -103,6 +103,36 @@ export default function NewConceptDialog() {
       return;
     }
 
+    const activeWasDiagram = /\.diagram\.ya?ml$/i.test(activeFile?.name || "");
+    const diagramFile = activeFile;
+    const diagramContent = activeFileContent;
+
+    if (activeWasDiagram && diagramFile && diagramContent) {
+      const nextDiagram = addInlineDiagramEntity(diagramContent, {
+        name: cleanName,
+        type: "concept",
+        domain: conceptSlug(subjectArea || "core"),
+        subject_area: String(subjectArea || "").trim(),
+        description: String(description || "").trim(),
+        x: Number.isFinite(targetX) ? targetX : 120,
+        y: Number.isFinite(targetY) ? targetY : 120,
+        width: 280,
+      });
+      if (!nextDiagram) {
+        setError("Could not write this concept into the active diagram YAML.");
+        return;
+      }
+      if (nextDiagram === diagramContent) {
+        setError(`A concept named "${cleanName}" already exists in this diagram.`);
+        return;
+      }
+      updateContent(nextDiagram);
+      requestLayoutRefresh?.();
+      addToast({ type: "success", message: `Created concept box "${cleanName}" in the diagram.` });
+      closeModal();
+      return;
+    }
+
     const slug = conceptSlug(cleanName);
     const filePath = `models/conceptual/${slug}.yaml`;
     const conceptYaml = canonicalConceptYaml({
@@ -111,9 +141,6 @@ export default function NewConceptDialog() {
       description: String(description || "").trim(),
     });
 
-    const activeWasDiagram = /\.diagram\.ya?ml$/i.test(activeFile?.name || "");
-    const diagramFile = activeFile;
-    const diagramContent = activeFileContent;
     try {
       await createNewFile(filePath, conceptYaml);
       if (activeWasDiagram && diagramFile && diagramContent) {

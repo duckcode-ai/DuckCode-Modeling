@@ -154,6 +154,20 @@ function TableCard({ table, selected, onSelect, onMove, onMoveEnd, onStartConnec
     Array.isArray(table?.terms) && table.terms.length ? `Terms: ${table.terms.slice(0, 2).join(", ")}` : "",
     Array.isArray(table?.tags) && table.tags.length ? `Tags: ${table.tags.slice(0, 3).join(", ")}` : "",
   ].filter(Boolean);
+  const keySetCount = (value) => Array.isArray(value) ? value.length : 0;
+  const keyBadges = logical ? [
+    keySetCount(table?.candidate_keys) ? `${keySetCount(table.candidate_keys)} CK` : "",
+    keySetCount(table?.alternate_keys) ? `${keySetCount(table.alternate_keys)} AK` : "",
+    keySetCount(table?.business_keys) ? `${keySetCount(table.business_keys)} BK` : "",
+    table?.surrogate_key ? "SK" : "",
+    table?.natural_key ? "NK" : "",
+    table?.hash_key ? "HK" : "",
+    table?.subtype_of ? "Subtype" : "",
+  ].filter(Boolean) : [];
+  const physicalBadges = !conceptual && !logical ? [
+    table?._sourceFile ? "dbt YAML" : "",
+    table?.physical_name ? `physical: ${table.physical_name}` : "",
+  ].filter(Boolean) : [];
 
   return (
     <div
@@ -166,7 +180,7 @@ function TableCard({ table, selected, onSelect, onMove, onMoveEnd, onStartConnec
       <div className="tc-header">
         {conceptual ? <I.Layers /> : table.kind === "ENUM" ? <I.Enum /> : table.junction ? <I.Junction /> : <I.Table />}
         <span className="tc-name">{table.name}</span>
-        <span className="tc-schema">{conceptual ? "conceptual" : logical ? "logical" : table.schema}</span>
+        <span className="tc-schema">{conceptual ? "business" : logical ? "logical" : (table.schema || "dbt")}</span>
         <div className="tc-badges">
           {diffTheme && (
             <span
@@ -217,12 +231,32 @@ function TableCard({ table, selected, onSelect, onMove, onMoveEnd, onStartConnec
             )}
           </div>
           <div className="tc-footer">
-            <span>{table.columns.length} attributes</span>
-            <span>{Array.isArray(table.tags) ? table.tags.length : 0} tags</span>
+            <span>business concept</span>
+            <span>{table.domain || table.subject_area || "unassigned"}</span>
           </div>
         </>
       ) : (
         <>
+          {(keyBadges.length > 0 || physicalBadges.length > 0) && (
+            <div style={{ padding: "8px 12px 4px", display: "flex", flexWrap: "wrap", gap: 5 }}>
+              {[...keyBadges, ...physicalBadges].slice(0, 6).map((badge) => (
+                <span
+                  key={badge}
+                  style={{
+                    fontSize: 9.5,
+                    padding: "2px 6px",
+                    borderRadius: 999,
+                    background: logical ? "rgba(8,145,178,0.12)" : "rgba(79,70,229,0.12)",
+                    border: "1px solid var(--border-default)",
+                    color: "var(--text-secondary)",
+                    fontFamily: "var(--font-mono)",
+                  }}
+                >
+                  {badge}
+                </span>
+              ))}
+            </div>
+          )}
           <div className="tc-rows">
             {table.columns.map((c) => {
               const isPk = c.pk;
@@ -255,8 +289,8 @@ function TableCard({ table, selected, onSelect, onMove, onMoveEnd, onStartConnec
           </div>
           {table.kind !== "ENUM" && (
             <div className="tc-footer">
-              <span>{table.columns.length} cols</span>
-              <span>{table.rowCount}{typeof table.rowCount === "number" ? " rows" : ""}</span>
+              <span>{table.columns.length} {logical ? "attributes" : "columns"}</span>
+              <span>{logical ? "platform-neutral" : (table._sourceFile ? table._sourceFile.split("/").pop() : table.rowCount || "physical")}</span>
             </div>
           )}
         </>
@@ -753,6 +787,13 @@ export default function Canvas({ tables, setTables, relationships, areas, select
     setBottomPanelTab("modeler");
   }, [setBottomPanelOpen, setBottomPanelTab]);
 
+  const openNewConceptDialog = React.useCallback((point = {}) => {
+    openModal("newConcept", {
+      x: Number.isFinite(Number(point.x)) ? Number(point.x) : undefined,
+      y: Number.isFinite(Number(point.y)) ? Number(point.y) : undefined,
+    });
+  }, [openModal]);
+
   const openConceptDetails = React.useCallback(() => {
     setRightPanelOpen(true);
     setRightPanelTab("DETAILS");
@@ -818,7 +859,7 @@ export default function Canvas({ tables, setTables, relationships, areas, select
         <div className="canvas-actions">
           {conceptualMode && (
             <>
-              <button className="canvas-btn" onClick={openConceptStudio} title="Open the Concept Studio to create a new concept box">
+              <button className="canvas-btn" onClick={() => openNewConceptDialog()} title="Create a business concept box in this diagram">
                 <I.Plus />Add Concept
               </button>
               <button
@@ -853,7 +894,13 @@ export default function Canvas({ tables, setTables, relationships, areas, select
             if (e.target === e.currentTarget) onSelect(null);
           }}
           onDoubleClick={(e) => {
-            if (conceptualMode && e.target === e.currentTarget) openConceptStudio();
+            if (conceptualMode && e.target === e.currentTarget) {
+              const rect = stageRef.current?.getBoundingClientRect();
+              openNewConceptDialog({
+                x: rect ? Math.max(0, (e.clientX - rect.left) / zoom) : undefined,
+                y: rect ? Math.max(0, (e.clientY - rect.top) / zoom) : undefined,
+              });
+            }
           }}
         >
           <div
@@ -864,7 +911,13 @@ export default function Canvas({ tables, setTables, relationships, areas, select
               if (e.target === e.currentTarget) onSelect(null);
             }}
             onDoubleClick={(e) => {
-              if (conceptualMode && e.target === e.currentTarget) openConceptStudio();
+              if (conceptualMode && e.target === e.currentTarget) {
+                const rect = stageRef.current?.getBoundingClientRect();
+                openNewConceptDialog({
+                  x: rect ? Math.max(0, (e.clientX - rect.left) / zoom) : undefined,
+                  y: rect ? Math.max(0, (e.clientY - rect.top) / zoom) : undefined,
+                });
+              }
             }}
             onDragOver={onDropYamlSource ? (e) => {
               // Accept the drag only if it advertises a YAML source payload —
@@ -915,7 +968,7 @@ export default function Canvas({ tables, setTables, relationships, areas, select
                   Conceptual mode is for business concepts and business relationships. Add the box first, then connect concepts with relationship arrows, then edit business meaning in Details.
                 </div>
                 <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                  <button className="canvas-btn" onClick={openConceptStudio}>
+                  <button className="canvas-btn" onClick={() => openNewConceptDialog({ x: 120, y: 120 })}>
                     <I.Plus />Add Concept
                   </button>
                   <button className="canvas-btn" onClick={openConceptDetails} disabled={!selectedTable}>

@@ -82,8 +82,8 @@ const LAYER_OPTIONS = [
 ];
 
 const ARTIFACT_OPTIONS = [
-  { id: "entity", label: "Model YAML", description: "Create a canonical DataLex entity file." },
-  { id: "diagram", label: "Diagram YAML", description: "Create a layer-specific DataLex diagram." },
+  { id: "diagram", label: "Diagram YAML", description: "Primary source of truth for new conceptual, logical, and physical modeling." },
+  { id: "entity", label: "Compatibility YAML", description: "Create a standalone canonical entity file for legacy/import workflows." },
 ];
 
 function defaultArtifactName(layer, artifact) {
@@ -93,9 +93,23 @@ function defaultArtifactName(layer, artifact) {
   return "new_table";
 }
 
-function defaultPath(layer, artifact, name, dialect = "postgres") {
+function layerFolder(layer) {
+  return displayName(layer || "physical").replace(/\s+/g, "");
+}
+
+function defaultDomain(value) {
+  return slugifyName(value, "core");
+}
+
+function defaultPath(layer, artifact, name, dialect = "postgres", domain = "core") {
   const slug = slugifyName(name, defaultArtifactName(layer, artifact));
-  if (artifact === "diagram") return `datalex/diagrams/${layer}_${slug}.diagram.yaml`;
+  const domainSlug = defaultDomain(domain);
+  if (artifact === "diagram") {
+    if (layer === "physical") {
+      return `DataLex/Diagrams/Physical/${domainSlug}/${slugifyName(dialect, "postgres")}/${slug}.diagram.yaml`;
+    }
+    return `DataLex/Diagrams/${layerFolder(layer)}/${domainSlug}/${slug}.diagram.yaml`;
+  }
   if (layer === "physical") return `models/physical/${slugifyName(dialect, "postgres")}/${slug}.yaml`;
   return `models/${layer}/${slug}.yaml`;
 }
@@ -156,17 +170,39 @@ function modelYaml(layer, name, dialect = "postgres") {
   ].join("\n");
 }
 
-function diagramYaml(layer, name) {
+function diagramYaml(layer, name, domain = "core", dialect = "postgres") {
   const slug = slugifyName(name, defaultArtifactName(layer, "diagram"));
-  return [
+  const domainSlug = defaultDomain(domain);
+  const base = [
     "kind: diagram",
     `name: ${slug}`,
     `title: ${displayName(name || slug)}`,
     `layer: ${layer}`,
+    `domain: ${domainSlug}`,
     "entities: []",
     "relationships: []",
-    "",
-  ].join("\n");
+  ];
+  if (layer === "logical") {
+    base.push(
+      "logic:",
+      `  target_model: ${slug}`,
+      "  materialization: view",
+      "  sql: |",
+      "    -- Define SQL logic here, then generate dbt SQL/YAML from this logical design.",
+      "    select *",
+      "    from source_model"
+    );
+  }
+  if (layer === "physical") {
+    base.splice(5, 0, `dialect: ${slugifyName(dialect, "postgres")}`);
+    base.push(
+      "dbt:",
+      "  source: connected_repo",
+      "  generated_sql: []"
+    );
+  }
+  base.push("");
+  return base.join("\n");
 }
 
 /* ─────────────────────────── Add Project ─────────────────────────── */
@@ -307,15 +343,17 @@ function AddProjectModal() {
 function NewFileModal() {
   const { closeModal, modalPayload } = useUiStore();
   const { createNewFile } = useWorkspaceStore();
-  const initialLayer = ["conceptual", "logical", "physical"].includes(modalPayload?.layer)
-    ? modalPayload.layer
+  const requestedLayer = modalPayload?.layer || modalPayload?.layerHint;
+  const initialLayer = ["conceptual", "logical", "physical"].includes(requestedLayer)
+    ? requestedLayer
     : "conceptual";
   const initialArtifact = ["entity", "diagram"].includes(modalPayload?.artifact)
     ? modalPayload.artifact
-    : "entity";
+    : "diagram";
   const [layer, setLayer] = useState(initialLayer);
   const [artifact, setArtifact] = useState(initialArtifact);
   const [name, setName] = useState(defaultArtifactName(initialLayer, initialArtifact));
+  const [domain, setDomain] = useState(modalPayload?.domainHint || "core");
   const [dialect, setDialect] = useState("postgres");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
@@ -324,7 +362,7 @@ function NewFileModal() {
     setName(defaultArtifactName(layer, artifact));
   }, [layer, artifact]);
 
-  const path = defaultPath(layer, artifact, name, dialect);
+  const path = defaultPath(layer, artifact, name, dialect, domain);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -333,7 +371,7 @@ function NewFileModal() {
     setError("");
     try {
       const content = artifact === "diagram"
-        ? diagramYaml(layer, name)
+        ? diagramYaml(layer, name, domain, dialect)
         : modelYaml(layer, name, dialect);
       await createNewFile(path, content);
       closeModal();
@@ -445,7 +483,40 @@ function NewFileModal() {
             onChange={(e) => setName(e.target.value)}
             autoFocus
           />
+          {artifact === "diagram" && (
+            <div style={{ marginTop: 8 }}>
+              <label className="dlx-modal-field-label" htmlFor="new-file-domain">
+                Domain folder
+              </label>
+              <input
+                id="new-file-domain"
+                className="panel-input"
+                value={domain}
+                onChange={(e) => setDomain(e.target.value)}
+                placeholder="customer, finance, supply_chain"
+              />
+            </div>
+          )}
           {layer === "physical" && artifact === "entity" && (
+            <div style={{ marginTop: 8 }}>
+              <label className="dlx-modal-field-label" htmlFor="new-file-dialect">
+                Dialect
+              </label>
+              <select
+                id="new-file-dialect"
+                className="panel-input"
+                value={dialect}
+                onChange={(e) => setDialect(e.target.value)}
+              >
+                <option value="postgres">Postgres</option>
+                <option value="snowflake">Snowflake</option>
+                <option value="bigquery">BigQuery</option>
+                <option value="databricks">Databricks</option>
+                <option value="sqlserver">SQL Server</option>
+              </select>
+            </div>
+          )}
+          {layer === "physical" && artifact === "diagram" && (
             <div style={{ marginTop: 8 }}>
               <label className="dlx-modal-field-label" htmlFor="new-file-dialect">
                 Dialect

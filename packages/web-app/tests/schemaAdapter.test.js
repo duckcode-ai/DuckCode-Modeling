@@ -249,6 +249,78 @@ columns:
   assert.equal(adapted.tables[0].y, 100);
 });
 
+test("adaptDiagramYaml renders diagram-first conceptual entities without model files", () => {
+  const diagramYaml = `
+kind: diagram
+name: sales_concepts
+layer: conceptual
+domain: sales
+entities:
+  - name: Customer
+    type: concept
+    description: Registered customers
+    owner: Revenue Ops
+    x: 100
+    y: 120
+  - name: Sales Order
+    type: concept
+    description: Parts sold to a customer
+    x: 420
+    y: 120
+relationships:
+  - name: customer_places_order
+    from: { entity: Customer }
+    to: { entity: Sales Order }
+    cardinality: one_to_many
+    verb: places
+`;
+  const adapted = adaptDiagramYaml(diagramYaml, []);
+  assert.ok(adapted);
+  assert.equal(adapted.modelKind, "conceptual");
+  assert.equal(adapted.domain, "sales");
+  assert.equal(adapted.tables.length, 2);
+  assert.equal(adapted.tables[0].columns.length, 0);
+  assert.equal(adapted.relationships[0].verb, "places");
+  assert.equal(adapted.relationships[0]._conceptualLevel, true);
+});
+
+test("adaptDiagramYaml renders diagram-first logical keys and roles", () => {
+  const diagramYaml = `
+kind: diagram
+name: sales_logical
+layer: logical
+entities:
+  - name: Customer
+    type: logical_entity
+    fields:
+      - { name: customer_key, type: number, primary_key: true, nullable: false }
+      - { name: customer_code, type: string, unique: true }
+    candidate_keys:
+      - [customer_key]
+      - [customer_code]
+    business_keys:
+      - [customer_code]
+  - name: Sales Order
+    type: associative_entity
+    fields:
+      - { name: customer_key, type: number }
+relationships:
+  - name: order_customer
+    from: { entity: Sales Order, field: customer_key }
+    to: { entity: Customer, field: customer_key }
+    cardinality: many_to_one
+    from_role: order customer
+    to_role: placed orders
+`;
+  const adapted = adaptDiagramYaml(diagramYaml, []);
+  assert.ok(adapted);
+  assert.equal(adapted.modelKind, "logical");
+  assert.equal(adapted.tables[0].candidate_keys.length, 2);
+  assert.equal(adapted.tables[0].business_keys.length, 1);
+  assert.equal(adapted.relationships[0].fromRole, "order customer");
+  assert.equal(adapted.relationships[0].toRole, "placed orders");
+});
+
 test("adaptDiagramYaml keeps same-named entities from different files as distinct nodes", () => {
   const diagramYaml = `
 kind: diagram

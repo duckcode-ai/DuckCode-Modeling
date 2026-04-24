@@ -204,14 +204,19 @@ def _suggest_fix(err) -> Optional[str]:
     return None
 
 
-def iter_yaml_files(root: Path, glob_pattern: str) -> Iterator[Path]:
+def iter_yaml_files(root: Path, glob_pattern: Any) -> Iterator[Path]:
     """Yield files matching the glob relative to root. Streaming — never materializes the full list."""
     # glob returns sorted by Path on most filesystems; sort explicitly for determinism.
-    full = str(root / glob_pattern)
-    for p in sorted(glob.iglob(full, recursive=True)):
-        path = Path(p)
-        if path.is_file():
-            yield path
+    patterns = glob_pattern if isinstance(glob_pattern, list) else [glob_pattern]
+    seen: set[str] = set()
+    for pattern in patterns:
+        full = str(root / str(pattern))
+        for p in sorted(glob.iglob(full, recursive=True)):
+            path = Path(p)
+            seen_key = str(path.resolve()).lower()
+            if path.is_file() and seen_key not in seen:
+                seen.add(seen_key)
+                yield path
 
 
 def load_file(
@@ -340,7 +345,7 @@ def load_project(
         "glossary": (manifest or {}).get("glossary", "glossary/**/*.yaml"),
         "snippets": (manifest or {}).get("snippets", ".datalex/snippets/**/*.yaml"),
         "policies": (manifest or {}).get("policies", "policies/**/*.yaml"),
-        "diagrams": (manifest or {}).get("diagrams", "datalex/diagrams/**/*.yaml"),
+        "diagrams": (manifest or {}).get("diagrams", ["DataLex/Diagrams/**/*.yaml", "datalex/diagrams/**/*.yaml"]),
         "relationships": (manifest or {}).get("relationships", "relationships/**/*.yaml"),
         "data_types": (manifest or {}).get("data_types", "data_types/**/*.yaml"),
         "semantic_models": (manifest or {}).get("semantic_models", "semantic/**/*.yaml"),

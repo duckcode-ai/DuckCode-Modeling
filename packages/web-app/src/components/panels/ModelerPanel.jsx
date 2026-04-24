@@ -1,10 +1,12 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { Boxes, ArrowRightLeft, Shapes, Layers3, Wand2, Plus, Info, KeyRound, Database } from "lucide-react";
+import yaml from "js-yaml";
 import useWorkspaceStore from "../../stores/workspaceStore";
 import useDiagramStore from "../../stores/diagramStore";
 import useUiStore from "../../stores/uiStore";
 import useAuthStore from "../../stores/authStore";
 import { addEntityWithOptions, addRelationship } from "../../lib/yamlRoundTrip";
+import { addDiagramRelationship, addInlineDiagramEntity } from "../../design/yamlPatch";
 import { PanelFrame, PanelSection, PanelEmpty } from "./PanelFrame";
 
 const VIEW_MODES = [
@@ -47,7 +49,7 @@ function allowedTypes(viewMode) {
 }
 
 export default function ModelerPanel() {
-  const { activeFile, activeFileContent, updateContent } = useWorkspaceStore();
+  const { activeFile, activeFileContent, updateContent, createNewFile } = useWorkspaceStore();
   const {
     model,
     selectedEntity,
@@ -75,6 +77,10 @@ export default function ModelerPanel() {
   const [toEntity, setToEntity] = useState("");
   const [toField, setToField] = useState("");
   const [cardinality, setCardinality] = useState("one_to_many");
+  const [targetDomain, setTargetDomain] = useState("core");
+  const [targetModelName, setTargetModelName] = useState("");
+  const [materialization, setMaterialization] = useState("view");
+  const [logicSql, setLogicSql] = useState("select *\nfrom source_model");
 
   useEffect(() => {
     const nextType = defaultEntityType(modelingViewMode, modelKind);
@@ -92,6 +98,12 @@ export default function ModelerPanel() {
 
   const fromEntityFields = entities.find((entity) => entity.name === fromEntity)?.fields || [];
   const toEntityFields = entities.find((entity) => entity.name === toEntity)?.fields || [];
+
+  useEffect(() => {
+    if (!targetModelName && entities[0]?.name) {
+      setTargetModelName(String(entities[0].name).trim().toLowerCase().replace(/[^a-z0-9_]+/g, "_"));
+    }
+  }, [entities, targetModelName]);
 
   useEffect(() => {
     if (!fromEntityFields.some((field) => field.name === fromField)) {
@@ -242,6 +254,38 @@ export default function ModelerPanel() {
       addToast?.({ type: "error", message: "Entity name is required." });
       return;
     }
+    if (activeIsDiagram) {
+      const cleanName = entityName.trim();
+      const result = addInlineDiagramEntity(activeFileContent, {
+        name: cleanName,
+        type: entityType,
+        domain: entitySubjectArea.trim() || model?.model?.domain || "core",
+        subject_area: entitySubjectArea.trim(),
+        fields: [{
+          name: "id",
+          type: "identifier",
+          primary_key: true,
+          nullable: false,
+        }],
+        candidate_keys: [["id"]],
+        x: 120 + entities.length * 32,
+        y: 120 + entities.length * 24,
+        width: 320,
+      });
+      if (!result) {
+        addToast?.({ type: "error", message: "Could not add this entity to the active diagram." });
+        return;
+      }
+      if (result === activeFileContent) {
+        addToast?.({ type: "info", message: `${cleanName} already exists in this diagram.` });
+        return;
+      }
+      updateContent(result);
+      requestLayoutRefresh();
+      setEntityName("");
+      addToast?.({ type: "success", message: `Added ${ENTITY_TYPES[entityType]?.label || entityType} to the diagram.` });
+      return;
+    }
     const result = addEntityWithOptions(activeFileContent, {
       name: entityName.trim(),
       type: entityType,
@@ -263,6 +307,27 @@ export default function ModelerPanel() {
       return;
     }
     const proposedName = relationshipName.trim() || `${fromEntity}_${toEntity}`.replace(/([a-z0-9])([A-Z])/g, "$1_$2").toLowerCase();
+    if (activeIsDiagram) {
+      const next = addDiagramRelationship(activeFileContent, {
+        name: proposedName,
+        from: { entity: fromEntity, field: fromField },
+        to: { entity: toEntity, field: toField },
+        cardinality,
+      });
+      if (!next) {
+        addToast?.({ type: "error", message: "Could not add relationship to the active diagram." });
+        return;
+      }
+      if (next === activeFileContent) {
+        addToast?.({ type: "info", message: "That relationship already exists on this diagram." });
+        return;
+      }
+      updateContent(next);
+      requestLayoutRefresh();
+      setRelationshipName("");
+      addToast?.({ type: "success", message: `Added diagram relationship ${proposedName}.` });
+      return;
+    }
     const result = addRelationship(activeFileContent, proposedName, `${fromEntity}.${fromField}`, `${toEntity}.${toField}`, cardinality);
     if (result.error) {
       addToast?.({ type: "error", message: result.error });
@@ -272,6 +337,62 @@ export default function ModelerPanel() {
     requestLayoutRefresh();
     setRelationshipName("");
     addToast?.({ type: "success", message: `Added relationship ${proposedName}.` });
+  };
+
+  const generateDbtFromLogical = async () => {
+    const modelSlug = String(targetModelName || "").trim().toLowerCase().replace(/[^a-z0-9_]+/g, "_").replace(/^_+|_+$/g, "");
+    const domainSlug = String(targetDomain || "core").trim().toLowerCase().replace(/[^a-z0-9_]+/g, "_").replace(/^_+|_+$/g, "") || "core";
+    if (!modelSlug) {
+      addToast?.({ type: "error", message: "Target dbt model name is required." });
+      return;
+    }
+    const selected = selectedEntity || entities[0];
+    const fields = Array.isArray(selected?.fields) ? selected.fields : [];
+    const columns = fields.map((field) => {
+      const col = {
+        name: String(field.name || ""),
+        description: String(field.description || ""),
+      };
+      if (field.type) col.data_type = String(field.type);
+      const tests = [];
+      if (field.primary_key || field.pk) {
+        tests.push("not_null", "unique");
+      } else if (field.nullable === false) {
+        tests.push("not_null");
+      }
+      if (field.unique) tests.push("unique");
+      if (field.foreign_key?.entity || field.foreign_key?.table || field.fk) {
+        const target = field.foreign_key || {};
+        const entity = target.entity || target.table || String(field.fk || "").split(".")[0];
+        const refField = target.field || target.column || String(field.fk || "").split(".")[1] || "id";
+        tests.push({ relationships: { to: `ref('${entity}')`, field: refField } });
+      }
+      if (tests.length) col.tests = tests;
+      return col;
+    }).filter((column) => column.name);
+    const schemaDoc = {
+      version: 2,
+      models: [{
+        name: modelSlug,
+        description: selected?.description || `Generated from DataLex logical diagram ${activeFile?.name || ""}`.trim(),
+        config: { materialized: materialization },
+        columns,
+      }],
+    };
+    const sqlText = [
+      `{{ config(materialized='${materialization}') }}`,
+      "",
+      logicSql.trim() || "select *\nfrom source_model",
+      "",
+    ].join("\n");
+    const base = `DataLex/Generated/dbt/${domainSlug}`;
+    try {
+      await createNewFile(`${base}/${modelSlug}.sql`, sqlText);
+      await createNewFile(`${base}/${modelSlug}.yml`, yaml.dump(schemaDoc, { lineWidth: 120, noRefs: true, sortKeys: false }));
+      addToast?.({ type: "success", message: `Generated dbt SQL/YAML under ${base}.` });
+    } catch (err) {
+      addToast?.({ type: "error", message: err?.message || "Could not generate dbt files." });
+    }
   };
 
   return (
@@ -305,7 +426,7 @@ export default function ModelerPanel() {
 
       {modelKind === "logical" && (
         <PanelSection title="Logical Readiness" icon={<KeyRound size={11} />}>
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 8 }}>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(0, 1fr))", gap: 8 }}>
             <div className="rounded-lg bg-bg-primary border border-border-primary px-2 py-2 text-[10px] text-text-muted leading-snug">
               Entities: {entities.length}
             </div>
@@ -314,6 +435,60 @@ export default function ModelerPanel() {
             </div>
             <div className="rounded-lg bg-bg-primary border border-border-primary px-2 py-2 text-[10px] text-text-muted leading-snug">
               Business keys: {entities.reduce((n, e) => n + (Array.isArray(e.business_keys) ? e.business_keys.length : 0), 0)}
+            </div>
+            <div className="rounded-lg bg-bg-primary border border-border-primary px-2 py-2 text-[10px] text-text-muted leading-snug">
+              Subtypes: {entities.filter((e) => e.subtype_of).length}
+            </div>
+          </div>
+        </PanelSection>
+      )}
+
+      {modelKind === "logical" && (
+        <PanelSection title="Generate dbt Model" icon={<Database size={11} />}>
+          <div className="space-y-2">
+            <div className="grid grid-cols-3 gap-2">
+              <input
+                value={targetDomain}
+                onChange={(e) => setTargetDomain(e.target.value)}
+                placeholder="domain"
+                className="bg-bg-primary border border-border-primary rounded-md px-3 py-2 text-xs text-text-primary outline-none focus:border-accent-blue"
+                disabled={!canEdit}
+              />
+              <input
+                value={targetModelName}
+                onChange={(e) => setTargetModelName(e.target.value)}
+                placeholder="dbt_model_name"
+                className="bg-bg-primary border border-border-primary rounded-md px-3 py-2 text-xs text-text-primary outline-none focus:border-accent-blue"
+                disabled={!canEdit}
+              />
+              <select
+                value={materialization}
+                onChange={(e) => setMaterialization(e.target.value)}
+                className="bg-bg-primary border border-border-primary rounded-md px-3 py-2 text-xs text-text-primary outline-none focus:border-accent-blue"
+                disabled={!canEdit}
+              >
+                <option value="view">view</option>
+                <option value="table">table</option>
+                <option value="incremental">incremental</option>
+              </select>
+            </div>
+            <textarea
+              value={logicSql}
+              onChange={(e) => setLogicSql(e.target.value)}
+              rows={5}
+              placeholder="select ..."
+              className="w-full bg-bg-primary border border-border-primary rounded-md px-3 py-2 text-xs text-text-primary outline-none focus:border-accent-blue font-mono"
+              disabled={!canEdit}
+            />
+            <button
+              onClick={generateDbtFromLogical}
+              disabled={!canEdit || !targetModelName.trim()}
+              className="w-full px-3 py-2 rounded-md text-xs font-medium bg-accent-blue text-white hover:bg-accent-blue/80 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+            >
+              Generate dbt SQL/YAML
+            </button>
+            <div className="rounded-lg bg-bg-primary border border-border-primary px-2 py-2 text-[10px] text-text-muted leading-snug">
+              Output path: DataLex/Generated/dbt/{targetDomain || "core"}/{targetModelName || "model"}.sql and .yml
             </div>
           </div>
         </PanelSection>
@@ -331,6 +506,14 @@ export default function ModelerPanel() {
             <div className="rounded-lg bg-bg-primary border border-border-primary px-2 py-2 text-[10px] text-text-muted leading-snug">
               Constraints: {(model?.relationships || []).length}
             </div>
+          </div>
+        </PanelSection>
+      )}
+
+      {modelKind === "physical" && activeIsDiagram && (
+        <PanelSection title="dbt-first Physical Flow" icon={<Database size={11} />}>
+          <div className="rounded-lg bg-bg-primary border border-border-primary px-2 py-2 text-[10px] text-text-muted leading-snug">
+            Drag dbt model or source YAML from Explorer onto the canvas, then add physical relationships and constraints in this diagram.
           </div>
         </PanelSection>
       )}

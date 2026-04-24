@@ -64,6 +64,8 @@ export default function NewRelationshipDialog() {
   const editingRelationship = editMode ? (modalPayload?.relationship || null) : null;
   const modelKind = String(modalPayload?.modelKind || "").toLowerCase();
   const conceptualLevel = Boolean(modalPayload?.conceptualLevel) || modelKind === "conceptual";
+  const logicalLevel = modelKind === "logical";
+  const physicalLevel = modelKind === "physical" || (!conceptualLevel && !logicalLevel);
   // Endpoint source: a drag on the canvas pre-fills from/to/columns and the
   // dialog is a one-pane confirmation. The toolbar / command-palette / right-
   // click paths send `tables:[{id,name,columns:[{name}]}]` in the payload and
@@ -87,6 +89,8 @@ export default function NewRelationshipDialog() {
   const [description, setDescription] = useState(String(modalPayload?.description || editingRelationship?.description || ""));
   const [verb, setVerb] = useState(String(modalPayload?.verb || editingRelationship?.verb || ""));
   const [relationshipType, setRelationshipType] = useState(String(modalPayload?.relationshipType || editingRelationship?.relationshipType || ""));
+  const [fromRole, setFromRole] = useState(String(modalPayload?.fromRole || editingRelationship?.fromRole || ""));
+  const [toRole, setToRole] = useState(String(modalPayload?.toRole || editingRelationship?.toRole || ""));
   const [rationale, setRationale] = useState(String(modalPayload?.rationale || editingRelationship?.rationale || ""));
   const [sourceOfTruth, setSourceOfTruth] = useState(String(modalPayload?.sourceOfTruth || editingRelationship?.sourceOfTruth || ""));
   const [error, setError] = useState("");
@@ -189,6 +193,8 @@ export default function NewRelationshipDialog() {
         description: description.trim() || undefined,
         verb: verb.trim() || undefined,
         relationship_type: relationshipType.trim() || undefined,
+        from_role: logicalLevel ? (fromRole.trim() || undefined) : undefined,
+        to_role: logicalLevel ? (toRole.trim() || undefined) : undefined,
         rationale: rationale.trim() || undefined,
         source_of_truth: sourceOfTruth.trim() || undefined,
         _match: {
@@ -261,6 +267,8 @@ export default function NewRelationshipDialog() {
         description: description.trim() || undefined,
         verb: verb.trim() || undefined,
         relationship_type: relationshipType.trim() || undefined,
+        from_role: logicalLevel ? (fromRole.trim() || undefined) : undefined,
+        to_role: logicalLevel ? (toRole.trim() || undefined) : undefined,
         rationale: rationale.trim() || undefined,
         source_of_truth: sourceOfTruth.trim() || undefined,
       });
@@ -306,7 +314,7 @@ export default function NewRelationshipDialog() {
     // the just-written relationship via the narrow patchRelationship
     // helper rather than expanding addRelationship's signature.
     let yamlOut = next;
-    if (identifying || optional || onDelete || description.trim() || verb.trim() || relationshipType.trim() || rationale.trim() || sourceOfTruth.trim() || conceptualLevel) {
+    if (identifying || optional || onDelete || description.trim() || verb.trim() || relationshipType.trim() || fromRole.trim() || toRole.trim() || rationale.trim() || sourceOfTruth.trim() || conceptualLevel) {
       const patched = patchRelationship(yamlOut, targetName, {
         identifying: conceptualLevel ? undefined : (identifying ? true : undefined),
         optional: conceptualLevel ? undefined : (optional ? true : undefined),
@@ -314,6 +322,8 @@ export default function NewRelationshipDialog() {
         description: description.trim() || undefined,
         verb: verb.trim() || undefined,
         relationship_type: relationshipType.trim() || undefined,
+        from_role: logicalLevel ? (fromRole.trim() || undefined) : undefined,
+        to_role: logicalLevel ? (toRole.trim() || undefined) : undefined,
         rationale: rationale.trim() || undefined,
         source_of_truth: sourceOfTruth.trim() || undefined,
       });
@@ -360,7 +370,9 @@ export default function NewRelationshipDialog() {
           ? "Update endpoints, cardinality, and options for this relationship."
           : conceptualLevel
             ? "Declare a business relationship between two concepts."
-            : "Declare a foreign-key edge between two entities. Writes to model YAML."
+            : logicalLevel
+              ? "Declare a platform-neutral logical relationship with roles, cardinality, and optionality."
+              : "Declare a physical dbt/database relationship with FK tests and constraint intent."
       }
       size="md"
       onClose={closeModal}
@@ -545,10 +557,30 @@ export default function NewRelationshipDialog() {
             className="panel-input"
             value={description}
             onChange={(e) => setDescription(e.target.value)}
-            placeholder={conceptualLevel ? "Explain the business relationship." : "Optional relationship note."}
+            placeholder={conceptualLevel ? "Explain the business relationship." : logicalLevel ? "Explain the business rule behind this relationship." : "Describe the physical FK/test/constraint intent."}
             rows={3}
           />
         </div>
+
+        {logicalLevel && (
+          <div className="dlx-modal-section">
+            <label className="dlx-modal-field-label">Role names</label>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+              <input
+                className="panel-input"
+                value={fromRole}
+                onChange={(e) => setFromRole(e.target.value)}
+                placeholder="from role, e.g. order customer"
+              />
+              <input
+                className="panel-input"
+                value={toRole}
+                onChange={(e) => setToRole(e.target.value)}
+                placeholder="to role, e.g. placed order"
+              />
+            </div>
+          </div>
+        )}
 
         {conceptualLevel && (
           <div className="dlx-modal-section">
@@ -629,7 +661,9 @@ export default function NewRelationshipDialog() {
               <span className="status-pill tone-info">{CARDINALITIES.find((c) => c.id === cardinality)?.label || "Relationship"}</span>
               {!conceptualLevel && identifying && <span className="status-pill tone-warning">Identifying</span>}
               {!conceptualLevel && optional && <span className="status-pill tone-neutral">Optional</span>}
-              {!conceptualLevel && onDelete && <span className="status-pill tone-neutral">ON DELETE {onDelete}</span>}
+              {logicalLevel && fromRole && <span className="status-pill tone-neutral">{fromRole}</span>}
+              {logicalLevel && toRole && <span className="status-pill tone-neutral">{toRole}</span>}
+              {physicalLevel && onDelete && <span className="status-pill tone-neutral">ON DELETE {onDelete}</span>}
               {conceptualLevel && verb && <span className="status-pill tone-accent">{verb}</span>}
               {conceptualLevel && relationshipType && <span className="status-pill tone-info">{relationshipType.replace(/_/g, " ")}</span>}
               {conceptualLevel && sourceOfTruth && <span className="status-pill tone-neutral">{sourceOfTruth}</span>}
@@ -639,6 +673,7 @@ export default function NewRelationshipDialog() {
 
         {!conceptualLevel && (
           <>
+            {physicalLevel && (
             <div className="dlx-modal-section">
               <label className="dlx-modal-field-label" htmlFor="rel-ondelete">ON DELETE</label>
               <select
@@ -650,6 +685,7 @@ export default function NewRelationshipDialog() {
                 {ON_DELETE.map((o) => <option key={o.id} value={o.id}>{o.label}</option>)}
               </select>
             </div>
+            )}
 
             <div className="dlx-modal-section">
               <label className="dlx-check" style={{ display: "inline-flex", alignItems: "center", gap: 8, cursor: "pointer" }}>

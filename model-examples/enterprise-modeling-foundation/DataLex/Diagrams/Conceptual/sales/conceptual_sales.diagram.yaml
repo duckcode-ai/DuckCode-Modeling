@@ -1,0 +1,70 @@
+kind: diagram
+name: conceptual_sales
+title: Sales Conceptual Model
+layer: conceptual
+domain: sales
+entities:
+  - name: Customer
+    type: concept
+    domain: sales
+    owner: Revenue Operations
+    description: Registered people or organizations that buy from the business.
+    terms: [account, buyer]
+    x: 80
+    y: 100
+    width: 280
+  - name: Sales Order
+    type: concept
+    domain: sales
+    owner: Order Management
+    description: Commercial commitment placed by a customer for products or services.
+    terms: [order, booking]
+    x: 430
+    y: 100
+    width: 300
+  - name: Loyalty Program
+    type: concept
+    domain: sales
+    owner: Customer Success
+    description: Membership program that classifies customers by benefit level.
+    terms: [tier, rewards]
+    x: 800
+    y: 100
+    width: 320
+  - name: Product
+    type: concept
+    domain: sales
+    owner: Product Operations
+    description: Sellable item or service offered to customers.
+    terms: [sku, catalog item]
+    x: 430
+    y: 360
+    width: 300
+relationships:
+  - name: customer_places_order
+    from:
+      entity: Customer
+    to:
+      entity: Sales Order
+    cardinality: one_to_many
+    verb: places
+    relationship_type: event
+    description: A customer can place many sales orders; each sales order is placed by one customer.
+  - name: customer_participates_in_loyalty
+    from:
+      entity: Customer
+    to:
+      entity: Loyalty Program
+    cardinality: many_to_one
+    verb: participates in
+    relationship_type: reference
+    description: Customers may participate in one loyalty program tiering structure.
+  - name: order_contains_product
+    from:
+      entity: Sales Order
+    to:
+      entity: Product
+    cardinality: many_to_many
+    verb: contains
+    relationship_type: ownership
+    description: Sales orders contain products, and products can appear on many sales orders.

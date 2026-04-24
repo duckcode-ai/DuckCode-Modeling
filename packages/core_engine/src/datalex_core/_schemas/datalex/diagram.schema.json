@@ -9,17 +9,53 @@
     "kind": { "const": "diagram" },
     "name": { "type": "string", "pattern": "^[a-z][a-z0-9_]*$" },
     "layer": { "type": "string", "enum": ["conceptual", "logical", "physical"] },
+    "domain": { "type": "string" },
+    "dialect": { "type": "string" },
     "title": { "type": "string" },
     "description": { "type": "string" },
     "entities": {
       "type": "array",
       "items": {
         "type": "object",
-        "required": ["file", "entity"],
         "additionalProperties": false,
         "properties": {
           "file": { "type": "string" },
+          "name": { "type": "string" },
           "entity": { "type": "string" },
+          "type": { "type": "string" },
+          "layer": { "type": "string", "enum": ["conceptual", "logical", "physical"] },
+          "logical_name": { "type": "string" },
+          "description": { "type": "string" },
+          "domain": { "type": "string" },
+          "subject_area": { "type": "string" },
+          "owner": { "type": "string" },
+          "terms": { "type": "array", "items": { "type": "string" } },
+          "tags": { "type": "array", "items": { "type": "string" } },
+          "fields": {
+            "type": "array",
+            "items": { "type": "object", "additionalProperties": true }
+          },
+          "columns": {
+            "type": "array",
+            "items": { "type": "object", "additionalProperties": true }
+          },
+          "candidate_keys": {
+            "type": "array",
+            "items": { "type": "array", "items": { "type": "string" } }
+          },
+          "alternate_keys": {
+            "type": "array",
+            "items": { "type": "array", "items": { "type": "string" } }
+          },
+          "business_keys": {
+            "type": "array",
+            "items": { "type": "array", "items": { "type": "string" } }
+          },
+          "surrogate_key": { "type": "string" },
+          "natural_key": { "type": "string" },
+          "hash_key": { "type": "string" },
+          "subtype_of": { "type": "string" },
+          "discriminator": { "type": "string" },
           "x": { "type": "number" },
           "y": { "type": "number" },
           "width": { "type": "number" }
@@ -74,9 +110,34 @@
           "optional": { "type": "boolean" },
           "label": { "type": "string" },
           "verb": { "type": "string" },
+          "relationship_type": { "type": "string" },
+          "from_role": { "type": "string" },
+          "to_role": { "type": "string" },
+          "rationale": { "type": "string" },
+          "source_of_truth": { "type": "string" },
           "description": { "type": "string" },
           "on_delete": { "type": "string" },
           "on_update": { "type": "string" }
+        }
+      }
+    },
+    "logic": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "target_model": { "type": "string" },
+        "materialization": { "type": "string" },
+        "sql": { "type": "string" }
+      }
+    },
+    "dbt": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "source": { "type": "string" },
+        "generated_sql": {
+          "type": "array",
+          "items": { "type": "string" }
         }
       }
     },

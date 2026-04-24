@@ -1,0 +1,21 @@
+version: 2
+models:
+  - name: fct_order
+    description: Generated dbt model staged from the logical sales diagram.
+    config:
+      materialized: table
+    columns:
+      - name: order_id
+        data_type: bigint
+        tests: [not_null, unique]
+      - name: customer_id
+        data_type: bigint
+        tests:
+          - not_null
+          - relationships:
+              to: ref('dim_customer')
+              field: customer_id
+      - name: order_date
+        data_type: date
+      - name: total_amount
+        data_type: numeric

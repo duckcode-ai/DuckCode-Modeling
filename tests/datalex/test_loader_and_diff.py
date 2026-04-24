@@ -63,6 +63,26 @@ class ProjectLoaderTests(unittest.TestCase):
             self.assertEqual("pii-email", email_col.get("sensitivity"))
             self.assertIn("pii", email_col.get("tags", []))
 
+    def test_discovers_new_and_legacy_diagram_folders_without_manifest_glob(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "new"
+            legacy_root = Path(tmp) / "legacy"
+            _write(root / "datalex.yaml", "kind: project\nname: t\nversion: '1'\n")
+            _write(
+                root / "DataLex" / "Diagrams" / "Conceptual" / "sales" / "sales.diagram.yaml",
+                "kind: diagram\nname: sales\nlayer: conceptual\nentities: []\nrelationships: []\n",
+            )
+            project = load_project(root, strict=True)
+            self.assertEqual({"sales"}, set(project.diagrams.keys()))
+
+            _write(legacy_root / "datalex.yaml", "kind: project\nname: legacy_t\nversion: '1'\n")
+            _write(
+                legacy_root / "datalex" / "diagrams" / "legacy.diagram.yaml",
+                "kind: diagram\nname: legacy\nlayer: physical\nentities: []\nrelationships: []\n",
+            )
+            legacy_project = load_project(legacy_root, strict=True)
+            self.assertEqual({"legacy"}, set(legacy_project.diagrams.keys()))
+
     def test_loads_canonical_modeling_primitives(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

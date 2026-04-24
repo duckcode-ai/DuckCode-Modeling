@@ -19,6 +19,11 @@ function artifactMeta(path, name, kind = "file") {
   const p = String(path || "").toLowerCase();
   const n = String(name || "").toLowerCase();
   if (kind === "folder") {
+    if (p.includes("datalex/diagrams/conceptual")) return { tone: "conceptual", label: "conceptual", icon: "diagram" };
+    if (p.includes("datalex/diagrams/logical")) return { tone: "logical", label: "logical", icon: "diagram" };
+    if (p.includes("datalex/diagrams/physical")) return { tone: "physical", label: "physical", icon: "diagram" };
+    if (p.includes("datalex/generated/dbt")) return { tone: "dbt", label: "generated", icon: "dbt" };
+    if (p === "datalex" || p.startsWith("datalex/")) return { tone: "diagram", label: "DataLex", icon: "folder" };
     if (p.includes("conceptual")) return { tone: "conceptual", label: "conceptual", icon: "folder" };
     if (p.includes("logical")) return { tone: "logical", label: "logical", icon: "folder" };
     if (p.includes("physical")) return { tone: "physical", label: "physical", icon: "folder" };
@@ -29,7 +34,14 @@ function artifactMeta(path, name, kind = "file") {
     if (p.startsWith("data_types")) return { tone: "datatype", label: "types", icon: "datatype" };
     return { tone: "folder", label: "", icon: "folder" };
   }
-  if (/\.diagram\.ya?ml$/i.test(n)) return { tone: "diagram", label: "diagram", icon: "diagram" };
+  if (/\.diagram\.ya?ml$/i.test(n)) {
+    if (p.includes("datalex/diagrams/conceptual")) return { tone: "conceptual", label: "diagram", icon: "diagram" };
+    if (p.includes("datalex/diagrams/logical")) return { tone: "logical", label: "diagram", icon: "diagram" };
+    if (p.includes("datalex/diagrams/physical")) return { tone: "physical", label: "diagram", icon: "diagram" };
+    return { tone: "diagram", label: "diagram", icon: "diagram" };
+  }
+  if (p.includes("datalex/generated/dbt") && /\.sql$/i.test(n)) return { tone: "dbt", label: "sql", icon: "dbt" };
+  if (p.includes("datalex/generated/dbt") && /\.ya?ml$/i.test(n)) return { tone: "dbt", label: "dbt", icon: "dbt" };
   if (p.includes("/conceptual/")) return { tone: "conceptual", label: "concept", icon: "entity" };
   if (p.includes("/logical/")) return { tone: "logical", label: "logical", icon: "entity" };
   if (p.includes("/physical/")) return { tone: "physical", label: "physical", icon: "entity" };

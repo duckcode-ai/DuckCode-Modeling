@@ -1,0 +1,133 @@
+kind: diagram
+name: logical_sales
+title: Sales Logical Model
+layer: logical
+domain: sales
+entities:
+  - name: Customer
+    type: logical_entity
+    domain: sales
+    description: Party that places orders and may participate in loyalty tiers.
+    fields:
+      - name: customer_key
+        type: number
+        primary_key: true
+        nullable: false
+      - name: customer_code
+        type: string
+        unique: true
+        nullable: false
+      - name: name
+        type: string
+      - name: location_key
+        type: number
+    candidate_keys:
+      - [customer_key]
+      - [customer_code]
+    business_keys:
+      - [customer_code]
+    surrogate_key: customer_key
+    x: 80
+    y: 80
+    width: 320
+  - name: Sales Order
+    type: associative_entity
+    domain: sales
+    description: Logical order relationship between customer and ordered products.
+    fields:
+      - name: sales_order_key
+        type: number
+        primary_key: true
+        nullable: false
+      - name: customer_key
+        type: number
+        nullable: false
+        foreign_key:
+          entity: Customer
+          field: customer_key
+      - name: order_date
+        type: date
+      - name: order_status
+        type: string
+    candidate_keys:
+      - [sales_order_key]
+    x: 470
+    y: 90
+    width: 340
+  - name: Loyalty Customer
+    type: subtype
+    domain: sales
+    subtype_of: Customer
+    discriminator: customer_type
+    fields:
+      - name: customer_key
+        type: number
+        primary_key: true
+        nullable: false
+      - name: loyalty_level
+        type: string
+    x: 80
+    y: 390
+    width: 320
+  - name: Product
+    type: logical_entity
+    domain: sales
+    fields:
+      - name: product_key
+        type: number
+        primary_key: true
+        nullable: false
+      - name: sku
+        type: string
+        unique: true
+      - name: name
+        type: string
+    candidate_keys:
+      - [product_key]
+      - [sku]
+    business_keys:
+      - [sku]
+    x: 470
+    y: 390
+    width: 320
+relationships:
+  - name: customer_places_sales_order
+    from:
+      entity: Sales Order
+      field: customer_key
+    to:
+      entity: Customer
+      field: customer_key
+    cardinality: many_to_one
+    identifying: false
+    from_role: order customer
+    to_role: placed orders
+    description: Every order belongs to one customer; customers can place many orders.
+  - name: loyalty_customer_is_customer
+    from:
+      entity: Loyalty Customer
+      field: customer_key
+    to:
+      entity: Customer
+      field: customer_key
+    cardinality: one_to_one
+    identifying: true
+    relationship_type: subtype
+  - name: sales_order_contains_product
+    from:
+      entity: Sales Order
+    to:
+      entity: Product
+    cardinality: many_to_many
+    relationship_type: associative_entity_required
+    description: Many-to-many relationship that should be resolved through an order line entity before physical generation.
+logic:
+  target_model: fct_sales_order
+  materialization: table
+  sql: |
+    select
+      sales_order_key,
+      customer_key,
+      order_date,
+      order_status
+    from source_model

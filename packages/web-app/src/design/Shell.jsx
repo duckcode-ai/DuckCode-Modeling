@@ -8,7 +8,7 @@
 import React, { useEffect, useState } from "react";
 import {
   Columns3, ShieldCheck, GitCompare, Clock, X,
-  BookOpen, ChevronUp, Wand2,
+  BookOpen, ChevronUp, Wand2, KeyRound, GitBranch, Database, FileCode2, Braces,
 } from "lucide-react";
 
 import yaml from "js-yaml";
@@ -21,7 +21,7 @@ import BottomDrawer from "./BottomDrawer";
 import { DEMO_SCHEMA } from "./demoSchema";
 import { THEMES } from "./notation";
 import { adaptDataLexYaml, adaptDataLexModelYaml, adaptDbtSchemaYaml, adaptDiagramYaml, schemaToPanelModel } from "./schemaAdapter";
-import { appendEntity, addDiagramRelationship, deleteDiagramEntity, deleteEntityDeep, removeFieldRelationship, setEntityDisplay, setDiagramEntityDisplay } from "./yamlPatch";
+import { appendEntity, addDiagramRelationship, deleteDiagramEntity, deleteEntityDeep, removeFieldRelationship, setEntityDisplay, setDiagramEntityDisplay, setInlineDiagramEntityDisplay } from "./yamlPatch";
 import { addRelationship, deleteRelationship as deleteRelationshipYaml } from "../lib/yamlRoundTrip";
 import { shouldShowFirstRun } from "../lib/onboardingTour";
 
@@ -139,17 +139,28 @@ import "../styles/datalex-integration.css";
 const THEME_STORAGE = "datalex.theme";
 const DENSITY_STORAGE = "datalex.density";
 
-const LOGICAL_PHYSICAL_EDIT_BOTTOM_TABS = [
-  { id: "modeler",       label: "Modeler",       icon: Wand2 },
-  { id: "properties",    label: "Properties",    icon: Columns3 },
+const LOGICAL_BOTTOM_TABS = [
+  { id: "modeler",       label: "Studio",        icon: Wand2 },
+  { id: "attributes",    label: "Attributes",    icon: Columns3 },
+  { id: "keys",          label: "Keys",          icon: KeyRound },
+  { id: "relationships", label: "Relationships", icon: GitBranch },
   { id: "validation",    label: "Validation",    icon: ShieldCheck },
-  { id: "diff",          label: "Diff & Gate",   icon: GitCompare },
-  { id: "history",       label: "History",       icon: Clock },
+  { id: "diff",          label: "Diff",          icon: GitCompare },
+];
+
+const PHYSICAL_BOTTOM_TABS = [
+  { id: "modeler",       label: "Studio",        icon: Wand2 },
+  { id: "dbt",           label: "dbt YAML",      icon: Braces },
+  { id: "sql",           label: "SQL Preview",   icon: FileCode2 },
+  { id: "constraints",   label: "Constraints",   icon: Database },
+  { id: "validation",    label: "Validation",    icon: ShieldCheck },
+  { id: "diff",          label: "Diff",          icon: GitCompare },
 ];
 
 const CONCEPTUAL_BOTTOM_TABS = [
   { id: "modeler",       label: "Studio",        icon: Wand2 },
   { id: "dictionary",    label: "Dictionary",    icon: BookOpen },
+  { id: "relationships", label: "Relationships", icon: GitBranch },
   { id: "validation",    label: "Validation",    icon: ShieldCheck },
   { id: "history",       label: "History",       icon: Clock },
 ];
@@ -164,10 +175,86 @@ const LazyFallback = (
   <div style={{ padding: 20, fontSize: 12, color: "var(--text-tertiary)" }}>Loading…</div>
 );
 
+function LayerSupportPanel({ title, eyebrow, description, table, rel, relationships, schema, activeFile, isDiagramFile }) {
+  const tables = Array.isArray(schema?.tables) ? schema.tables : [];
+  const rels = Array.isArray(schema?.relationships) ? schema.relationships : [];
+  const selected = table || null;
+  const columns = Array.isArray(selected?.columns) ? selected.columns : [];
+  const candidateKeys = Array.isArray(selected?.candidate_keys) ? selected.candidate_keys : [];
+  const businessKeys = Array.isArray(selected?.business_keys) ? selected.business_keys : [];
+  return (
+    <div style={{ padding: 16, display: "grid", gap: 12, color: "var(--text-primary)" }}>
+      <div>
+        <div style={{ fontSize: 10, letterSpacing: "0.12em", textTransform: "uppercase", color: "var(--text-tertiary)" }}>{eyebrow}</div>
+        <div style={{ marginTop: 2, fontSize: 15, fontWeight: 700 }}>{title}</div>
+        <div style={{ marginTop: 4, fontSize: 12, color: "var(--text-secondary)", lineHeight: 1.45 }}>{description}</div>
+      </div>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(0, 1fr))", gap: 8 }}>
+        {[
+          ["Active file", activeFile?.name || activeFile?.path || "No file"],
+          ["Layer", schema?.modelKind || "physical"],
+          ["Objects", String(tables.length)],
+          ["Relationships", String(rels.length)],
+        ].map(([label, value]) => (
+          <div key={label} style={{ border: "1px solid var(--border-default)", borderRadius: 8, padding: "8px 10px", background: "var(--bg-1)", minWidth: 0 }}>
+            <div style={{ fontSize: 10, textTransform: "uppercase", letterSpacing: "0.08em", color: "var(--text-tertiary)" }}>{label}</div>
+            <div style={{ marginTop: 3, fontSize: 12, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{value}</div>
+          </div>
+        ))}
+      </div>
+      {selected && (
+        <div style={{ border: "1px solid var(--border-default)", borderRadius: 8, padding: 12, background: "var(--bg-1)" }}>
+          <div style={{ fontSize: 12, fontWeight: 700 }}>{selected.name}</div>
+          <div style={{ marginTop: 6, display: "flex", gap: 6, flexWrap: "wrap", fontSize: 10 }}>
+            {candidateKeys.length > 0 && <span className="status-pill tone-info">{candidateKeys.length} candidate key{candidateKeys.length === 1 ? "" : "s"}</span>}
+            {businessKeys.length > 0 && <span className="status-pill tone-accent">{businessKeys.length} business key{businessKeys.length === 1 ? "" : "s"}</span>}
+            {selected.surrogate_key && <span className="status-pill tone-neutral">Surrogate key</span>}
+            {selected.subtype_of && <span className="status-pill tone-warning">Subtype of {selected.subtype_of}</span>}
+            {isDiagramFile && <span className="status-pill tone-neutral">Diagram scoped</span>}
+          </div>
+          {columns.length > 0 && (
+            <div style={{ marginTop: 10, display: "grid", gap: 6 }}>
+              {columns.slice(0, 8).map((column) => (
+                <div key={column.name} style={{ display: "grid", gridTemplateColumns: "1fr auto", gap: 8, fontSize: 11, color: "var(--text-secondary)" }}>
+                  <span>{column.name}</span>
+                  <span style={{ fontFamily: "var(--font-mono)" }}>{column.type || "untyped"}{column.pk ? " PK" : ""}{column.fk ? " FK" : ""}</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+      {rel && (
+        <div style={{ border: "1px solid var(--border-default)", borderRadius: 8, padding: 12, background: "var(--bg-1)", fontSize: 12 }}>
+          {rel.name}: {rel.from?.table}{rel.from?.col ? `.${rel.from.col}` : ""}{" -> "}{rel.to?.table}{rel.to?.col ? `.${rel.to.col}` : ""}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function BottomPanelContent({ tab, table, rel, relationships, schema, activeFile, isDiagramFile }) {
   let node;
   switch (tab) {
     case "modeler":       node = <ModelerPanel />; break;
+    case "attributes":
+      node = <LayerSupportPanel title="Logical Attributes" eyebrow="Logical" description="Define platform-neutral attributes, logical data types, nullability, and rules before physical dbt generation." table={table} rel={rel} relationships={relationships} schema={schema} activeFile={activeFile} isDiagramFile={isDiagramFile} />;
+      break;
+    case "keys":
+      node = <LayerSupportPanel title="Keys" eyebrow="Logical" description="Review primary, foreign, alternate, candidate, composite, business, natural, surrogate, and hash key intent for the selected entity." table={table} rel={rel} relationships={relationships} schema={schema} activeFile={activeFile} isDiagramFile={isDiagramFile} />;
+      break;
+    case "relationships":
+      node = <LayerSupportPanel title="Relationships" eyebrow={schema?.modelKind || "Model"} description="Review relationship meaning, role names, cardinality, optionality, identifying status, and diagram-scoped edges." table={table} rel={rel} relationships={relationships} schema={schema} activeFile={activeFile} isDiagramFile={isDiagramFile} />;
+      break;
+    case "dbt":
+      node = <LayerSupportPanel title="dbt YAML" eyebrow="Physical" description="Physical diagrams are composed from dbt model/source YAML. Drag dbt YAML files from Explorer into this diagram and model constraints here." table={table} rel={rel} relationships={relationships} schema={schema} activeFile={activeFile} isDiagramFile={isDiagramFile} />;
+      break;
+    case "sql":
+      node = <LayerSupportPanel title="SQL Preview" eyebrow="Physical" description="Generate or export SQL from physical dbt-backed diagrams. Logical diagrams can stage generated dbt SQL/YAML under DataLex/Generated/dbt." table={table} rel={rel} relationships={relationships} schema={schema} activeFile={activeFile} isDiagramFile={isDiagramFile} />;
+      break;
+    case "constraints":
+      node = <LayerSupportPanel title="Constraints" eyebrow="Physical" description="Review physical names, dialect data types, PK/FK/AK flags, relationship tests, nullability, and generated constraint readiness." table={table} rel={rel} relationships={relationships} schema={schema} activeFile={activeFile} isDiagramFile={isDiagramFile} />;
+      break;
     case "properties":
       node = (
         <SelectionSummaryPanel
@@ -1010,8 +1097,9 @@ export default function Shell() {
     let next;
     if (activeIsDiagram) {
       const sourceFile = t._sourceFile || "";
-      if (!sourceFile) return;
-      next = setDiagramEntityDisplay(s.activeFileContent, sourceFile, t.name || t._entityName || t.id, { x: t.x, y: t.y });
+      next = sourceFile
+        ? setDiagramEntityDisplay(s.activeFileContent, sourceFile, t.name || t._entityName || t.id, { x: t.x, y: t.y })
+        : setInlineDiagramEntityDisplay(s.activeFileContent, t.name || t._entityName || t.id, { x: t.x, y: t.y });
     } else {
       next = setEntityDisplay(s.activeFileContent, t.name || t.id, { x: t.x, y: t.y });
     }
@@ -1106,7 +1194,9 @@ export default function Shell() {
   const activeBottomTabs = React.useMemo(
     () => {
       if (activeModelKind === "conceptual") return CONCEPTUAL_BOTTOM_TABS;
-      return isEditable ? LOGICAL_PHYSICAL_EDIT_BOTTOM_TABS : VIEWER_BOTTOM_TABS;
+      if (activeModelKind === "logical") return LOGICAL_BOTTOM_TABS;
+      if (activeModelKind === "physical") return PHYSICAL_BOTTOM_TABS;
+      return isEditable ? PHYSICAL_BOTTOM_TABS : VIEWER_BOTTOM_TABS;
     },
     [activeModelKind, isEditable]
   );

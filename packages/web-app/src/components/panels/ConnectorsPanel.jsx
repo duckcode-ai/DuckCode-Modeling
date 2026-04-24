@@ -1041,7 +1041,7 @@ export default function ConnectorsPanel() {
 
     try {
       const outputRoot = targetRel || "DataLex";
-      const generatedRoot = joinPath(outputRoot, "dbt_models");
+      const generatedRoot = joinPath(outputRoot, "Generated/dbt/imported");
       let targetProject = (projects || []).find(
         (p) => normalizePath(p.path) === normalizePath(repoPath)
       );
@@ -1127,11 +1127,56 @@ export default function ConnectorsPanel() {
         throw new Error(firstErr);
       }
 
+      const diagramSlug = sanitizeModelStem(projectName || dbtScan.repoName || "dbt_physical", "dbt_physical");
+      const diagramPathBase = joinPath(outputRoot, `Diagrams/Physical/imported/postgres/${diagramSlug}.diagram.yaml`);
+      let diagramPath = diagramPathBase;
+      let diagramSuffix = 1;
+      while (reservedNames.has(diagramPath) || (!dbtOverwrite && existingPaths.has(normalizePath(diagramPath)))) {
+        diagramPath = joinPath(outputRoot, `Diagrams/Physical/imported/postgres/${diagramSlug}_${diagramSuffix}.diagram.yaml`);
+        diagramSuffix += 1;
+      }
+      const diagramEntities = generatedFiles.map((file, index) => {
+        const sourceFile = String(file.sourcePath || "").replace(/^\/+/, "");
+        return [
+          `  - file: ${JSON.stringify(sourceFile)}`,
+          "    entity: \"*\"",
+          `    x: ${80 + (index % 3) * 340}`,
+          `    y: ${90 + Math.floor(index / 3) * 260}`,
+        ].join("\n");
+      }).join("\n");
+      const diagramYaml = [
+        "kind: diagram",
+        `name: ${diagramSlug}`,
+        `title: ${JSON.stringify(`${projectName} Physical dbt Model`)}`,
+        "layer: physical",
+        "domain: imported",
+        "dialect: postgres",
+        "entities:",
+        diagramEntities || "[]",
+        "relationships: []",
+        "dbt:",
+        "  source: connected_repo",
+        "  generated_sql: []",
+        "",
+      ].join("\n");
+      if (existingPaths.has(normalizePath(diagramPath)) && dbtOverwrite) {
+        await apiPut("/api/files", {
+          path: joinPath(targetProject.path, diagramPath),
+          content: diagramYaml,
+        });
+      } else {
+        await apiPost(`/api/projects/${targetProject.id}/files`, {
+          name: diagramPath,
+          content: diagramYaml,
+        });
+      }
+      existingPaths.add(normalizePath(diagramPath));
+
       await loadProjects();
       if (dbtAutoOpen) {
         await selectProject(targetProject.id);
         const refreshed = await apiGet(`/api/projects/${targetProject.id}/files`);
-        const firstGeneratedPath = generatedFiles[0]?.relativePath;
+        const firstGeneratedPath = diagramPath || generatedFiles[0]?.relativePath;
         const modelFile = (refreshed.files || []).find((f) => normalizePath(f.path || f.fullPath || f.name) === normalizePath(firstGeneratedPath));
         if (modelFile) {
           await openFile(modelFile);
@@ -1143,6 +1188,7 @@ export default function ConnectorsPanel() {
         success: failedFiles.length === 0,
         project: targetProject,
         generatedFiles,
+        physicalDiagramPath: diagramPath,
         failedFiles,
         generatedCount: generatedFiles.length,
         failedCount: failedFiles.length,
@@ -1155,7 +1201,7 @@ export default function ConnectorsPanel() {
       setStep(2);
       addToast?.({
         type: "success",
-        message: `Converted ${generatedFiles.length} of ${dbtScan.dbtFileCount} dbt file${dbtScan.dbtFileCount === 1 ? "" : "s"} into DataLex models`,
+        message: `Converted ${generatedFiles.length} dbt file${generatedFiles.length === 1 ? "" : "s"} and created a physical diagram`,
       });
       if (failedFiles.length > 0) {
         setError(`${failedFiles.length} dbt file${failedFiles.length === 1 ? "" : "s"} could not be converted. Review the result list.`);
@@ -2068,7 +2114,7 @@ export default function ConnectorsPanel() {
                     className="w-full px-2 py-1 text-[11px] rounded border border-border-primary bg-bg-primary text-text-primary focus:outline-none focus:border-accent-blue"
                   />
                   <div className="text-[9px] text-text-muted mt-1">
-                    Output names use folder + file path, e.g. <code>DataLex/dbt_models/models_src_schema.model.yaml</code>.
+                  Output names use folder + file path, e.g. <code>DataLex/Generated/dbt/imported/models_src_schema.model.yaml</code>, plus a physical diagram under <code>DataLex/Diagrams/Physical</code>.
                   </div>
                 </div>
               </div>
@@ -2108,7 +2154,7 @@ export default function ConnectorsPanel() {
                 className={`flex items-center gap-1.5 px-4 py-1.5 text-[11px] font-semibold rounded-md text-white ${meta.accent} hover:opacity-90 transition-colors disabled:opacity-50`}
               >
                 {loading ? <Loader2 size={11} className="animate-spin" /> : <Download size={11} />}
-                Convert to DataLex Models
+                Convert and Create Physical Diagram
                 <ChevronRight size={11} />
               </button>
             </div>

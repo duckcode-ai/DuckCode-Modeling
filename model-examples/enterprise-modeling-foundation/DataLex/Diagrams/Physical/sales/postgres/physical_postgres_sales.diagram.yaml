@@ -1,0 +1,30 @@
+kind: diagram
+name: physical_postgres_sales
+title: Sales Physical Model - Postgres
+layer: physical
+domain: sales
+dialect: postgres
+entities:
+  - file: models/physical/postgres/dim_customer.yaml
+    entity: dim_customer
+    x: 80
+    y: 100
+  - file: models/physical/postgres/fct_order.yaml
+    entity: fct_order
+    x: 480
+    y: 100
+relationships:
+  - name: fct_order_customer_fk
+    from:
+      entity: fct_order
+      field: customer_id
+    to:
+      entity: dim_customer
+      field: customer_id
+    cardinality: many_to_one
+    optional: false
+    on_delete: restrict
+dbt:
+  source: connected_repo
+  generated_sql:
+    - DataLex/Generated/dbt/sales/fct_order.sql

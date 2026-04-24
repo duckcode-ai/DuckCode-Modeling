@@ -230,6 +230,8 @@ export function adaptDataLexYaml(yamlText) {
       description: r.description ? String(r.description) : "",
       verb: r.verb ? String(r.verb) : "",
       relationshipType: r.relationship_type ? String(r.relationship_type) : "",
+      fromRole: r.from_role ? String(r.from_role) : "",
+      toRole: r.to_role ? String(r.to_role) : "",
       rationale: r.rationale ? String(r.rationale) : "",
       sourceOfTruth: r.source_of_truth ? String(r.source_of_truth) : "",
     });
@@ -919,6 +921,16 @@ export function schemaToPanelModel(schema) {
       schema: table.schema,
       database: table.database,
       row_count: table.rowCount,
+      logical_name: table.logical_name,
+      physical_name: table.physical_name,
+      candidate_keys: Array.isArray(table.candidate_keys) ? table.candidate_keys : [],
+      business_keys: Array.isArray(table.business_keys) ? table.business_keys : [],
+      surrogate_key: table.surrogate_key,
+      natural_key: table.natural_key,
+      hash_key: table.hash_key,
+      alternate_keys: Array.isArray(table.alternate_keys) ? table.alternate_keys : [],
+      subtype_of: table.subtype_of,
+      discriminator: table.discriminator,
       fields: (table.columns || []).map((column) => ({
         name: String(column.name || ""),
         type: String(column.type || ""),
@@ -947,6 +959,8 @@ export function schemaToPanelModel(schema) {
       description: rel.description,
       verb: rel.verb,
       relationship_type: rel.relationshipType,
+      from_role: rel.fromRole,
+      to_role: rel.toRole,
       rationale: rel.rationale,
       source_of_truth: rel.sourceOfTruth,
     })),
@@ -960,6 +974,7 @@ export function adaptDiagramYaml(yamlText, projectFiles) {
   if (!diagram || typeof diagram !== "object") return null;
   const entries = Array.isArray(diagram.entities) ? diagram.entities : [];
   const diagramNodeId = (file, entity) => `${String(file || "").replace(/^[/\\]+/, "")}::${String(entity || "").toLowerCase()}`;
+  const inlineNodeId = (entity) => `diagram::${String(entity || "").toLowerCase()}`;
 
   // Build a fast lookup from projectFiles: [{fullPath, content?, path}].
   const byPath = new Map();
@@ -973,8 +988,14 @@ export function adaptDiagramYaml(yamlText, projectFiles) {
   // duplicate tables on canvas.
   const seen = new Set();
   const refs = [];
+  const inlineEntries = [];
   entries.forEach((e) => {
     const file = String(e?.file || "").replace(/^[/\\]+/, "");
+    if (!file) {
+      const name = String(e?.name || e?.entity || "").trim();
+      if (name) inlineEntries.push(e);
+      return;
+    }
     const entity = String(e?.entity || "").trim();
     if (!file) return;
     const key = `${file}::${entity || "*"}`;
@@ -989,6 +1010,53 @@ export function adaptDiagramYaml(yamlText, projectFiles) {
   const adaptedRefs = [];
   const nodeByScopedName = new Map();
   const nodeIdsByEntity = new Map();
+
+  inlineEntries.forEach((entry, index) => {
+    const rawName = String(entry?.name || entry?.entity || `concept_${index + 1}`).trim();
+    if (!rawName) return;
+    const entityName = rawName.toLowerCase();
+    const nodeId = inlineNodeId(entityName);
+    const cols = columnsFromFields(entry?.fields || entry?.columns || []);
+    const x = Number.isFinite(Number(entry?.x)) ? Number(entry.x) : 80 + (index % 3) * 300;
+    const y = Number.isFinite(Number(entry?.y)) ? Number(entry.y) : 90 + Math.floor(index / 3) * 260;
+    const domain = String(entry?.domain || entry?.subject_area || diagram?.domain || "").trim();
+    const layer = String(diagram?.layer || entry?.layer || "").trim().toLowerCase();
+    const table = {
+      id: nodeId,
+      name: rawName,
+      logical_name: entry?.logical_name ? String(entry.logical_name) : rawName,
+      schema: String(diagram?.name || "diagram"),
+      domain: domain || undefined,
+      subject: String(entry?.subject_area || domain || "Business").trim(),
+      subject_area: String(entry?.subject_area || domain || "").trim() || undefined,
+      description: entry?.description ? String(entry.description) : "",
+      tags: Array.isArray(entry?.tags) ? entry.tags : [],
+      terms: Array.isArray(entry?.terms) ? entry.terms : [],
+      owner: entry?.owner ? String(entry.owner) : "",
+      type: entry?.type ? String(entry.type) : (layer === "logical" ? "logical_entity" : "concept"),
+      x,
+      y,
+      width: Number.isFinite(Number(entry?.width)) ? Number(entry.width) : (layer === "conceptual" ? 280 : 300),
+      manualPosition: Number.isFinite(Number(entry?.x)) && Number.isFinite(Number(entry?.y)),
+      badges: [layer === "logical" ? "LOGICAL" : layer === "physical" ? "DBT" : "BUSINESS"],
+      rowCount: "",
+      columns: cols,
+      _inlineDiagram: true,
+      _entityName: entityName,
+      candidate_keys: Array.isArray(entry?.candidate_keys) ? entry.candidate_keys : [],
+      business_keys: Array.isArray(entry?.business_keys) ? entry.business_keys : [],
+      surrogate_key: entry?.surrogate_key ? String(entry.surrogate_key) : "",
+      natural_key: entry?.natural_key ? String(entry.natural_key) : "",
+      hash_key: entry?.hash_key ? String(entry.hash_key) : "",
+      alternate_keys: Array.isArray(entry?.alternate_keys) ? entry.alternate_keys : [],
+      subtype_of: entry?.subtype_of ? String(entry.subtype_of) : "",
+      discriminator: entry?.discriminator ? String(entry.discriminator) : "",
+    };
+    allTables.push(table);
+    const bucket = nodeIdsByEntity.get(entityName) || [];
+    if (!bucket.includes(nodeId)) bucket.push(nodeId);
+    nodeIdsByEntity.set(entityName, bucket);
+  });
 
   const upsertRelationship = (relationship, precedence = 0) => {
     const key = `${relationship?.from?.table || ""}.${relationship?.from?.col || "*"}->${relationship?.to?.table || ""}.${relationship?.to?.col || "*"}`;
@@ -1091,8 +1159,10 @@ export function adaptDiagramYaml(yamlText, projectFiles) {
         _fromEntityName: fromEntity,
         _toEntityName: toEntity,
         _conceptualLevel: !r?.from?.col && !r?.to?.col,
-        relationshipType: r?.relationshipType ? String(r.relationshipType) : "",
-        rationale: r?.rationale ? String(r.rationale) : "",
+      relationshipType: r?.relationshipType ? String(r.relationshipType) : "",
+      fromRole: r?.fromRole ? String(r.fromRole) : "",
+      toRole: r?.toRole ? String(r.toRole) : "",
+      rationale: r?.rationale ? String(r.rationale) : "",
         sourceOfTruth: r?.sourceOfTruth ? String(r.sourceOfTruth) : "",
       }, origin === "field_fk" ? 0 : 1);
     });
@@ -1139,6 +1209,8 @@ export function adaptDiagramYaml(yamlText, projectFiles) {
       description: r?.description ? String(r.description) : "",
       verb: r?.verb ? String(r.verb) : "",
       relationshipType: r?.relationship_type ? String(r.relationship_type) : "",
+      fromRole: r?.from_role ? String(r.from_role) : "",
+      toRole: r?.to_role ? String(r.to_role) : "",
       rationale: r?.rationale ? String(r.rationale) : "",
       sourceOfTruth: r?.source_of_truth ? String(r.source_of_truth) : "",
     }, 2);
@@ -1187,18 +1259,22 @@ export function adaptDiagramYaml(yamlText, projectFiles) {
     area.count = allTables.reduce((n, t) => n + (t.subject_area === area.name ? 1 : 0), 0);
   }
 
+  const declaredLayer = String(diagram?.layer || "").trim().toLowerCase();
   const modelKinds = new Set(
     adaptedRefs
       .map(({ adapted }) => String(adapted?.modelKind || "physical").trim().toLowerCase())
       .filter(Boolean)
   );
-  const diagramModelKind = modelKinds.size === 1 ? Array.from(modelKinds)[0] : "physical";
+  const diagramModelKind = ["conceptual", "logical", "physical"].includes(declaredLayer)
+    ? declaredLayer
+    : (modelKinds.size === 1 ? Array.from(modelKinds)[0] : "physical");
 
   return {
     name: String(diagram.title || diagram.name || "Diagram"),
     engine: "DataLex Diagram",
     schema: "diagram",
     modelKind: diagramModelKind,
+    domain: String(diagram.domain || "").trim(),
     tables: allTables,
     relationships: filteredRels,
     subjectAreas: diagramSubjectAreas,

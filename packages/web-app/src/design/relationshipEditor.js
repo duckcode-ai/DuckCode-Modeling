@@ -36,6 +36,8 @@ export function buildRelationshipEditorPayload(rel, tables = []) {
     description: rel.description || "",
     verb: rel.verb || "",
     relationshipType: rel.relationshipType || "",
+    fromRole: rel.fromRole || "",
+    toRole: rel.toRole || "",
     rationale: rel.rationale || "",
     sourceOfTruth: rel.sourceOfTruth || "",
   };

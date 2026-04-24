@@ -165,6 +165,30 @@ const ISSUE_GUIDANCE = {
     why: "Cross-domain relationships are where business boundaries blur, so they need explicit explanation.",
     nextStep: "Add a description that explains why the two bounded contexts connect and what the relationship means.",
   },
+  CONCEPTUAL_WEAK_RELATIONSHIP_VERB: {
+    why: "Conceptual relationships should read like business language, not just a technical edge.",
+    nextStep: "Add a verb phrase such as places, owns, participates in, contains, or based in.",
+  },
+  LOGICAL_MISSING_CANDIDATE_KEY: {
+    why: "Logical models need candidate keys so identity is clear before physical PK choices are made.",
+    nextStep: "Declare candidate_keys for each logical entity, even when the physical model later uses a surrogate key.",
+  },
+  LOGICAL_MANY_TO_MANY_NEEDS_ASSOCIATIVE_ENTITY: {
+    why: "A many-to-many relationship must be resolved before physical generation can create reliable dbt tables.",
+    nextStep: "Add an associative entity or bridge entity and connect both sides through it.",
+  },
+  LOGICAL_UNRESOLVED_TYPE: {
+    why: "Logical attributes need platform-neutral types so they can map cleanly into physical dialect types.",
+    nextStep: "Set a logical type such as string, number, date, timestamp, boolean, identifier, or money.",
+  },
+  PHYSICAL_MISSING_DBT_SOURCE: {
+    why: "Physical diagrams should be grounded in dbt model/source YAML so the canvas reflects runnable assets.",
+    nextStep: "Drag dbt YAML files from Explorer onto the physical diagram.",
+  },
+  PHYSICAL_MISSING_SQL_OUTPUT: {
+    why: "Physical release readiness needs generated or referenced SQL so the model can become runnable.",
+    nextStep: "Generate or link dbt SQL under DataLex/Generated/dbt for the physical model.",
+  },
   CONCEPTUAL_MISSING_DOMAIN: {
     why: "The model domain tells consumers which business area owns the conceptual view.",
     nextStep: "Set model.domain to the bounded context or enterprise domain this conceptual model covers.",
@@ -216,6 +240,72 @@ function issueTarget(issue) {
   const quoted = String(issue?.message || "").match(/'([^']+)'/);
   if (quoted) return quoted[1];
   return "General";
+}
+
+function endpointEntityName(value) {
+  if (typeof value === "string") return value.split(".")[0];
+  return value?.entity || value?.table || "";
+}
+
+function runLayerChecks(activeFileContent, activeFile) {
+  let doc;
+  try { doc = yaml.load(activeFileContent); } catch (_err) { return []; }
+  if (!doc || typeof doc !== "object") return [];
+  const layer = String(doc.layer || doc.model?.layer || doc.model?.kind || "").toLowerCase();
+  const isDiagram = String(doc.kind || "").toLowerCase() === "diagram" || /\.diagram\.ya?ml$/i.test(activeFile?.name || activeFile?.path || "");
+  const entities = Array.isArray(doc.entities) ? doc.entities : [];
+  const relationships = Array.isArray(doc.relationships) ? doc.relationships : [];
+  const issues = [];
+
+  if (layer === "conceptual") {
+    entities.forEach((entity, index) => {
+      if (entity?.file) return;
+      const name = entity?.name || entity?.entity || `Concept ${index + 1}`;
+      if (!entity?.description) issues.push({ severity: "warn", code: "CONCEPTUAL_MISSING_DESCRIPTION", path: `/entities/${name}`, message: `${name} needs a business definition.` });
+      if (!entity?.domain && !entity?.subject_area && !doc.domain) issues.push({ severity: "warn", code: "CONCEPTUAL_MISSING_SUBJECT_AREA", path: `/entities/${name}`, message: `${name} should be assigned to a business domain.` });
+    });
+    relationships.forEach((rel, index) => {
+      if (!rel?.verb && !rel?.label) issues.push({ severity: "warn", code: "CONCEPTUAL_WEAK_RELATIONSHIP_VERB", path: `/relationships/${index}`, message: `${rel?.name || "Relationship"} needs a business verb phrase.` });
+    });
+  }
+
+  if (layer === "logical") {
+    const entityNames = new Set(entities.map((entity) => String(entity?.name || entity?.entity || "").toLowerCase()).filter(Boolean));
+    entities.forEach((entity, index) => {
+      if (entity?.file) return;
+      const name = entity?.name || entity?.entity || `Entity ${index + 1}`;
+      const fields = Array.isArray(entity?.fields) ? entity.fields : (Array.isArray(entity?.columns) ? entity.columns : []);
+      if (!Array.isArray(entity?.candidate_keys) || entity.candidate_keys.length === 0) {
+        issues.push({ severity: "warn", code: "LOGICAL_MISSING_CANDIDATE_KEY", path: `/entities/${name}`, message: `${name} needs at least one candidate key.` });
+      }
+      fields.forEach((field) => {
+        if (!field?.type) issues.push({ severity: "warn", code: "LOGICAL_UNRESOLVED_TYPE", path: `/entities/${name}/fields/${field?.name || "field"}`, message: `${name}.${field?.name || "field"} needs a logical data type.` });
+      });
+    });
+    relationships.forEach((rel, index) => {
+      const from = String(endpointEntityName(rel?.from)).toLowerCase();
+      const to = String(endpointEntityName(rel?.to)).toLowerCase();
+      if (String(rel?.cardinality || "").toLowerCase() === "many_to_many") {
+        const hasAssociative = entities.some((entity) => {
+          const type = String(entity?.type || "").toLowerCase();
+          const name = String(entity?.name || "").toLowerCase();
+          return type.includes("associative") || type.includes("bridge") || (from && to && name.includes(from) && name.includes(to));
+        });
+        if (!hasAssociative) issues.push({ severity: "warn", code: "LOGICAL_MANY_TO_MANY_NEEDS_ASSOCIATIVE_ENTITY", path: `/relationships/${index}`, message: `${rel?.name || "Many-to-many relationship"} should be resolved with an associative entity.` });
+      }
+      if ((from && !entityNames.has(from)) || (to && !entityNames.has(to))) {
+        issues.push({ severity: "warn", code: "RELATIONSHIP_REF_NOT_FOUND", path: `/relationships/${index}`, message: `${rel?.name || "Relationship"} points at an entity that is not in this logical diagram.` });
+      }
+    });
+  }
+
+  if (layer === "physical" && isDiagram) {
+    const dbtBacked = entities.some((entity) => entity?.file && /(^|\/)(models|sources|seeds|snapshots|analyses)\//i.test(String(entity.file)));
+    if (!dbtBacked) issues.push({ severity: "warn", code: "PHYSICAL_MISSING_DBT_SOURCE", path: "/entities", message: "Physical diagram should reference dbt model/source YAML files." });
+    const generated = Array.isArray(doc?.dbt?.generated_sql) ? doc.dbt.generated_sql : [];
+    if (generated.length === 0) issues.push({ severity: "info", code: "PHYSICAL_MISSING_SQL_OUTPUT", path: "/dbt/generated_sql", message: "No generated SQL is linked for this physical diagram yet." });
+  }
+  return issues;
 }
 
 function groupIssuesByTarget(issues) {
@@ -667,20 +757,25 @@ export default function ValidationPanel() {
     }
   }, [activeFileContent, activeFile]);
 
+  const layerFindings = useMemo(() => {
+    if (!activeFileContent) return [];
+    return runLayerChecks(activeFileContent, activeFile);
+  }, [activeFileContent, activeFile]);
+
   const errors = currentCheck?.errors || [];
   const allNudges = (currentCheck?.warnings || []).filter((w) => NUDGE_CODES.has(w.code));
   const warnings = (currentCheck?.warnings || []).filter((w) => !NUDGE_CODES.has(w.code));
   const dimensionalIssues = allNudges.filter((w) => DIMENSIONAL_CODES.has(w.code));
   const gaps = allNudges.filter((w) => !DIMENSIONAL_CODES.has(w.code));
   const completeness = currentCheck?.completeness || null;
-  const modelQualityIssues = [...warnings, ...dimensionalIssues];
-  const coverageIssues = [...gaps, ...dbtFindings];
+  const modelQualityIssues = [...warnings, ...dimensionalIssues, ...layerFindings.filter((issue) => issue.severity !== "info")];
+  const coverageIssues = [...gaps, ...dbtFindings, ...layerFindings.filter((issue) => issue.severity === "info")];
 
   /* Summary cluster shown in the header's `actions` slot. One status
      pill per category; zero-count categories collapse to a single
      "No errors" success pill so the header never feels empty. */
   const totalIssues =
-    errors.length + warnings.length + dimensionalIssues.length + gaps.length + dbtFindings.length;
+    errors.length + warnings.length + dimensionalIssues.length + gaps.length + dbtFindings.length + layerFindings.length;
   const blockerCount = errors.length + danglingFindings.length;
   const headerStatus = activeFileContent ? (
     <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
