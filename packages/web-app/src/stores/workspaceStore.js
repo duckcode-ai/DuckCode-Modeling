@@ -1729,7 +1729,7 @@ const useWorkspaceStore = create((set, get) => ({
     const folder = String(targetFolder || "").replace(/^\/+|\/+$/g, "");
     const subpath = folder
       ? `${folder}/${clean}.diagram.yaml`
-      : `DataLex/Diagrams/Physical/core/postgres/${clean}.diagram.yaml`;
+      : `DataLex/core/Physical/postgres/${clean}.diagram.yaml`;
     const content =
       `kind: diagram\n` +
       `name: ${clean}\n` +

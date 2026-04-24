@@ -63,9 +63,12 @@ export default function ModelerPanel() {
   const canEdit = canEditFn();
 
   const modelKind = model?.model?.layer || model?.model?.kind || "physical";
+  const activeLayer = ["conceptual", "logical", "physical"].includes(String(modelKind || "").toLowerCase())
+    ? String(modelKind || "").toLowerCase()
+    : modelingViewMode;
   const entities = Array.isArray(model?.entities) ? model.entities : [];
   const subjectAreas = Array.isArray(model?.subject_areas) ? model.subject_areas : [];
-  const entityOptions = useMemo(() => allowedTypes(modelingViewMode), [modelingViewMode]);
+  const entityOptions = useMemo(() => allowedTypes(activeLayer), [activeLayer]);
 
   const [entityType, setEntityType] = useState(defaultEntityType(modelingViewMode, modelKind));
   const [entityName, setEntityName] = useState("");
@@ -83,9 +86,9 @@ export default function ModelerPanel() {
   const [logicSql, setLogicSql] = useState("select *\nfrom source_model");
 
   useEffect(() => {
-    const nextType = defaultEntityType(modelingViewMode, modelKind);
-    setEntityType((current) => (allowedTypes(modelingViewMode).includes(current) ? current : nextType));
-  }, [modelingViewMode, modelKind]);
+    const nextType = defaultEntityType(activeLayer, modelKind);
+    setEntityType((current) => (allowedTypes(activeLayer).includes(current) ? current : nextType));
+  }, [activeLayer, modelKind]);
 
   useEffect(() => {
     if (!entities.some((entity) => entity.name === fromEntity)) {
@@ -385,7 +388,7 @@ export default function ModelerPanel() {
       logicSql.trim() || "select *\nfrom source_model",
       "",
     ].join("\n");
-    const base = `DataLex/Generated/dbt/${domainSlug}`;
+    const base = `DataLex/${domainSlug}/Generated/dbt`;
     try {
       await createNewFile(`${base}/${modelSlug}.sql`, sqlText);
       await createNewFile(`${base}/${modelSlug}.yml`, yaml.dump(schemaDoc, { lineWidth: 120, noRefs: true, sortKeys: false }));
@@ -407,12 +410,22 @@ export default function ModelerPanel() {
           {VIEW_MODES.map((view) => (
             <button
               key={view.id}
-              onClick={() => setModelingViewMode(view.id)}
+              onClick={() => {
+                setModelingViewMode(view.id);
+                if (view.id !== activeLayer) {
+                  openModal("newFile", {
+                    layerHint: view.id,
+                    artifact: "diagram",
+                    domainHint: model?.domain || "core",
+                  });
+                }
+              }}
               className={`rounded-lg border px-2 py-2 text-left transition-colors ${
-                modelingViewMode === view.id
+                activeLayer === view.id
                   ? "border-accent-blue bg-accent-blue/10 text-text-primary"
                   : "border-border-primary bg-bg-primary text-text-secondary hover:bg-bg-hover"
               }`}
+              title={activeLayer === view.id ? `Current ${view.label.toLowerCase()} diagram` : `Create or open a ${view.label.toLowerCase()} diagram`}
             >
               <div className="text-[11px] font-semibold">{view.label}</div>
               <div className="text-[10px] text-text-muted mt-1 leading-snug">{view.description}</div>
@@ -420,7 +433,7 @@ export default function ModelerPanel() {
           ))}
         </div>
         <div className="text-[11px] text-text-muted mt-2">
-          Model kind: <span className="font-medium text-text-secondary">{modelKind}</span>
+          Active layer: <span className="font-medium text-text-secondary">{activeLayer}</span>
         </div>
       </PanelSection>
 
@@ -488,7 +501,7 @@ export default function ModelerPanel() {
               Generate dbt SQL/YAML
             </button>
             <div className="rounded-lg bg-bg-primary border border-border-primary px-2 py-2 text-[10px] text-text-muted leading-snug">
-              Output path: DataLex/Generated/dbt/{targetDomain || "core"}/{targetModelName || "model"}.sql and .yml
+              Output path: DataLex/{targetDomain || "core"}/Generated/dbt/{targetModelName || "model"}.sql and .yml
             </div>
           </div>
         </PanelSection>

@@ -69,7 +69,7 @@ class ProjectLoaderTests(unittest.TestCase):
             legacy_root = Path(tmp) / "legacy"
             _write(root / "datalex.yaml", "kind: project\nname: t\nversion: '1'\n")
             _write(
-                root / "DataLex" / "Diagrams" / "Conceptual" / "sales" / "sales.diagram.yaml",
+                root / "DataLex" / "sales" / "Conceptual" / "sales.diagram.yaml",
                 "kind: diagram\nname: sales\nlayer: conceptual\nentities: []\nrelationships: []\n",
             )
             project = load_project(root, strict=True)

@@ -8,4 +8,4 @@ models: models/**/*.yaml
 relationships: relationships/**/*.yaml
 data_types: data_types/**/*.yaml
 semantic_models: semantic/**/*.yaml
-diagrams: DataLex/Diagrams/**/*.yaml
+diagrams: DataLex/**/*.diagram.yaml

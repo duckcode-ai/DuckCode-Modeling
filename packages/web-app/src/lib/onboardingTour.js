@@ -16,7 +16,7 @@
 import { driver } from "driver.js";
 import "driver.js/dist/driver.css";
 
-export const TOUR_VERSION = 1;
+export const TOUR_VERSION = 2;
 const STORAGE_KEY = "datalex.onboarding.seen";
 
 /** The steps, in order. Each step is a driver.js PopoverStep. */
@@ -25,7 +25,7 @@ const TOUR_STEPS = [
     popover: {
       title: "Welcome to DataLex",
       description:
-        "DataLex is a git-native visual studio for dbt models. This 60-second tour walks through the icons and panels you'll use most. You can press <kbd>Esc</kbd> to skip at any point — it's always available from the Settings menu.",
+        "DataLex is a git-native modeling workbench for conceptual, logical, and physical dbt-centered models. This tour walks through the icons and panels used to create, relate, validate, and save YAML assets.",
       side: "over",
       align: "center",
     },
@@ -33,9 +33,19 @@ const TOUR_STEPS = [
   {
     element: '[data-tour="import-dbt"]',
     popover: {
-      title: "1 · Import your dbt repo",
+      title: "1 · Import dbt when you need physical models",
       description:
-        "Start here. Paste a public git URL (e.g. <code>https://github.com/dbt-labs/jaffle-shop</code>) or pick a local folder. Every model in <code>manifest.json</code> becomes a DataLex YAML entity — the Explorer on the left fills in immediately.",
+        "Start from a local dbt folder or a public git URL. DataLex keeps the original dbt YAML visible and creates a physical diagram you can use for table relationships, constraints, and SQL readiness.",
+      side: "bottom",
+      align: "start",
+    },
+  },
+  {
+    element: '[data-tour="new-modeling-asset"]',
+    popover: {
+      title: "2 · Create by modeling layer",
+      description:
+        "The + button now asks for <strong>Conceptual</strong>, <strong>Logical</strong>, or <strong>Physical</strong>. New diagrams use the domain-first structure <code>DataLex/&lt;domain&gt;/Conceptual|Logical|Physical</code>.",
       side: "bottom",
       align: "start",
     },
@@ -43,29 +53,29 @@ const TOUR_STEPS = [
   {
     element: '[data-tour="explorer-files"]',
     popover: {
-      title: "2 · The Explorer is your source of truth",
+      title: "3 · Explorer shows the real YAML tree",
       description:
-        "Every <code>.yml</code> you see is a real file on disk. Right-click any folder for <strong>New file</strong>, <strong>New folder</strong>, <strong>New diagram here…</strong>, rename, or delete — destructive actions show an impact preview before they cascade.",
+        "Every file here is on disk. DataLex assets live under one parent folder by domain, while dbt model, source, semantic, and generated YAML files remain visible for Git review.",
       side: "right",
       align: "start",
     },
   },
   {
-    element: '[data-tour="new-diagram"]',
+    element: '[data-tour="workbench-studio"]',
     popover: {
-      title: "3 · Create a diagram",
+      title: "4 · Work in the right layer mode",
       description:
-        "Click the Layers icon to create a <code>.diagram.yaml</code> under <code>DataLex/diagrams/</code>. A diagram is just a curated view over your models — you can have many, each with its own layout.",
+        "The canvas toolbar changes by layer: conceptual adds business concepts, logical adds entities and keys, and physical opens dbt-backed table, constraint, and SQL workflows.",
       side: "bottom",
-      align: "end",
+      align: "center",
     },
   },
   {
     element: '[data-tour="add-entities"]',
     popover: {
-      title: "4 · Populate the canvas",
+      title: "5 · Compose diagrams from YAML",
       description:
-        "Open a diagram, click <strong>Add Entities</strong>, search / filter / multi-select across every model in the project. Entities auto-layout via ELK on add. Dragging a <code>schema.yml</code> straight onto the canvas works too.",
+        "In physical mode, drag dbt YAML from Explorer onto the diagram. In conceptual and logical modes, create diagram-first boxes and keep the business or logical design in the diagram YAML.",
       side: "bottom",
       align: "center",
     },
@@ -73,9 +83,9 @@ const TOUR_STEPS = [
   {
     element: '[data-tour="add-relationship"]',
     popover: {
-      title: "5 · Wire up relationships",
+      title: "6 · Add relationships by layer",
       description:
-        "Click <strong>Add Relationship</strong> or drag between the tiny column handles on two entities. Endpoints are validated against the resolved model graph — typos get an inline error, nothing writes until you confirm.",
+        "Click <strong>Add Relationship</strong> or drag from a relationship handle. Conceptual relationships use business verbs, logical relationships capture roles and cardinality, and physical relationships capture dbt/database intent.",
       side: "bottom",
       align: "center",
     },
@@ -83,9 +93,9 @@ const TOUR_STEPS = [
   {
     element: '[data-tour="panel-tab-validation"]',
     popover: {
-      title: "6 · Validation + dangling scan",
+      title: "7 · Validate what matters for the layer",
       description:
-        "The Validation panel aggregates every lint warning across the tree, grouped by file. If any relationship points at a missing entity or column, a red <strong>Dangling relationships</strong> banner lets you prune them in one click.",
+        "Validation is layer-aware: conceptual checks definitions and domains, logical checks keys and unresolved types, and physical checks dbt YAML, SQL output, names, and relationship readiness.",
       side: "top",
       align: "start",
     },
@@ -93,9 +103,9 @@ const TOUR_STEPS = [
   {
     element: '[data-tour="save-all"]',
     popover: {
-      title: "7 · Save All → git diff",
+      title: "8 · Save All, then review in Git",
       description:
-        "Every UI edit is merge-safe: shared <code>schema.yml</code> files route through the core-engine merge helper so sibling models aren't clobbered. Partial failures return a structured error listing exactly which files didn't land. Then just <code>git commit</code>.",
+        "Every edit is YAML on disk. Save All flushes the workbench, generated dbt assets, and diagram files so your next step is a normal Git diff and commit.",
       side: "bottom",
       align: "end",
     },
@@ -105,7 +115,7 @@ const TOUR_STEPS = [
     popover: {
       title: "You're ready",
       description:
-        "You can replay this tour anytime from <strong>Settings → Replay onboarding tour</strong>. Full tutorials live under <code>docs/tutorials/</code> in the repo. Happy modeling.",
+        "You can replay this tour anytime from <strong>Settings → Replay onboarding tour</strong>.",
       side: "bottom",
       align: "end",
     },
@@ -126,12 +136,13 @@ function buildDriver(onDoneOrClose) {
     prevBtnText: "← Back",
     doneBtnText: "Finish",
     steps: TOUR_STEPS,
-    onDestroyStarted: () => {
-      // Fires on both Esc and the close X — mark as seen so we don't
-      // nag the user again on refresh. If the user wants it back, the
-      // Settings button spawns a fresh run.
+    onDestroyStarted: (_element, _step, context) => {
+      // Driver.js calls this before it removes the overlay. If we do not
+      // explicitly destroy here, the Finish / close action marks the tour
+      // seen but leaves the final popover on screen.
       markTourSeen();
       if (typeof onDoneOrClose === "function") onDoneOrClose();
+      context?.driver?.destroy();
     },
   });
 }

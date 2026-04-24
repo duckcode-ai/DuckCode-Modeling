@@ -55,15 +55,14 @@ original `.yml` files — `git status` shows real diffs.
 **Build your first ER diagram:**
 
 1. Click **Import dbt repo → Local folder** → pick your project root
-2. In the Explorer, right-click any folder → **New diagram here…**
-   (or use the Explorer toolbar's **New Diagram** button for the
-   default `datalex/diagrams/` location)
-3. Open the new `.diagram.yaml` and click **Add Entities** on the
-   canvas toolbar — multi-select with search + domain filter, then
-   confirm. Entities auto-layout via ELK on add. You can also drag
-   any `schema.yml` / `.model.yaml` from the Explorer onto the canvas
-   as an alternative — FK edges from `tests: - relationships:` render
-   automatically.
+2. Click **New modeling asset** and choose Conceptual, Logical, or
+   Physical. New diagrams use the domain-first structure
+   `DataLex/<domain>/<Conceptual|Logical|Physical>/...`.
+3. Open the new `.diagram.yaml`. Conceptual and logical diagrams can
+   create boxes directly; physical diagrams are dbt-first, so drag any
+   `schema.yml` / `.model.yaml` from the Explorer onto the canvas.
+   Relationship handles on each card create business, logical, or
+   physical relationships for the active layer.
 4. Drag to reposition → **Save All** → positions persist in the
    diagram file; `git commit` picks them up. Save All is merge-safe:
    multiple in-memory docs targeting the same `schema.yml` are merged

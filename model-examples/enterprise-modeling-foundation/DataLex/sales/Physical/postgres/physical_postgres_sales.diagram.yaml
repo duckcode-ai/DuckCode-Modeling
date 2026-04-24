@@ -27,4 +27,4 @@ relationships:
 dbt:
   source: connected_repo
   generated_sql:
-    - DataLex/Generated/dbt/sales/fct_order.sql
+    - DataLex/sales/Generated/dbt/fct_order.sql

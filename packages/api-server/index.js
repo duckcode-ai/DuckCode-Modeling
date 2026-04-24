@@ -415,7 +415,10 @@ async function bootstrapProjectStructure(projectPath, { initializeGit = false } 
 
   const dirs = [
     DATALEX_WORKSPACE_ROOT,
-    join(DATALEX_WORKSPACE_ROOT, "diagrams"),
+    join(DATALEX_WORKSPACE_ROOT, "core", "Conceptual"),
+    join(DATALEX_WORKSPACE_ROOT, "core", "Logical"),
+    join(DATALEX_WORKSPACE_ROOT, "core", "Physical", "postgres"),
+    join(DATALEX_WORKSPACE_ROOT, "core", "Generated", "dbt"),
     join(DATALEX_WORKSPACE_ROOT, "domains"),
     join(DATALEX_WORKSPACE_ROOT, "projects"),
     "migrations/snowflake",
@@ -2124,7 +2127,7 @@ async function resolveProjectAndModelPath(projectId) {
 // through git. Silent on errors (callers are project-open hooks, not actionable).
 function ensureWorkspaceFolders(rootPath) {
   try {
-    for (const rel of ["diagrams", "domains", "projects"]) {
+    for (const rel of ["core/Conceptual", "core/Logical", "core/Physical/postgres", "core/Generated/dbt", "domains", "projects"]) {
       const fullDir = join(rootPath, rel);
       if (!existsSync(fullDir)) {
         mkdirSync(fullDir, { recursive: true });
@@ -3390,7 +3393,7 @@ app.post("/api/dbt/import", requireAdmin, express.json({ limit: "2mb" }), async 
       const seed = ensureWorkspaceFolders(workspaceRoot);
       if (!seed.ok) {
         writeFailures.push({
-          path: `${DATALEX_WORKSPACE_ROOT}/diagrams/.gitkeep`,
+          path: `${DATALEX_WORKSPACE_ROOT}/core/Conceptual/.gitkeep`,
           code: "INTERNAL",
           error: seed.error,
         });

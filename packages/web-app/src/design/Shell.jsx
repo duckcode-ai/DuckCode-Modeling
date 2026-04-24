@@ -250,7 +250,7 @@ function BottomPanelContent({ tab, table, rel, relationships, schema, activeFile
       node = <LayerSupportPanel title="dbt YAML" eyebrow="Physical" description="Physical diagrams are composed from dbt model/source YAML. Drag dbt YAML files from Explorer into this diagram and model constraints here." table={table} rel={rel} relationships={relationships} schema={schema} activeFile={activeFile} isDiagramFile={isDiagramFile} />;
       break;
     case "sql":
-      node = <LayerSupportPanel title="SQL Preview" eyebrow="Physical" description="Generate or export SQL from physical dbt-backed diagrams. Logical diagrams can stage generated dbt SQL/YAML under DataLex/Generated/dbt." table={table} rel={rel} relationships={relationships} schema={schema} activeFile={activeFile} isDiagramFile={isDiagramFile} />;
+      node = <LayerSupportPanel title="SQL Preview" eyebrow="Physical" description="Generate or export SQL from physical dbt-backed diagrams. Logical diagrams can stage generated dbt SQL/YAML under DataLex/<domain>/Generated/dbt." table={table} rel={rel} relationships={relationships} schema={schema} activeFile={activeFile} isDiagramFile={isDiagramFile} />;
       break;
     case "constraints":
       node = <LayerSupportPanel title="Constraints" eyebrow="Physical" description="Review physical names, dialect data types, PK/FK/AK flags, relationship tests, nullability, and generated constraint readiness." table={table} rel={rel} relationships={relationships} schema={schema} activeFile={activeFile} isDiagramFile={isDiagramFile} />;
@@ -1121,8 +1121,51 @@ export default function Shell() {
     const toEntityName = String(toTable?.name || payload?.toEntity || "").trim();
     const fromColumn = String(payload?.fromColumn || "").trim();
     const toColumn = String(payload?.toColumn || "").trim();
-    const dialogPayload = { ...payload, modelKind: activeModelKind };
-    if (!fromEntityName || !toEntityName || !fromColumn || !toColumn) {
+    const normalizedKind = String(activeModelKind || "").toLowerCase();
+    const entityLevelRelationship = normalizedKind === "conceptual" || normalizedKind === "logical";
+    const dialogPayload = {
+      ...payload,
+      modelKind: activeModelKind,
+      fromEntity: fromEntityName,
+      toEntity: toEntityName,
+      fromColumn,
+      toColumn,
+      tables: (tables || []).map((table) => ({
+        id: table.name || table.id,
+        name: table.name || table.id,
+        columns: entityLevelRelationship ? [] : (table.columns || []),
+      })),
+    };
+
+    if (!fromEntityName || !toEntityName) {
+      openModal("newRelationship", dialogPayload);
+      return;
+    }
+
+    if (isDiagramFile && entityLevelRelationship && (!fromColumn || !toColumn)) {
+      const next = addDiagramRelationship(s.activeFileContent, {
+        name: defaultRelationshipName(fromEntityName, toEntityName),
+        from: { entity: fromEntityName },
+        to: { entity: toEntityName },
+        cardinality: normalizedKind === "conceptual" ? "many_to_many" : "many_to_one",
+        verb: normalizedKind === "conceptual" ? "relates to" : undefined,
+      });
+      if (!next) {
+        openModal("newRelationship", dialogPayload);
+        return;
+      }
+      if (next === s.activeFileContent) {
+        addToast({ type: "info", message: `Relationship ${fromEntityName} → ${toEntityName} already exists.` });
+        return;
+      }
+      s.updateContent(next);
+      s.flushAutosave?.().catch(() => {});
+      s.bumpModelGraphVersion?.();
+      addToast({ type: "success", message: `Linked ${fromEntityName} → ${toEntityName}.` });
+      return;
+    }
+
+    if (!fromColumn || !toColumn) {
       openModal("newRelationship", dialogPayload);
       return;
     }
@@ -1150,6 +1193,7 @@ export default function Shell() {
       }
       s.updateContent(next);
       s.flushAutosave?.().catch(() => {});
+      s.bumpModelGraphVersion?.();
       addToast({ type: "success", message: `Linked ${fromEntityName}.${fromColumn} → ${toEntityName}.${toColumn}.` });
       return;
     }
@@ -1167,6 +1211,7 @@ export default function Shell() {
     }
     s.updateContent(result.yaml);
     s.flushAutosave?.().catch(() => {});
+    s.bumpModelGraphVersion?.();
     addToast({ type: "success", message: `Linked ${fromEntityName}.${fromColumn} → ${toEntityName}.${toColumn}.` });
   }, [activeModelKind, addToast, isDiagramFile, openModal, tables]);
 
@@ -1216,7 +1261,7 @@ export default function Shell() {
         setTheme={setTheme}
         onNewTable={handleNewTable}
         onNewFile={() => (
-          activeProjectId
+          activeFile
             ? openModal("newFile", { layerHint: activeModelKind, domainHint: schema?.domain || "" })
             : openModal("addProject")
         )}

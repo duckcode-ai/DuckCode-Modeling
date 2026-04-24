@@ -48,13 +48,13 @@ function defaultRelName(fromEntity, toEntity) {
   return `${sanitize(fromEntity)}_to_${sanitize(toEntity)}`.toLowerCase() || "new_relationship";
 }
 
-function endpointValue(entity, column, conceptualLevel) {
-  if (conceptualLevel) return { entity };
+function endpointValue(entity, column, entityLevel) {
+  if (entityLevel || !column) return { entity };
   return `${entity}.${column}`;
 }
 
-function endpointPatchValue(entity, column, conceptualLevel) {
-  if (conceptualLevel) return { entity };
+function endpointPatchValue(entity, column, entityLevel) {
+  if (entityLevel || !column) return { entity };
   return { entity, field: column };
 }
 
@@ -66,15 +66,28 @@ export default function NewRelationshipDialog() {
   const conceptualLevel = Boolean(modalPayload?.conceptualLevel) || modelKind === "conceptual";
   const logicalLevel = modelKind === "logical";
   const physicalLevel = modelKind === "physical" || (!conceptualLevel && !logicalLevel);
+  const entityLevelEndpoints = conceptualLevel || logicalLevel;
   // Endpoint source: a drag on the canvas pre-fills from/to/columns and the
   // dialog is a one-pane confirmation. The toolbar / command-palette / right-
   // click paths send `tables:[{id,name,columns:[{name}]}]` in the payload and
   // leave endpoints empty — the user picks them with dropdowns here.
   const pickableTables = Array.isArray(modalPayload?.tables) ? modalPayload.tables : null;
+  const defaultColumnForEntity = React.useCallback((entityId) => {
+    const hit = (pickableTables || []).find(
+      (t) => (t?.id || t?.name || "").toLowerCase() === String(entityId || "").toLowerCase()
+    );
+    const cols = (hit?.columns || []).filter(Boolean);
+    return (
+      cols.find((col) => col?.pk || col?.primary_key)?.name ||
+      cols.find((col) => String(col?.name || "").toLowerCase() === "id")?.name ||
+      cols[0]?.name ||
+      ""
+    );
+  }, [pickableTables]);
   const initFromEntity = String(modalPayload?.fromEntity || "");
-  const initFromColumn = conceptualLevel ? "" : String(modalPayload?.fromColumn || (initFromEntity ? "id" : ""));
+  const initFromColumn = entityLevelEndpoints ? String(modalPayload?.fromColumn || "") : String(modalPayload?.fromColumn || defaultColumnForEntity(initFromEntity));
   const initToEntity = String(modalPayload?.toEntity || "");
-  const initToColumn = conceptualLevel ? "" : String(modalPayload?.toColumn || (initToEntity ? "id" : ""));
+  const initToColumn = entityLevelEndpoints ? String(modalPayload?.toColumn || "") : String(modalPayload?.toColumn || defaultColumnForEntity(initToEntity));
 
   const [fromEntity, setFromEntity] = useState(initFromEntity);
   const [fromColumn, setFromColumn] = useState(initFromColumn);
@@ -127,7 +140,7 @@ export default function NewRelationshipDialog() {
     return (hit?.columns || []).map((c) => c.name).filter(Boolean);
   }, [pickableTables, toEntity]);
 
-  const canSubmit = !!name.trim() && !!fromEntity && !!toEntity && (conceptualLevel || (!!fromColumn && !!toColumn));
+  const canSubmit = !!name.trim() && !!fromEntity && !!toEntity && (entityLevelEndpoints || (!!fromColumn && !!toColumn));
 
   // Phase 4.3 — inline endpoint validation. When the user opened the dialog
   // via toolbar/command-palette, pickableTables has the authoritative column
@@ -142,11 +155,11 @@ export default function NewRelationshipDialog() {
     );
     if (!hit) return `${side} entity "${entityId}" is not on this diagram.`;
     const cols = (hit.columns || []).map((c) => c.name).filter(Boolean);
-    if (!conceptualLevel && column && !cols.includes(column)) {
+    if (!entityLevelEndpoints && column && !cols.includes(column)) {
       return `${side} column "${column}" does not exist on ${hit.name || entityId}.`;
     }
     return null;
-  }, [conceptualLevel, pickableTables]);
+  }, [entityLevelEndpoints, pickableTables]);
 
   const endpointError = React.useMemo(() => {
     if (!fromEntity || !toEntity) return "";
@@ -184,8 +197,8 @@ export default function NewRelationshipDialog() {
       }
       const patch = {
         name: targetName,
-        from: endpointPatchValue(fromEntity, fromColumn, conceptualLevel),
-        to: endpointPatchValue(toEntity, toColumn, conceptualLevel),
+        from: endpointPatchValue(fromEntity, fromColumn, entityLevelEndpoints),
+        to: endpointPatchValue(toEntity, toColumn, entityLevelEndpoints),
         cardinality,
         identifying: conceptualLevel ? undefined : identifying,
         optional: conceptualLevel ? undefined : optional,
@@ -221,7 +234,7 @@ export default function NewRelationshipDialog() {
             }
             addToast({
               type: "success",
-              message: conceptualLevel
+              message: entityLevelEndpoints
                 ? `Updated ${fromEntity} → ${toEntity}.`
                 : `Updated ${fromEntity}.${fromColumn} → ${toEntity}.${toColumn}.`,
             });
@@ -248,7 +261,7 @@ export default function NewRelationshipDialog() {
       s.bumpModelGraphVersion?.();
       addToast({
         type: "success",
-        message: conceptualLevel
+        message: entityLevelEndpoints
           ? `Updated ${fromEntity} → ${toEntity}.`
           : `Updated ${fromEntity}.${fromColumn} → ${toEntity}.${toColumn}.`,
       });
@@ -259,8 +272,8 @@ export default function NewRelationshipDialog() {
     if (isDiagram) {
       const next = addDiagramRelationship(s.activeFileContent, {
         name: targetName,
-        from: conceptualLevel ? { entity: fromEntity } : { entity: fromEntity, field: fromColumn },
-        to: conceptualLevel ? { entity: toEntity } : { entity: toEntity, field: toColumn },
+        from: endpointPatchValue(fromEntity, fromColumn, entityLevelEndpoints),
+        to: endpointPatchValue(toEntity, toColumn, entityLevelEndpoints),
         cardinality,
         identifying: conceptualLevel ? undefined : identifying,
         label: "",
@@ -285,7 +298,7 @@ export default function NewRelationshipDialog() {
       s.bumpModelGraphVersion?.();
       addToast({
         type: "success",
-        message: conceptualLevel
+        message: entityLevelEndpoints
           ? `Linked ${fromEntity} → ${toEntity} (diagram).`
           : `Linked ${fromEntity}.${fromColumn} → ${toEntity}.${toColumn} (diagram).`,
       });
@@ -295,8 +308,8 @@ export default function NewRelationshipDialog() {
 
     // Model-file mode: fall through to the existing addRelationship path,
     // which writes into `relationships:` inside the model YAML itself.
-    const from = endpointValue(fromEntity, fromColumn, conceptualLevel);
-    const to = endpointValue(toEntity, toColumn, conceptualLevel);
+    const from = endpointValue(fromEntity, fromColumn, entityLevelEndpoints);
+    const to = endpointValue(toEntity, toColumn, entityLevelEndpoints);
     const { yaml: next, error: err } = addRelationship(
       s.activeFileContent,
       targetName,
@@ -335,7 +348,7 @@ export default function NewRelationshipDialog() {
     s.bumpModelGraphVersion?.();
     addToast({
       type: "success",
-      message: conceptualLevel
+      message: entityLevelEndpoints
         ? `Linked ${fromEntity} → ${toEntity}.`
         : `Linked ${fromEntity}.${fromColumn} → ${toEntity}.${toColumn}.`,
     });
@@ -355,7 +368,7 @@ export default function NewRelationshipDialog() {
       >
         <div className="dlx-modal-alert">
           <AlertCircle size={12} style={{ marginTop: 1, flexShrink: 0 }} />
-          <span>Missing endpoint(s). Drag between two column keys on the canvas to start again.</span>
+          <span>Missing endpoint(s). Drag from a relationship handle or column key to another card on the canvas to start again.</span>
         </div>
       </Modal>
     );
@@ -405,11 +418,7 @@ export default function NewRelationshipDialog() {
                   onChange={(e) => {
                     setFromEntity(e.target.value);
                     // Reset column to a sensible default whenever entity changes.
-                    const hit = pickableTables.find(
-                      (t) => (t?.id || t?.name || "").toLowerCase() === e.target.value.toLowerCase()
-                    );
-                    const cols = (hit?.columns || []).map((c) => c.name).filter(Boolean);
-                    setFromColumn(conceptualLevel ? "" : (cols.includes("id") ? "id" : (cols[0] || "")));
+                    setFromColumn(entityLevelEndpoints ? "" : defaultColumnForEntity(e.target.value));
                   }}
                 >
                   <option value="">Choose entity…</option>
@@ -419,7 +428,7 @@ export default function NewRelationshipDialog() {
                     return <option key={id} value={id}>{label}</option>;
                   })}
                 </select>
-                {!conceptualLevel && (
+                {!entityLevelEndpoints && (
                   <select
                     className="panel-input"
                     value={fromColumn}
@@ -454,11 +463,7 @@ export default function NewRelationshipDialog() {
                   value={toEntity}
                   onChange={(e) => {
                     setToEntity(e.target.value);
-                    const hit = pickableTables.find(
-                      (t) => (t?.id || t?.name || "").toLowerCase() === e.target.value.toLowerCase()
-                    );
-                    const cols = (hit?.columns || []).map((c) => c.name).filter(Boolean);
-                    setToColumn(conceptualLevel ? "" : (cols.includes("id") ? "id" : (cols[0] || "")));
+                    setToColumn(entityLevelEndpoints ? "" : defaultColumnForEntity(e.target.value));
                   }}
                 >
                   <option value="">Choose entity…</option>
@@ -468,7 +473,7 @@ export default function NewRelationshipDialog() {
                     return <option key={id} value={id}>{label}</option>;
                   })}
                 </select>
-                {!conceptualLevel && (
+                {!entityLevelEndpoints && (
                   <select
                     className="panel-input"
                     value={toColumn}
@@ -498,10 +503,10 @@ export default function NewRelationshipDialog() {
             }}
           >
             <span style={{ color: "var(--text-primary)", fontWeight: 600 }}>{fromEntity}</span>
-            {!conceptualLevel && <span style={{ color: "var(--text-tertiary)" }}>.{fromColumn}</span>}
+            {!entityLevelEndpoints && <span style={{ color: "var(--text-tertiary)" }}>.{fromColumn}</span>}
             <Link2 size={12} style={{ margin: "0 4px", color: "var(--text-tertiary)" }} />
             <span style={{ color: "var(--text-primary)", fontWeight: 600 }}>{toEntity}</span>
-            {!conceptualLevel && <span style={{ color: "var(--text-tertiary)" }}>.{toColumn}</span>}
+            {!entityLevelEndpoints && <span style={{ color: "var(--text-tertiary)" }}>.{toColumn}</span>}
           </div>
         )}
 
@@ -650,17 +655,17 @@ export default function NewRelationshipDialog() {
           >
             <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
               <span style={{ fontSize: 12, fontWeight: 600, color: "var(--text-primary)" }}>
-                {fromEntity || "From entity"}{conceptualLevel ? "" : `.${fromColumn || "column"}`}
+                {fromEntity || "From entity"}{entityLevelEndpoints ? "" : `.${fromColumn || "column"}`}
               </span>
               <span style={{ fontSize: 11, color: "var(--text-tertiary)" }}>{CARDINALITIES.find((c) => c.id === cardinality)?.sub || ""}</span>
               <span style={{ fontSize: 12, fontWeight: 600, color: "var(--text-primary)" }}>
-                {toEntity || "To entity"}{conceptualLevel ? "" : `.${toColumn || "column"}`}
+                {toEntity || "To entity"}{entityLevelEndpoints ? "" : `.${toColumn || "column"}`}
               </span>
             </div>
             <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
               <span className="status-pill tone-info">{CARDINALITIES.find((c) => c.id === cardinality)?.label || "Relationship"}</span>
-              {!conceptualLevel && identifying && <span className="status-pill tone-warning">Identifying</span>}
-              {!conceptualLevel && optional && <span className="status-pill tone-neutral">Optional</span>}
+              {!entityLevelEndpoints && identifying && <span className="status-pill tone-warning">Identifying</span>}
+              {!entityLevelEndpoints && optional && <span className="status-pill tone-neutral">Optional</span>}
               {logicalLevel && fromRole && <span className="status-pill tone-neutral">{fromRole}</span>}
               {logicalLevel && toRole && <span className="status-pill tone-neutral">{toRole}</span>}
               {physicalLevel && onDelete && <span className="status-pill tone-neutral">ON DELETE {onDelete}</span>}

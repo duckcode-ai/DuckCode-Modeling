@@ -18,7 +18,15 @@ import ExplorerContextMenu from "../components/panels/ExplorerContextMenu";
 function artifactMeta(path, name, kind = "file") {
   const p = String(path || "").toLowerCase();
   const n = String(name || "").toLowerCase();
+  const isDomainConceptual = /^datalex\/[^/]+\/conceptual(\/|$)/.test(p);
+  const isDomainLogical = /^datalex\/[^/]+\/logical(\/|$)/.test(p);
+  const isDomainPhysical = /^datalex\/[^/]+\/physical(\/|$)/.test(p);
+  const isDomainGeneratedDbt = /^datalex\/[^/]+\/generated\/dbt(\/|$)/.test(p);
   if (kind === "folder") {
+    if (isDomainConceptual) return { tone: "conceptual", label: "conceptual", icon: "diagram" };
+    if (isDomainLogical) return { tone: "logical", label: "logical", icon: "diagram" };
+    if (isDomainPhysical) return { tone: "physical", label: "physical", icon: "diagram" };
+    if (isDomainGeneratedDbt) return { tone: "dbt", label: "generated", icon: "dbt" };
     if (p.includes("datalex/diagrams/conceptual")) return { tone: "conceptual", label: "conceptual", icon: "diagram" };
     if (p.includes("datalex/diagrams/logical")) return { tone: "logical", label: "logical", icon: "diagram" };
     if (p.includes("datalex/diagrams/physical")) return { tone: "physical", label: "physical", icon: "diagram" };
@@ -35,11 +43,16 @@ function artifactMeta(path, name, kind = "file") {
     return { tone: "folder", label: "", icon: "folder" };
   }
   if (/\.diagram\.ya?ml$/i.test(n)) {
+    if (isDomainConceptual) return { tone: "conceptual", label: "diagram", icon: "diagram" };
+    if (isDomainLogical) return { tone: "logical", label: "diagram", icon: "diagram" };
+    if (isDomainPhysical) return { tone: "physical", label: "diagram", icon: "diagram" };
     if (p.includes("datalex/diagrams/conceptual")) return { tone: "conceptual", label: "diagram", icon: "diagram" };
     if (p.includes("datalex/diagrams/logical")) return { tone: "logical", label: "diagram", icon: "diagram" };
     if (p.includes("datalex/diagrams/physical")) return { tone: "physical", label: "diagram", icon: "diagram" };
     return { tone: "diagram", label: "diagram", icon: "diagram" };
   }
+  if (isDomainGeneratedDbt && /\.sql$/i.test(n)) return { tone: "dbt", label: "sql", icon: "dbt" };
+  if (isDomainGeneratedDbt && /\.ya?ml$/i.test(n)) return { tone: "dbt", label: "dbt", icon: "dbt" };
   if (p.includes("datalex/generated/dbt") && /\.sql$/i.test(n)) return { tone: "dbt", label: "sql", icon: "dbt" };
   if (p.includes("datalex/generated/dbt") && /\.ya?ml$/i.test(n)) return { tone: "dbt", label: "dbt", icon: "dbt" };
   if (p.includes("/conceptual/")) return { tone: "conceptual", label: "concept", icon: "entity" };

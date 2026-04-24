@@ -1484,11 +1484,10 @@ def cmd_serve(args: argparse.Namespace) -> int:
     # The api-server resolves the CLI script via `join(REPO_ROOT, "dm")`
     # in its `dmExec()` helper. In a repo clone that file exists; in a
     # pip install it doesn't, so we drop a small shim next to REPO_ROOT.
-    # NOTE: we intentionally do NOT write a shim named `datalex` —
-    # `<project>/datalex/` is the canonical folder where DataLex stores
-    # diagrams (`datalex/diagrams/*.diagram.yaml`), and a file named
-    # `datalex` would collide with the `mkdir datalex/diagrams` that
-    # the Explorer does on "new diagram". The api-server's dmExec helper
+    # NOTE: we intentionally do NOT write a shim named `DataLex` —
+    # `<project>/DataLex/` is the canonical folder where DataLex stores
+    # domain-first modeling assets, and a file named `DataLex` would
+    # collide with that workspace folder. The api-server's dmExec helper
     # already handles the rename (falls back through `datalex` → `dm`
     # → PATH) so the `dm` shim alone is sufficient.
     dm_shim = Path(project_dir) / "dm"

@@ -82,19 +82,19 @@ function TableCard({ table, selected, onSelect, onMove, onMoveEnd, onStartConnec
   const hasValue = (value) => value != null && String(value).trim() !== "";
 
   const onMouseDown = (e) => {
-    // Dragging from a column's key dot starts a relationship draw instead
-    // of a table move. The row click-target is still the card; only the
-    // tc-key glyph triggers the connect gesture.
+    // Dragging from a column key dot or the card-level relationship handle
+    // starts a relationship draw instead of a table move. Conceptual and
+    // logical diagrams often need entity-level relationships, so the card
+    // handle intentionally does not require a column endpoint.
     const keyEl = e.target.closest(".tc-key");
-    if (keyEl && onStartConnect) {
-      const row = keyEl.closest(".tc-row");
+    const connectHandle = e.target.closest(".tc-connect-handle");
+    if ((keyEl || connectHandle) && onStartConnect) {
+      const row = keyEl?.closest(".tc-row");
       const colName = row?.getAttribute("data-col");
-      if (colName) {
-        e.preventDefault();
-        e.stopPropagation();
-        onStartConnect({ fromTable: table.id, fromColumn: colName }, e);
-        return;
-      }
+      e.preventDefault();
+      e.stopPropagation();
+      onStartConnect({ fromTable: table.id, fromColumn: colName || "" }, e);
+      return;
     }
     if (e.target.closest(".tc-badges, button, .tc-colflags")) return;
     const rect = cardRef.current.getBoundingClientRect();
@@ -181,6 +181,27 @@ function TableCard({ table, selected, onSelect, onMove, onMoveEnd, onStartConnec
         {conceptual ? <I.Layers /> : table.kind === "ENUM" ? <I.Enum /> : table.junction ? <I.Junction /> : <I.Table />}
         <span className="tc-name">{table.name}</span>
         <span className="tc-schema">{conceptual ? "business" : logical ? "logical" : (table.schema || "dbt")}</span>
+        <button
+          type="button"
+          className="tc-connect-handle"
+          title={conceptual ? "Drag to another concept to define a business relationship" : logical ? "Drag to another entity to define a logical relationship" : "Drag to another table or column to define a physical relationship"}
+          aria-label="Create relationship"
+          style={{
+            display: "inline-flex",
+            alignItems: "center",
+            justifyContent: "center",
+            width: 20,
+            height: 20,
+            borderRadius: 6,
+            border: "1px solid var(--border-default)",
+            background: "var(--bg-1)",
+            color: "var(--text-tertiary)",
+            cursor: "crosshair",
+            flexShrink: 0,
+          }}
+        >
+          <I.Relation />
+        </button>
         <div className="tc-badges">
           {diffTheme && (
             <span
@@ -679,22 +700,23 @@ export default function Canvas({ tables, setTables, relationships, areas, select
     const onUp = (ev) => {
       window.removeEventListener("mousemove", onMove);
       window.removeEventListener("mouseup", onUp);
-      // Pick the element under the cursor and walk up for a .tc-key ancestor.
+      // Pick the element under the cursor. Column key hits create column-level
+      // relationships; card hits create entity-level relationships.
       const hit = document.elementFromPoint(ev.clientX, ev.clientY);
       const keyHit = hit?.closest?.(".tc-key");
       const rowHit = keyHit?.closest?.(".tc-row");
-      const cardHit = keyHit?.closest?.(".table-card");
+      const cardHit = (keyHit?.closest?.(".table-card")) || hit?.closest?.(".table-card");
       const toTableId = cardHit?.id?.replace(/^tc-/, "") || null;
-      const toColName = rowHit?.getAttribute("data-col") || null;
+      const toColName = rowHit?.getAttribute("data-col") || "";
       setConnectDrag(null);
       if (
-        toTableId && toColName &&
-        (toTableId !== seed.fromTable || toColName !== seed.fromColumn) &&
+        toTableId &&
+        (toTableId !== seed.fromTable || toColName !== (seed.fromColumn || "")) &&
         onConnect
       ) {
         onConnect({
           fromEntity: seed.fromTable,
-          fromColumn: seed.fromColumn,
+          fromColumn: seed.fromColumn || "",
           toEntity: toTableId,
           toColumn: toColName,
         });
@@ -782,7 +804,7 @@ export default function Canvas({ tables, setTables, relationships, areas, select
     [selected, tables]
   );
 
-  const openConceptStudio = React.useCallback(() => {
+  const openStudio = React.useCallback(() => {
     setBottomPanelOpen(true);
     setBottomPanelTab("modeler");
   }, [setBottomPanelOpen, setBottomPanelTab]);
@@ -799,22 +821,34 @@ export default function Canvas({ tables, setTables, relationships, areas, select
     setRightPanelTab("DETAILS");
   }, [setRightPanelOpen, setRightPanelTab]);
 
-  const openConceptRelationshipDialog = React.useCallback(() => {
+  const openRelationshipDialog = React.useCallback(() => {
     const orderedTables = Array.isArray(tables) ? tables : [];
     const first = selectedTable || orderedTables[0] || null;
     const second = orderedTables.find((table) => table.id !== first?.id) || orderedTables[1] || null;
+    const normalizedKind = String(modelKind || "physical").toLowerCase();
+    const defaultColumn = (table) => {
+      const cols = Array.isArray(table?.columns) ? table.columns : [];
+      return (
+        cols.find((col) => col?.pk)?.name ||
+        cols.find((col) => String(col?.name || "").toLowerCase() === "id")?.name ||
+        cols[0]?.name ||
+        ""
+      );
+    };
     openModal("newRelationship", {
-      modelKind: "conceptual",
-      conceptualLevel: true,
+      modelKind: normalizedKind,
+      conceptualLevel: normalizedKind === "conceptual",
       tables: orderedTables.map((table) => ({
         id: table.name || table.id,
         name: table.name || table.id,
-        columns: [],
+        columns: normalizedKind === "conceptual" ? [] : (table.columns || []),
       })),
       fromEntity: first?.name || first?.id || "",
       toEntity: second?.name || second?.id || "",
+      fromColumn: normalizedKind === "physical" ? defaultColumn(first) : "",
+      toColumn: normalizedKind === "physical" ? defaultColumn(second) : "",
     });
-  }, [openModal, selectedTable, tables]);
+  }, [modelKind, openModal, selectedTable, tables]);
 
   // Keyboard Delete / Backspace → delete the currently selected entity or
   // relationship. Ignored while the user is typing in an input/textarea or a
@@ -856,15 +890,16 @@ export default function Canvas({ tables, setTables, relationships, areas, select
             <span>{relationships.length} relationships</span>
           </p>
         </div>
-        <div className="canvas-actions">
+        <div className="canvas-actions" data-tour="workbench-studio">
           {conceptualMode && (
             <>
-              <button className="canvas-btn" onClick={() => openNewConceptDialog()} title="Create a business concept box in this diagram">
+              <button data-tour="add-entities" className="canvas-btn" onClick={() => openNewConceptDialog()} title="Create a business concept box in this diagram">
                 <I.Plus />Add Concept
               </button>
               <button
+                data-tour="add-relationship"
                 className="canvas-btn"
-                onClick={openConceptRelationshipDialog}
+                onClick={openRelationshipDialog}
                 title="Create a business relationship between concept boxes"
                 disabled={tables.length < 2}
               >
@@ -877,6 +912,38 @@ export default function Canvas({ tables, setTables, relationships, areas, select
                 disabled={!selectedTable}
               >
                 <I.Edit />Edit Details
+              </button>
+            </>
+          )}
+          {!conceptualMode && String(modelKind || "").toLowerCase() === "logical" && (
+            <>
+              <button data-tour="add-entities" className="canvas-btn" onClick={openStudio} title="Add logical entities, attributes, keys, and generated dbt output">
+                <I.Plus />Add Entity
+              </button>
+              <button
+                data-tour="add-relationship"
+                className="canvas-btn"
+                onClick={openRelationshipDialog}
+                title="Create a logical relationship with roles, cardinality, and optionality"
+                disabled={tables.length < 2}
+              >
+                <I.Relation />Add Relationship
+              </button>
+            </>
+          )}
+          {!conceptualMode && String(modelKind || "").toLowerCase() === "physical" && (
+            <>
+              <button data-tour="add-entities" className="canvas-btn" onClick={openStudio} title="Open physical dbt YAML, SQL preview, and constraint workflow">
+                <I.Plus />Physical Studio
+              </button>
+              <button
+                data-tour="add-relationship"
+                className="canvas-btn"
+                onClick={openRelationshipDialog}
+                title="Create a physical dbt/database relationship"
+                disabled={tables.length < 2}
+              >
+                <I.Relation />Add Relationship
               </button>
             </>
           )}
