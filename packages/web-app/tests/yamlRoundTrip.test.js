@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import yaml from "js-yaml";
 import {
   addEntityWithOptions,
+  addRelationship,
   setEntityKeySets,
   setEntityScalarProperty,
   addIndex,
@@ -75,4 +76,34 @@ test("index mutations and bulk subject-area assignment stay YAML-safe", () => {
   assert.equal(customer.subject_area, "Identity");
   assert.equal(Array.isArray(doc.indexes), true);
   assert.equal(doc.indexes.length, 0);
+});
+
+test("addRelationship round-trips conceptual entity-level endpoints", () => {
+  const conceptualModel = `model:
+  name: insurance_concepts
+  kind: conceptual
+  domain: insurance
+  owners: []
+  state: draft
+
+entities:
+  - name: Customer
+    type: concept
+  - name: Policy
+    type: concept
+relationships: []
+`;
+
+  const result = addRelationship(
+    conceptualModel,
+    "customer_holds_policy",
+    { entity: "Customer" },
+    { entity: "Policy" },
+    "one_to_many",
+  );
+  assert.equal(result.error, null);
+  const doc = yaml.load(result.yaml);
+  assert.deepEqual(doc.relationships[0].from, { entity: "Customer" });
+  assert.deepEqual(doc.relationships[0].to, { entity: "Policy" });
+  assert.equal(doc.relationships[0].cardinality, "one_to_many");
 });

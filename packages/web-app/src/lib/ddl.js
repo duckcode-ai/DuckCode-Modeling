@@ -42,6 +42,46 @@ function formatDefault(value) {
   return `'${s.replace(/'/g, "''")}'`;
 }
 
+function endpointParts(value, tableNameById) {
+  if (typeof value === "string") {
+    const [table, col] = String(value || "").split(".");
+    return {
+      table: String(table || "").trim(),
+      col: String(col || "").trim() || "id",
+    };
+  }
+  if (value && typeof value === "object") {
+    const rawTable = String(value.table || value.entity || "").trim();
+    const resolvedTable = tableNameById?.get(rawTable) || rawTable;
+    return {
+      table: resolvedTable,
+      col: String(value.col || value.field || value.column || "").trim() || "id",
+    };
+  }
+  return { table: "", col: "id" };
+}
+
+function relationshipAlterStatement(relationship, tableNameById, schemaName = "public") {
+  if (!relationship || relationship?.status === "unresolved" || relationship?.unresolved === true) return "";
+  const from = endpointParts(relationship.from, tableNameById);
+  const to = endpointParts(relationship.to, tableNameById);
+  if (!from.table || !from.col || !to.table || !to.col) return "";
+  const onDelete = String(relationship?.on_delete || relationship?.onDelete || "").trim();
+  const onUpdate = String(relationship?.on_update || relationship?.onUpdate || "").trim();
+  const tail = [];
+  if (onDelete && onDelete.toUpperCase() !== "NO ACTION") tail.push(`ON DELETE ${onDelete.toUpperCase()}`);
+  if (onUpdate && onUpdate.toUpperCase() !== "NO ACTION") tail.push(`ON UPDATE ${onUpdate.toUpperCase()}`);
+  return (
+    `ALTER TABLE ${quoteIdent(schemaName)}.${quoteIdent(from.table)}\n  ` +
+    `ADD FOREIGN KEY (${quoteIdent(from.col)}) REFERENCES ${quoteIdent(to.table)}(${quoteIdent(to.col)})` +
+    `${tail.length ? ` ${tail.join(" ")}` : ""};`
+  );
+}
+
+function relationshipKey(fromTable, fromCol, toTable, toCol) {
+  return `${String(fromTable || "").toLowerCase()}.${String(fromCol || "").toLowerCase()}->${String(toTable || "").toLowerCase()}.${String(toCol || "").toLowerCase()}`;
+}
+
 /* Normalise a DataLex field entry into the shape the generator below
    uses. Handles both the adapter-flattened shape (`{ pk, nn, unique,
    fk, onDelete }`) and the raw YAML shape (`{ primary_key, nullable,
@@ -91,6 +131,7 @@ export function generateEntityDDL(entity, options = {}) {
   const schema = String(entity.schema || options.schema || "public");
   const tableName = String(entity.name || "unnamed");
   const typ = String(entity.type || "table").toLowerCase();
+  const tableNameById = options.tableNameById instanceof Map ? options.tableNameById : new Map();
   const fields = (Array.isArray(entity.fields) ? entity.fields : (entity.columns || []))
     .map(normaliseField)
     .filter(Boolean);
@@ -147,19 +188,21 @@ export function generateEntityDDL(entity, options = {}) {
   const relMap = new Map();
   for (const r of options.relationships || []) {
     if (r?.status === "unresolved" || r?.unresolved === true) continue;
-    const from = String(r?.from || "").toLowerCase();
-    if (!from.startsWith(`${tableName.toLowerCase()}.`)) continue;
-    const col = from.split(".").slice(1).join(".");
-    relMap.set(col, r);
+    const from = endpointParts(r?.from, tableNameById);
+    if (String(from.table || "").toLowerCase() !== tableName.toLowerCase()) continue;
+    relMap.set(String(from.col || "").toLowerCase(), r);
   }
   const fkLines = [];
+  const emittedRelationshipKeys = options.emittedRelationshipKeys instanceof Set
+    ? options.emittedRelationshipKeys
+    : null;
   for (const f of fields) {
     if (!f.fk) continue;
     const [targetTable, targetCol] = String(f.fk).split(".");
     if (!targetTable || !targetCol) continue;
     const rel = relMap.get(f.name.toLowerCase());
-    const onDelete = (rel?.on_delete || f.onDelete || "").toString().trim();
-    const onUpdate = (rel?.on_update || f.onUpdate || "").toString().trim();
+    const onDelete = (rel?.on_delete || rel?.onDelete || f.onDelete || "").toString().trim();
+    const onUpdate = (rel?.on_update || rel?.onUpdate || f.onUpdate || "").toString().trim();
     const tail = [];
     if (onDelete && onDelete.toUpperCase() !== "NO ACTION") tail.push(`ON DELETE ${onDelete.toUpperCase()}`);
     if (onUpdate && onUpdate.toUpperCase() !== "NO ACTION") tail.push(`ON UPDATE ${onUpdate.toUpperCase()}`);
@@ -168,6 +211,7 @@ export function generateEntityDDL(entity, options = {}) {
         `ADD FOREIGN KEY (${quoteIdent(f.name)}) REFERENCES ` +
         `${quoteIdent(targetTable)}(${quoteIdent(targetCol)})${tail.length ? " " + tail.join(" ") : ""};`
     );
+    emittedRelationshipKeys?.add(relationshipKey(tableName, f.name, targetTable, targetCol));
   }
   if (fkLines.length) {
     lines.push("");
@@ -195,6 +239,58 @@ export function generateEntityDDL(entity, options = {}) {
   }
 
   return lines.join("\n");
+}
+
+export function generateSchemaDDL(schema, options = {}) {
+  if (!schema || typeof schema !== "object") return "";
+  const tables = Array.isArray(schema.tables) ? schema.tables : [];
+  if (tables.length === 0) return "";
+  const relationships = Array.isArray(schema.relationships) ? schema.relationships : [];
+  const indexes = Array.isArray(schema.indexes) ? schema.indexes : [];
+  const tableNameById = new Map(
+    tables.map((table) => [String(table?.id || ""), String(table?.name || table?.id || "")])
+  );
+  const schemaName = String(schema.schema || "public");
+  const emittedRelationshipKeys = new Set();
+  const header = [
+    `-- ${String(schema.name || "Diagram SQL Preview")}`,
+    `-- ${tables.length} ${tables.length === 1 ? "entity" : "entities"} composed from the current canvas`,
+  ];
+
+  const orderedTables = [...tables].sort((a, b) => {
+    const aView = /view/.test(String(a?.type || "").toLowerCase()) ? 1 : 0;
+    const bView = /view/.test(String(b?.type || "").toLowerCase()) ? 1 : 0;
+    if (aView !== bView) return aView - bView;
+    return String(a?.name || "").localeCompare(String(b?.name || ""));
+  });
+
+  const blocks = orderedTables
+    .map((table) => generateEntityDDL(table, {
+      ...options,
+      schema: table?.schema || schemaName,
+      includeIndexes: true,
+      indexes,
+      relationships,
+      tableNameById,
+      emittedRelationshipKeys,
+    }))
+    .filter(Boolean);
+
+  const relationshipStatements = relationships
+    .map((relationship) => {
+      const from = endpointParts(relationship?.from, tableNameById);
+      const to = endpointParts(relationship?.to, tableNameById);
+      const key = relationshipKey(from.table, from.col, to.table, to.col);
+      if (emittedRelationshipKeys.has(key)) return "";
+      emittedRelationshipKeys.add(key);
+      const fromSchema = tables.find((table) => String(table?.name || table?.id || "") === from.table)?.schema || schemaName;
+      return relationshipAlterStatement(relationship, tableNameById, fromSchema);
+    })
+    .filter(Boolean);
+
+  const output = blocks.join("\n\n");
+  const relOutput = relationshipStatements.join("\n\n");
+  return [...header, "", ...output.split("\n"), ...(relOutput ? ["", ...relOutput.split("\n")] : [])].join("\n");
 }
 
 /* Theme-aware SQL highlighter. Emits span classes consumed by

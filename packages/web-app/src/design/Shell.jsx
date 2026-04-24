@@ -7,8 +7,8 @@
    the bottom-drawer row + dirty dot come from datalex-integration.css. */
 import React, { useEffect, useState } from "react";
 import {
-  Columns3, ShieldCheck, GitCompare, Activity, Network, Clock, X,
-  Wand2, LibraryBig, Map, BookOpen, ChevronUp,
+  Columns3, ShieldCheck, GitCompare, Clock, X,
+  BookOpen, ChevronUp, Wand2,
 } from "lucide-react";
 
 import yaml from "js-yaml";
@@ -20,9 +20,9 @@ import CommandPalette from "./CommandPalette";
 import BottomDrawer from "./BottomDrawer";
 import { DEMO_SCHEMA } from "./demoSchema";
 import { THEMES } from "./notation";
-import { adaptDataLexYaml, adaptDataLexModelYaml, adaptDiagramYaml } from "./schemaAdapter";
-import { appendEntity, deleteEntityDeep, setEntityDisplay, setDiagramEntityDisplay } from "./yamlPatch";
-import { deleteRelationship as deleteRelationshipYaml } from "../lib/yamlRoundTrip";
+import { adaptDataLexYaml, adaptDataLexModelYaml, adaptDbtSchemaYaml, adaptDiagramYaml, schemaToPanelModel } from "./schemaAdapter";
+import { appendEntity, addDiagramRelationship, deleteDiagramEntity, deleteEntityDeep, removeFieldRelationship, setEntityDisplay, setDiagramEntityDisplay } from "./yamlPatch";
+import { addRelationship, deleteRelationship as deleteRelationshipYaml } from "../lib/yamlRoundTrip";
 import { shouldShowFirstRun } from "../lib/onboardingTour";
 
 import { fetchGitStatus } from "../lib/api";
@@ -35,16 +35,12 @@ import KeyboardShortcutsPanel from "../components/panels/KeyboardShortcutsPanel"
 
 // Heavy panels / dialogs are split into separate chunks — they only load when
 // the user actually opens them, which keeps the initial JS bundle small.
-const ModelerPanel        = React.lazy(() => import("../components/panels/ModelerPanel"));
-const EntityPanel         = React.lazy(() => import("../components/panels/EntityPanel"));
-const LibrariesPanel      = React.lazy(() => import("../components/panels/LibrariesPanel"));
-const SubjectAreasPanel   = React.lazy(() => import("../components/panels/SubjectAreasPanel"));
 const ValidationPanel     = React.lazy(() => import("../components/panels/ValidationPanel"));
 const DiffPanel           = React.lazy(() => import("../components/panels/DiffPanel"));
-const ImpactPanel         = React.lazy(() => import("../components/panels/ImpactPanel"));
 const HistoryPanel        = React.lazy(() => import("../components/panels/HistoryPanel"));
-const ModelGraphPanel     = React.lazy(() => import("../components/panels/ModelGraphPanel"));
 const DictionaryPanel     = React.lazy(() => import("../components/panels/DictionaryPanel"));
+const SelectionSummaryPanel = React.lazy(() => import("../components/panels/SelectionSummaryPanel"));
+const ModelerPanel        = React.lazy(() => import("../components/panels/ModelerPanel"));
 const SettingsDialog      = React.lazy(() => import("../components/dialogs/SettingsDialog"));
 const ConnectionsManager  = React.lazy(() => import("../components/dialogs/ConnectionsManager"));
 const CommitDialog        = React.lazy(() => import("../components/dialogs/CommitDialog"));
@@ -54,10 +50,74 @@ const PanelDialog         = React.lazy(() => import("../components/dialogs/Panel
 const GitBranchDialog     = React.lazy(() => import("../components/dialogs/GitBranchDialog"));
 const ImportDbtRepoDialog = React.lazy(() => import("../components/dialogs/ImportDbtRepoDialog"));
 const NewRelationshipDialog = React.lazy(() => import("../components/dialogs/NewRelationshipDialog"));
-const NewConceptDialog  = React.lazy(() => import("../components/dialogs/NewConceptDialog"));
+const NewConceptDialog    = React.lazy(() => import("../components/dialogs/NewConceptDialog"));
 const EntityPickerDialog  = React.lazy(() => import("../components/dialogs/EntityPickerDialog"));
 const BulkRenameColumnDialog = React.lazy(() => import("../components/dialogs/BulkRenameColumnDialog"));
 const ShareBundleDialog   = React.lazy(() => import("../components/dialogs/ShareBundleDialog"));
+
+function normalizeWorkspaceFileRef(value) {
+  return String(value || "").replace(/\\/g, "/").replace(/^[/\\]+/, "");
+}
+
+function parseDbtEntityRef(value) {
+  if (typeof value !== "string") return null;
+  const text = value.trim();
+  if (!text) return null;
+  const ref = text.match(/ref\(\s*['"]([^'"]+)['"]\s*\)/i);
+  if (ref) return String(ref[1] || "").trim() || null;
+  const source = text.match(/source\(\s*['"][^'"]+['"]\s*,\s*['"]([^'"]+)['"]\s*\)/i);
+  if (source) return String(source[1] || "").trim() || null;
+  return null;
+}
+
+function collectSemanticDependencyNames(yamlText) {
+  try {
+    const doc = yaml.load(yamlText);
+    if (!doc || typeof doc !== "object") return [];
+    const names = [];
+    const seen = new Set();
+    (Array.isArray(doc.semantic_models) ? doc.semantic_models : []).forEach((model) => {
+      const ref = parseDbtEntityRef(model?.model);
+      const key = String(ref || "").toLowerCase();
+      if (!key || seen.has(key)) return;
+      seen.add(key);
+      names.push(ref);
+    });
+    return names;
+  } catch (_err) {
+    return [];
+  }
+}
+
+function resolveSemanticDependencyPaths(projectFiles, entityNames) {
+  const wanted = new Set((entityNames || []).map((name) => String(name || "").toLowerCase()).filter(Boolean));
+  if (wanted.size === 0) return [];
+  const paths = [];
+  const seen = new Set();
+  (projectFiles || []).forEach((file) => {
+    const rawPath = normalizeWorkspaceFileRef(file?.fullPath || file?.path || "");
+    if (!rawPath || !/\.ya?ml$/i.test(rawPath)) return;
+    const base = rawPath.split("/").pop()?.replace(/\.ya?ml$/i, "").toLowerCase();
+    if (!base || !wanted.has(base) || seen.has(rawPath)) return;
+    seen.add(rawPath);
+    paths.push(rawPath);
+  });
+  return paths;
+}
+
+function inferRelationshipCardinality(fromCol, toCol) {
+  const fromOne = !!(fromCol?.pk || fromCol?.unique);
+  const toOne = !!(toCol?.pk || toCol?.unique);
+  if (fromOne && toOne) return "one_to_one";
+  if (fromOne && !toOne) return "one_to_many";
+  if (!fromOne && toOne) return "many_to_one";
+  return "many_to_many";
+}
+
+function defaultRelationshipName(fromEntity, toEntity) {
+  const clean = (value) => String(value || "").replace(/[^A-Za-z0-9]+/g, "_").replace(/^_+|_+$/g, "");
+  return `${clean(fromEntity)}_to_${clean(toEntity)}`.toLowerCase() || "new_relationship";
+}
 const SnapshotsDialog     = React.lazy(() => import("../components/dialogs/SnapshotsDialog"));
 const ViewerWelcome       = React.lazy(() => import("../components/viewer/ViewerWelcome"));
 const OnboardingWelcomeDialog = React.lazy(() => import("../components/dialogs/OnboardingWelcomeDialog"));
@@ -79,19 +139,18 @@ import "../styles/datalex-integration.css";
 const THEME_STORAGE = "datalex.theme";
 const DENSITY_STORAGE = "datalex.density";
 
-const EDITOR_BOTTOM_TABS = [
+const LOGICAL_PHYSICAL_EDIT_BOTTOM_TABS = [
   { id: "modeler",       label: "Modeler",       icon: Wand2 },
   { id: "properties",    label: "Properties",    icon: Columns3 },
-  { id: "validation",    label: "Validation",    icon: ShieldCheck, adminOnly: true },
-  { id: "diff",          label: "Diff & Gate",   icon: GitCompare,  adminOnly: true },
-  { id: "dictionary",    label: "Dictionary",    icon: BookOpen },
+  { id: "validation",    label: "Validation",    icon: ShieldCheck },
+  { id: "diff",          label: "Diff & Gate",   icon: GitCompare },
   { id: "history",       label: "History",       icon: Clock },
 ];
 
 const CONCEPTUAL_BOTTOM_TABS = [
   { id: "modeler",       label: "Studio",        icon: Wand2 },
   { id: "dictionary",    label: "Dictionary",    icon: BookOpen },
-  { id: "validation",    label: "Validation",    icon: ShieldCheck, adminOnly: true },
+  { id: "validation",    label: "Validation",    icon: ShieldCheck },
   { id: "history",       label: "History",       icon: Clock },
 ];
 
@@ -105,20 +164,37 @@ const LazyFallback = (
   <div style={{ padding: 20, fontSize: 12, color: "var(--text-tertiary)" }}>Loading…</div>
 );
 
-function BottomPanelContent({ tab }) {
+function BottomPanelContent({ tab, table, rel, relationships, schema, activeFile, isDiagramFile }) {
   let node;
   switch (tab) {
     case "modeler":       node = <ModelerPanel />; break;
-    case "properties":    node = <EntityPanel />; break;
-    case "libraries":     node = <LibrariesPanel />; break;
-    case "subject-areas": node = <SubjectAreasPanel />; break;
+    case "properties":
+      node = (
+        <SelectionSummaryPanel
+          table={table}
+          rel={rel}
+          relationships={relationships}
+          schema={schema}
+          activeFile={activeFile}
+          isDiagramFile={isDiagramFile}
+        />
+      );
+      break;
     case "validation":    node = <ValidationPanel />; break;
     case "diff":          node = <DiffPanel />; break;
-    case "impact":        node = <ImpactPanel />; break;
-    case "model-graph":   node = <ModelGraphPanel />; break;
     case "dictionary":    node = <DictionaryPanel />; break;
     case "history":       node = <HistoryPanel />; break;
-    default:              node = <EntityPanel />;
+    default:
+      node = (
+        <SelectionSummaryPanel
+          table={table}
+          rel={rel}
+          relationships={relationships}
+          schema={schema}
+          activeFile={activeFile}
+          isDiagramFile={isDiagramFile}
+        />
+      );
   }
   return <React.Suspense fallback={LazyFallback}>{node}</React.Suspense>;
 }
@@ -253,8 +329,9 @@ export default function Shell() {
   }, [rightPanelWidth]);
 
   const selectedEntityId = useDiagramStore((s) => s.selectedEntityId);
-  const setDiagramGraph = useDiagramStore((s) => s.setGraph);
+  const setGraph = useDiagramStore((s) => s.setGraph);
   const selectDiagramEntity = useDiagramStore((s) => s.selectEntity);
+  const clearDiagramSelection = useDiagramStore((s) => s.clearSelection);
 
   /* ── Keyboard shortcuts (match legacy App.jsx behavior) ────────── */
   const [showShortcuts, setShowShortcuts] = useState(false);
@@ -369,6 +446,11 @@ export default function Shell() {
     return () => window.removeEventListener("keydown", handler);
   }, [showShortcuts, cycleTheme, cycleProject, toggleBottomPanel, setCommandPaletteOpen, addToast]);
 
+  /* ── Auto-switch bottom tab when entity selected ───────────────── */
+  useEffect(() => {
+    if (selectedEntityId) setBottomPanelTab("properties");
+  }, [selectedEntityId, setBottomPanelTab]);
+
   /* ── Current git branch (displayed on project tabs bar) ───────── */
   const [branch, setBranch] = useState("main");
   useEffect(() => {
@@ -400,37 +482,47 @@ export default function Shell() {
     return /\.diagram\.ya?ml$/i.test(n);
   }, [activeFile]);
 
-  /* Merge `fileContentCache` contents into the projectFiles list so the
-     diagram adapter has `file.content` for each referenced path. Without
-     this the list from `/api/projects/:id/files` is metadata-only and
-     every diagram renders empty. */
-  const filesForDiagram = React.useMemo(() => {
-    if (!isDiagramFile) return projectFiles;
+  /* Merge `fileContentCache` contents into the projectFiles list so both
+     the diagram adapter and semantic-model type resolver can inspect
+     already-loaded YAML without extra fetches. */
+  const filesWithContent = React.useMemo(() => {
     const cache = fileContentCache || {};
     return (projectFiles || []).map((f) => {
-      const key = (f?.fullPath || f?.path || "").replace(/^[/\\]+/, "");
+      const key = normalizeWorkspaceFileRef(f?.fullPath || f?.path || "");
       if (typeof f?.content === "string") return f;
       if (key && typeof cache[key] === "string") return { ...f, content: cache[key] };
       return f;
     });
-  }, [isDiagramFile, projectFiles, fileContentCache]);
+  }, [projectFiles, fileContentCache]);
 
   /* When viewing a diagram file, prefetch any referenced file contents so
      the adapter can render them. The store's `ensureFilesLoaded` skips
      already-cached paths, so this is a no-op on subsequent renders. */
   React.useEffect(() => {
-    if (!isDiagramFile || !activeFileContent) return;
+    if (!activeFileContent) return;
     let paths = [];
+    const semanticDependencyNames = new Set();
     try {
-      const doc = yaml.load(activeFileContent);
-      if (doc && Array.isArray(doc.entities)) {
-        paths = doc.entities
-          .map((e) => String(e?.file || "").replace(/^[/\\]+/, ""))
-          .filter(Boolean);
+      if (isDiagramFile) {
+        const doc = yaml.load(activeFileContent);
+        if (doc && Array.isArray(doc.entities)) {
+          paths = doc.entities
+            .map((e) => normalizeWorkspaceFileRef(e?.file))
+            .filter(Boolean);
+        }
+        filesWithContent
+          .filter((file) => paths.includes(normalizeWorkspaceFileRef(file?.fullPath || file?.path || "")))
+          .forEach((file) => {
+            collectSemanticDependencyNames(file?.content).forEach((name) => semanticDependencyNames.add(name));
+          });
+      } else {
+        collectSemanticDependencyNames(activeFileContent).forEach((name) => semanticDependencyNames.add(name));
       }
     } catch (_e) { /* malformed — nothing to prefetch */ }
-    if (paths.length > 0) ensureFilesLoaded(paths);
-  }, [isDiagramFile, activeFileContent, ensureFilesLoaded]);
+    const semanticPaths = resolveSemanticDependencyPaths(projectFiles, [...semanticDependencyNames]);
+    const allPaths = [...new Set([...paths, ...semanticPaths])];
+    if (allPaths.length > 0) ensureFilesLoaded(allPaths);
+  }, [isDiagramFile, activeFileContent, ensureFilesLoaded, filesWithContent, projectFiles]);
 
   // Key on modelGraphVersion as well so cross-file edits (e.g. saving a
   // neighbor model while a diagram is open) rebuild the adapted schema.
@@ -438,89 +530,17 @@ export default function Shell() {
   // identity is the same but the underlying YAML on disk changed.
   const modelGraphVersion = useWorkspaceStore((s) => s.modelGraphVersion);
   const adapted = React.useMemo(() => {
-    if (isDiagramFile) return adaptDiagramYaml(activeFileContent, filesForDiagram);
-    // Try canonical DataLex (entities:) first, then the dbt-importer shape
-    // (kind: model / kind: source with top-level columns:). Without the
-    // second pass, opening an imported stg_*.yml directly renders nothing.
-    return adaptDataLexYaml(activeFileContent) || adaptDataLexModelYaml(activeFileContent);
-  }, [activeFileContent, isDiagramFile, filesForDiagram, modelGraphVersion]);
+    if (isDiagramFile) return adaptDiagramYaml(activeFileContent, filesWithContent);
+    // Raw dbt schema.yml files (including semantic_models / metrics) should
+    // render directly in the live shell, then fall back to DataLex shapes.
+    return adaptDbtSchemaYaml(activeFileContent, filesWithContent) || adaptDataLexYaml(activeFileContent) || adaptDataLexModelYaml(activeFileContent);
+  }, [activeFileContent, isDiagramFile, filesWithContent, modelGraphVersion]);
   const isDemo = useWorkspaceStore((s) => s.offlineMode && !s.activeProjectId);
   const emptySchema = React.useMemo(
     () => ({ name: "Project", engine: "DataLex", schema: "public", tables: [], relationships: [], subjectAreas: [] }),
     []
   );
   const schema = adapted || (isDemo ? DEMO_SCHEMA : emptySchema);
-  const activeModelKind = React.useMemo(() => {
-    if (!activeFileContent) return "physical";
-    try {
-      const doc = yaml.load(activeFileContent);
-      if (doc && typeof doc === "object") {
-        const kind = String(doc?.model?.kind || doc?.kind || "").toLowerCase();
-        const layer = String(doc?.layer || doc?.model?.layer || "").toLowerCase();
-        if (["conceptual", "logical", "physical"].includes(layer)) return layer;
-        if (String(doc?.kind || "").toLowerCase() === "diagram") {
-          const diagramLayer = String(doc?.layer || doc?.viz?.layer || "").toLowerCase();
-          if (["conceptual", "logical", "physical"].includes(diagramLayer)) return diagramLayer;
-        }
-        if (kind) return kind;
-      }
-    } catch (_e) {
-      // ignore parse errors and fall back below
-    }
-    return "physical";
-  }, [activeFileContent]);
-
-  React.useEffect(() => {
-    const entities = (schema.tables || []).map((t) => ({
-      name: t.name || t.id,
-      type: t.type || (activeModelKind === "conceptual" ? "concept" : "table"),
-      layer: activeModelKind,
-      logical_name: t.logical_name,
-      physical_name: t.physical_name,
-      description: t.description || "",
-      owner: t.owner || "",
-      domain: t.domain || "",
-      subject_area: t.subject_area || t.subject || t.schema || "",
-      tags: Array.isArray(t.tags) ? t.tags : [],
-      candidate_keys: Array.isArray(t.candidate_keys) ? t.candidate_keys : [],
-      business_keys: Array.isArray(t.business_keys) ? t.business_keys : [],
-      subtype_of: t.subtype_of || "",
-      subtypes: Array.isArray(t.subtypes) ? t.subtypes : [],
-      fields: (t.columns || []).map((c) => ({
-        name: c.name,
-        type: c.type,
-        nullable: !c.nn,
-        primary_key: !!c.pk,
-        unique: !!c.unique,
-        fk: c.fk,
-        description: c.description || "",
-      })),
-    }));
-    const edges = (schema.relationships || [])
-      .map((r, i) => ({
-        id: r.id || r.name || `rel-${i}`,
-        source: r.from?.table,
-        target: r.to?.table,
-        label: r.verb || r.name || r.label || "",
-        data: r,
-      }))
-      .filter((e) => e.source && e.target);
-    setDiagramGraph({
-      nodes: [],
-      edges,
-      warnings: [],
-      model: {
-        model: {
-          name: schema.name || activeFile?.name || "model",
-          kind: activeModelKind,
-          layer: activeModelKind,
-        },
-        entities,
-        relationships: schema.relationships || [],
-        subject_areas: schema.subjectAreas || [],
-      },
-    });
-  }, [schema, activeModelKind, activeFile?.name, setDiagramGraph]);
 
   /* Raw index list straight from the YAML, used by the inspector's
      IndexesView. Parsed lazily and cached per content change — js-yaml
@@ -532,6 +552,10 @@ export default function Shell() {
       return doc && Array.isArray(doc.indexes) ? doc.indexes : [];
     } catch (_e) { return []; }
   }, [activeFileContent]);
+  const activeModelKind = String(schema?.modelKind || "physical").toLowerCase();
+  const canRunForwardSql = activeModelKind === "physical";
+
+  const panelModel = React.useMemo(() => schemaToPanelModel(schema), [schema]);
 
   /* ── Layout persistence (localStorage; keyed per project+file) ─── */
   const layoutKey = React.useMemo(() => {
@@ -583,33 +607,39 @@ export default function Shell() {
   React.useEffect(() => {
     if (schema.tables[0]) {
       setSelected({ type: "table", id: schema.tables[0].id });
-      selectDiagramEntity(schema.tables[0].id);
       setSelectedCol(schema.tables[0].columns[0]?.name || null);
     } else {
       setSelected(null);
-      selectDiagramEntity(null);
       setSelectedCol(null);
     }
-  }, [schema, selectDiagramEntity]);
+  }, [schema]);
 
   const activeTable = selected?.type === "table" ? tables.find((t) => t.id === selected.id) : null;
   const activeRel = selected?.type === "rel" ? schema.relationships.find((r) => r.id === selected.id) : null;
 
+  React.useEffect(() => {
+    setGraph({ nodes: [], edges: [], warnings: [], model: panelModel });
+  }, [panelModel, setGraph]);
+
+  React.useEffect(() => {
+    if (selected?.type === "table" && activeTable) {
+      selectDiagramEntity(activeTable.id);
+      return;
+    }
+    clearDiagramSelection();
+  }, [selected, activeTable, selectDiagramEntity, clearDiagramSelection]);
+
   const handleSelect = (sel) => {
-    if (sel == null) { setSelected(null); selectDiagramEntity(null); return; }
+    if (sel == null) { setSelected(null); return; }
     if (typeof sel === "string") {
       setSelected({ type: "table", id: sel });
-      selectDiagramEntity(sel);
       const t = tables.find((x) => x.id === sel);
       if (t) setSelectedCol(t.columns[0]?.name);
     } else {
       setSelected(sel);
       if (sel.type === "table") {
-        selectDiagramEntity(sel.id);
         const t = tables.find((x) => x.id === sel.id);
         if (t) setSelectedCol(t.columns[0]?.name);
-      } else {
-        selectDiagramEntity(null);
       }
     }
   };
@@ -700,7 +730,12 @@ export default function Shell() {
     closeProject(pid);
   };
   const handleNewTable = () => {
-    if (activeFile) openModal("newFile");
+    if (activeFile) {
+      openModal("newFile", {
+        layerHint: activeModelKind,
+        domainHint: schema?.domain || "",
+      });
+    }
     else addToast({ type: "error", message: "Open a project first." });
   };
 
@@ -708,6 +743,15 @@ export default function Shell() {
   const handleAddEntity = React.useCallback((kind) => {
     const s = useWorkspaceStore.getState();
     if (!s.activeFile) { addToast({ type: "error", message: "Open a file first." }); return; }
+    const activeIsDiagram = /\.diagram\.ya?ml$/i.test(s.activeFile?.name || "");
+    if (activeIsDiagram) {
+      if (kind === "ENUMS") {
+        addToast({ type: "info", message: "Diagrams can only reference existing models. Open a model file to create an enum." });
+        return;
+      }
+      openModal("entityPicker");
+      return;
+    }
     const isEnum = kind === "ENUMS";
     const label = isEnum ? "enum" : "entity";
     const name = window.prompt(`New ${label} name (e.g. ${isEnum ? "order_status" : "customer"})`);
@@ -722,32 +766,70 @@ export default function Shell() {
       return;
     }
     s.updateContent(next);
+    s.flushAutosave?.().catch(() => {});
     addToast({ type: "success", message: `Added ${label} “${clean}”.` });
-  }, [addToast]);
+  }, [addToast, openModal]);
 
   const handleDeleteEntity = React.useCallback((entityName) => {
     if (!entityName) return;
-    const s = useWorkspaceStore.getState();
-    if (!s.activeFile) return;
-    if (!window.confirm(`Delete entity “${entityName}”? This removes its fields and every relationship, index, metric, and governance entry referencing it.`)) return;
-    const result = deleteEntityDeep(s.activeFileContent, entityName);
-    if (!result) {
-      addToast({ type: "error", message: `Could not delete “${entityName}” — entity not found or YAML invalid.` });
-      return;
-    }
-    s.updateContent(result.yaml);
-    setSelected(null);
-    const extras = [];
-    if (result.impact.relationships) extras.push(`${result.impact.relationships} relationship${result.impact.relationships === 1 ? "" : "s"}`);
-    if (result.impact.indexes)       extras.push(`${result.impact.indexes} index${result.impact.indexes === 1 ? "" : "es"}`);
-    if (result.impact.metrics)       extras.push(`${result.impact.metrics} metric${result.impact.metrics === 1 ? "" : "s"}`);
-    if (result.impact.governance)    extras.push(`${result.impact.governance} governance entr${result.impact.governance === 1 ? "y" : "ies"}`);
-    const suffix = extras.length ? ` (also removed ${extras.join(", ")})` : "";
-    addToast({ type: "success", message: `Deleted “${entityName}”${suffix}.` });
-    // Nudge read-only graph panels that key off modelGraphVersion so they
-    // refetch instead of showing a stale cascade.
-    s.bumpModelGraphVersion?.();
-  }, [addToast]);
+    void (async () => {
+      const s = useWorkspaceStore.getState();
+      if (!s.activeFile) return;
+      const activeIsDiagram = /\.diagram\.ya?ml$/i.test(s.activeFile?.name || "");
+      const table = (schema.tables || []).find((t) =>
+        t.id === entityName || String(t.name || "").toLowerCase() === String(entityName || "").toLowerCase()
+      );
+      const resolvedName = table?.name || entityName;
+      const sourceFile = table?._sourceFile || "";
+      const confirmCopy = activeIsDiagram
+        ? `Remove entity “${resolvedName}” from this diagram?`
+        : `Delete entity “${resolvedName}”? This removes its fields and every relationship, index, metric, and governance entry referencing it.`;
+      if (!window.confirm(confirmCopy)) return;
+
+      let referencedContent = sourceFile
+        ? (s.fileContentCache?.[String(sourceFile).replace(/^[/\\]+/, "")] || "")
+        : "";
+      if (activeIsDiagram && sourceFile && !referencedContent) {
+        try {
+          await s.ensureFilesLoaded?.([sourceFile]);
+          referencedContent =
+            useWorkspaceStore.getState().fileContentCache?.[String(sourceFile).replace(/^[/\\]+/, "")] || "";
+        } catch (_err) {
+          // Best effort; deleteDiagramEntity will still fail cleanly if the
+          // referenced YAML can't be loaded.
+        }
+      }
+
+      const result = activeIsDiagram
+        ? deleteDiagramEntity(s.activeFileContent, sourceFile, resolvedName, referencedContent)
+        : deleteEntityDeep(s.activeFileContent, resolvedName);
+      if (!result) {
+        addToast({
+          type: "error",
+          message: activeIsDiagram
+            ? `Could not remove “${resolvedName}” from the diagram — entry not found or YAML invalid.`
+            : `Could not delete “${resolvedName}” — entity not found or YAML invalid.`,
+        });
+        return;
+      }
+      s.updateContent(result.yaml);
+      s.flushAutosave?.().catch(() => {});
+      setSelected(null);
+      const extras = [];
+      if (result.impact.relationships) extras.push(`${result.impact.relationships} relationship${result.impact.relationships === 1 ? "" : "s"}`);
+      if (result.impact.indexes)       extras.push(`${result.impact.indexes} index${result.impact.indexes === 1 ? "" : "es"}`);
+      if (result.impact.metrics)       extras.push(`${result.impact.metrics} metric${result.impact.metrics === 1 ? "" : "s"}`);
+      if (result.impact.governance)    extras.push(`${result.impact.governance} governance entr${result.impact.governance === 1 ? "y" : "ies"}`);
+      const suffix = extras.length ? ` (also removed ${extras.join(", ")})` : "";
+      addToast({
+        type: "success",
+        message: activeIsDiagram
+          ? `Removed “${resolvedName}” from the diagram${suffix}.`
+          : `Deleted “${resolvedName}”${suffix}.`,
+      });
+      s.bumpModelGraphVersion?.();
+    })();
+  }, [addToast, schema.tables]);
 
   /* Delete relationship by its in-canvas id. Canvas relationships come from
    * schemaAdapter with ids like `r1`, `r2`, … for explicit entries and
@@ -764,15 +846,56 @@ export default function Shell() {
     const s = useWorkspaceStore.getState();
     if (!s.activeFile) return;
     if (!window.confirm(`Delete relationship “${rel.name}”?`)) return;
-    const res = deleteRelationshipYaml(s.activeFileContent, rel.name);
-    if (!res || res.error || !res.yaml) {
-      addToast({ type: "error", message: `Could not delete relationship — ${res?.error || "not found in active YAML"}.` });
-      return;
-    }
-    s.updateContent(res.yaml);
-    setSelected(null);
-    addToast({ type: "success", message: `Deleted relationship “${rel.name}”.` });
-    s.bumpModelGraphVersion?.();
+    void (async () => {
+      const origin = rel._origin || "";
+      if (origin === "diagram_relationship") {
+        const res = deleteRelationshipYaml(s.activeFileContent, rel.name);
+        if (!res || res.error || !res.yaml) {
+          addToast({ type: "error", message: `Could not delete relationship — ${res?.error || "not found in active YAML"}.` });
+          return;
+        }
+        s.updateContent(res.yaml);
+        s.flushAutosave?.().catch(() => {});
+      } else if (origin === "model_relationship" && rel._sourceFile) {
+        try {
+          const result = await s.mutateReferencedFile(rel._sourceFile, (content) => {
+            const next = deleteRelationshipYaml(content, rel.name);
+            return next?.yaml || null;
+          });
+          if (!result?.changed) {
+            addToast({ type: "error", message: "Could not delete relationship — not found in the source YAML." });
+            return;
+          }
+        } catch (err) {
+          addToast({ type: "error", message: err?.message || String(err) });
+          return;
+        }
+      } else if (origin === "field_fk" && rel._sourceFile) {
+        try {
+          const result = await s.mutateReferencedFile(rel._sourceFile, (content) =>
+            removeFieldRelationship(content, rel._fromEntityName, rel.from?.col, rel._toEntityName, rel.to?.col)
+          );
+          if (!result?.changed) {
+            addToast({ type: "error", message: "Could not delete relationship — no matching FK/test found in the source YAML." });
+            return;
+          }
+        } catch (err) {
+          addToast({ type: "error", message: err?.message || String(err) });
+          return;
+        }
+      } else {
+        const res = deleteRelationshipYaml(s.activeFileContent, rel.name);
+        if (!res || res.error || !res.yaml) {
+          addToast({ type: "error", message: `Could not delete relationship — ${res?.error || "not found in active YAML"}.` });
+          return;
+        }
+        s.updateContent(res.yaml);
+        s.flushAutosave?.().catch(() => {});
+      }
+      setSelected(null);
+      addToast({ type: "success", message: `Deleted relationship “${rel.name}”.` });
+      s.bumpModelGraphVersion?.();
+    })();
   }, [schema.relationships, addToast]);
 
   /* ── ELK auto-layout (palette action) ──────────────────────────────
@@ -888,29 +1011,76 @@ export default function Shell() {
     if (activeIsDiagram) {
       const sourceFile = t._sourceFile || "";
       if (!sourceFile) return;
-      next = setDiagramEntityDisplay(s.activeFileContent, sourceFile, t.id, { x: t.x, y: t.y });
+      next = setDiagramEntityDisplay(s.activeFileContent, sourceFile, t.name || t._entityName || t.id, { x: t.x, y: t.y });
     } else {
-      next = setEntityDisplay(s.activeFileContent, t.id, { x: t.x, y: t.y });
+      next = setEntityDisplay(s.activeFileContent, t.name || t.id, { x: t.x, y: t.y });
     }
     if (next && next !== s.activeFileContent) {
       s.updateContent(next);
     }
   }, [tables]);
 
-  /* ── Drag-to-connect handoff to NewRelationshipDialog ─────────── */
+  /* ── Drag-to-connect: create the relationship directly when the active
+     file can safely accept it, and only fall back to the dialog for
+     ambiguous/manual cases. */
   const handleCanvasConnect = React.useCallback((payload) => {
-    const conceptualLevel = String(activeModelKind || "").toLowerCase() === "conceptual" || payload?.conceptualLevel;
-    openModal("newRelationship", {
-      ...payload,
-      modelKind: conceptualLevel ? "conceptual" : payload?.modelKind,
-      conceptualLevel,
-      tables: (tables || []).map((t) => ({
-        id: t.name || t.id,
-        name: t.name || t.id,
-        columns: conceptualLevel ? [] : (t.columns || []).map((c) => ({ name: c.name })),
-      })),
-    });
-  }, [openModal, activeModelKind, tables]);
+    const s = useWorkspaceStore.getState();
+    if (!s.activeFile || !s.activeFileContent) return;
+
+    const fromTable = tables.find((table) => table.id === payload?.fromEntity || table.name === payload?.fromEntity);
+    const toTable = tables.find((table) => table.id === payload?.toEntity || table.name === payload?.toEntity);
+    const fromEntityName = String(fromTable?.name || payload?.fromEntity || "").trim();
+    const toEntityName = String(toTable?.name || payload?.toEntity || "").trim();
+    const fromColumn = String(payload?.fromColumn || "").trim();
+    const toColumn = String(payload?.toColumn || "").trim();
+    const dialogPayload = { ...payload, modelKind: activeModelKind };
+    if (!fromEntityName || !toEntityName || !fromColumn || !toColumn) {
+      openModal("newRelationship", dialogPayload);
+      return;
+    }
+
+    const cardinality = inferRelationshipCardinality(
+      fromTable?.columns?.find((column) => column.name === fromColumn),
+      toTable?.columns?.find((column) => column.name === toColumn),
+    );
+    const name = defaultRelationshipName(fromEntityName, toEntityName);
+
+    if (isDiagramFile) {
+      const next = addDiagramRelationship(s.activeFileContent, {
+        name,
+        from: { entity: fromEntityName, field: fromColumn },
+        to: { entity: toEntityName, field: toColumn },
+        cardinality,
+      });
+      if (!next) {
+        openModal("newRelationship", dialogPayload);
+        return;
+      }
+      if (next === s.activeFileContent) {
+        addToast({ type: "info", message: `Relationship ${fromEntityName}.${fromColumn} → ${toEntityName}.${toColumn} already exists.` });
+        return;
+      }
+      s.updateContent(next);
+      s.flushAutosave?.().catch(() => {});
+      addToast({ type: "success", message: `Linked ${fromEntityName}.${fromColumn} → ${toEntityName}.${toColumn}.` });
+      return;
+    }
+
+    const result = addRelationship(
+      s.activeFileContent,
+      name,
+      `${fromEntityName}.${fromColumn}`,
+      `${toEntityName}.${toColumn}`,
+      cardinality,
+    );
+    if (result?.error || !result?.yaml || result.yaml === s.activeFileContent) {
+      openModal("newRelationship", dialogPayload);
+      return;
+    }
+    s.updateContent(result.yaml);
+    s.flushAutosave?.().catch(() => {});
+    addToast({ type: "success", message: `Linked ${fromEntityName}.${fromColumn} → ${toEntityName}.${toColumn}.` });
+  }, [activeModelKind, addToast, isDiagramFile, openModal, tables]);
 
   /* ── Drop a YAML source onto the canvas: append its file reference
          to the active diagram's `entities:` and prefetch content. Only
@@ -932,30 +1102,20 @@ export default function Shell() {
     }
   }, [isDiagramFile, addToast]);
 
-  const activeBottomTabs = React.useMemo(() => {
-    const editable = !!(canEdit && canEdit());
-    const sourceTabs = !editable
-      ? VIEWER_BOTTOM_TABS
-      : activeModelKind === "conceptual"
-        ? CONCEPTUAL_BOTTOM_TABS
-        : EDITOR_BOTTOM_TABS;
-    return sourceTabs.filter((t) => !t.adminOnly || editable);
-  }, [activeModelKind, canEdit]);
+  const isEditable = !!(canEdit && canEdit());
+  const activeBottomTabs = React.useMemo(
+    () => {
+      if (activeModelKind === "conceptual") return CONCEPTUAL_BOTTOM_TABS;
+      return isEditable ? LOGICAL_PHYSICAL_EDIT_BOTTOM_TABS : VIEWER_BOTTOM_TABS;
+    },
+    [activeModelKind, isEditable]
+  );
 
   React.useEffect(() => {
     if (!activeBottomTabs.some((tab) => tab.id === bottomPanelTab)) {
-      setBottomPanelTab(activeBottomTabs[0]?.id || "modeler");
+      setBottomPanelTab(activeBottomTabs[0]?.id || "properties");
     }
   }, [activeBottomTabs, bottomPanelTab, setBottomPanelTab]);
-
-  /* ── Auto-switch bottom tab when entity selected ───────────────── */
-  useEffect(() => {
-    if (!selectedEntityId) return;
-    if (activeModelKind === "conceptual") return;
-    if (activeBottomTabs.some((tab) => tab.id === "properties")) {
-      setBottomPanelTab("properties");
-    }
-  }, [selectedEntityId, setBottomPanelTab, activeModelKind, activeBottomTabs]);
 
   /* ── Shell render ──────────────────────────────────────────────── */
   return (
@@ -965,7 +1125,11 @@ export default function Shell() {
         theme={theme}
         setTheme={setTheme}
         onNewTable={handleNewTable}
-        onNewFile={() => (activeProjectId ? openModal("newFile") : openModal("addProject"))}
+        onNewFile={() => (
+          activeProjectId
+            ? openModal("newFile", { layerHint: activeModelKind, domainHint: schema?.domain || "" })
+            : openModal("addProject")
+        )}
         onOpenFile={() => openModal("addProject")}
         onSave={async () => {
           if (!activeFile) return addToast({ type: "error", message: "No file to save." });
@@ -1001,10 +1165,11 @@ export default function Shell() {
         onSettings={() => openModal("settings")}
         onConnections={() => openModal("connectionsManager")}
         onCommit={() => openModal("commit")}
-        onRunSql={() => openModal("exportDdl")}
+        onRunSql={() => canRunForwardSql && openModal("exportDdl")}
         onImport={() => openModal("importDialog")}
         onImportDbt={() => openModal("importDbtRepo")}
         onSearch={() => setCommandPaletteOpen(true)}
+        canRunSql={canRunForwardSql}
         isDirty={isDirty}
         canSave={!!activeFile}
         domains={topBarDomains}
@@ -1026,8 +1191,6 @@ export default function Shell() {
         activeTable={selected?.type === "table" ? selected.id : null}
         onSelectTable={(id) => handleSelect({ type: "table", id })}
         tables={tables}
-        theme={theme}
-        setTheme={setTheme}
         subjectAreas={subjectAreaTreeItems}
         schemas={schemaList}
         connectionLabel={
@@ -1044,6 +1207,8 @@ export default function Shell() {
         activeProjectId={activeProjectId}
         onSelectProject={(id) => selectProject(id)}
         onAddEntity={handleAddEntity}
+        onOpenConnectors={() => openModal("connectors")}
+        onManageConnections={() => openModal("connectionsManager")}
       />
 
       {/* Main canvas cell swaps based on the top-bar ViewSwitcher.
@@ -1063,7 +1228,7 @@ export default function Shell() {
           onDeleteEntity={handleDeleteEntity}
           onDeleteRelationship={handleDeleteRelationship}
           onAutoLayout={handleAutoLayout}
-          onExport={() => openModal("exportDdl")}
+          onExport={canRunForwardSql ? () => openModal("exportDdl") : undefined}
           title={schema.name}
           engine={schema.engine}
           modelKind={activeModelKind}
@@ -1103,15 +1268,25 @@ export default function Shell() {
           setSelectedCol={setSelectedCol}
           relationships={schema.relationships}
           indexes={rawIndexes}
+          schema={schema}
+          isDiagramFile={isDiagramFile}
           onSelectRel={handleSelect}
           onDeleteEntity={handleDeleteEntity}
-          onExportDdl={() => openModal("exportDdl")}
+          onExportDdl={canRunForwardSql ? () => openModal("exportDdl") : undefined}
         />
       )}
 
       {bottomPanelOpen && (
         <BottomDrawer tabs={activeBottomTabs}>
-          <BottomPanelContent tab={bottomPanelTab} />
+          <BottomPanelContent
+            tab={bottomPanelTab}
+            table={activeTable}
+            rel={activeRel}
+            relationships={schema.relationships}
+            schema={schema}
+            activeFile={activeFile}
+            isDiagramFile={isDiagramFile}
+          />
         </BottomDrawer>
       )}
 
@@ -1152,9 +1327,10 @@ export default function Shell() {
               name: t.name || t.id,
               columns: (t.columns || []).map((c) => ({ name: c.name })),
             })),
+            modelKind: activeModelKind,
           }),
           autoLayout:      () => handleAutoLayout(),
-          exportSql:       () => openModal("exportDdl"),
+          exportSql:       () => canRunForwardSql && openModal("exportDdl"),
           cycleTheme:      () => cycleTheme(),
         }}
         extraCommands={[
@@ -1165,7 +1341,9 @@ export default function Shell() {
           { id: "connect",    section: "Actions", label: "Manage connections…",    meta: "",    icon: <span style={{ fontSize: 12 }}>⛁</span>,  run: () => openModal("connectionsManager") },
           { id: "import",     section: "Actions", label: "Import schema…",         meta: "",    icon: <span style={{ fontSize: 12 }}>⇩</span>,  run: () => openModal("importDialog") },
           { id: "import-dbt", section: "Actions", label: "Import dbt repo…",       meta: "",    icon: <span style={{ fontSize: 12 }}>⤓</span>,  run: () => openModal("importDbtRepo") },
-          { id: "apply-ddl",  section: "Actions", label: "Apply to warehouse…",    meta: "",    icon: <span style={{ fontSize: 12 }}>☁</span>,  run: () => openModal("applyDdl") },
+          ...(canRunForwardSql ? [
+            { id: "apply-ddl",  section: "Actions", label: "Apply to warehouse…", meta: "", icon: <span style={{ fontSize: 12 }}>☁</span>, run: () => openModal("applyDdl") },
+          ] : []),
           // v0.5.0 — stakeholder-share + snapshot flows. Share opens the
           // HTML bundle dialog prefilled from the currently-adapted schema;
           // snapshots routes through the new git-tag API.
@@ -1191,6 +1369,7 @@ export default function Shell() {
         {activeModal === "exportDdl"          && <ExportDdlDialog />}
         {activeModal === "applyDdl"           && <ApplyDdlDialog />}
         {activeModal === "importDialog"       && <PanelDialog kind="import" />}
+        {activeModal === "connectors"         && <PanelDialog kind="connectors" />}
         {activeModal === "importDbtRepo"      && <ImportDbtRepoDialog />}
         {activeModal === "newConcept"         && <NewConceptDialog />}
         {activeModal === "newRelationship"    && <NewRelationshipDialog />}

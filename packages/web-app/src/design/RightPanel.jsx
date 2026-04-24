@@ -1,9 +1,8 @@
 /* RightPanel — entity / relationship inspector.
    Uses the shared PanelFrame primitives so its visual language matches
-   the bottom drawer (same header, same paddings, same tone colours). The
-   five tabs (COLUMNS / RELATIONS / INDEXES / SQL / YAML) each live in
-   their own file under `./inspector/` and are lazy-loaded — YAML pulls
-   in CodeMirror, so we keep it behind Suspense.
+   the bottom drawer (same header, same paddings, same tone colours).
+   Physical/logical models use the richer technical inspector, while
+   conceptual models swap in a business-focused details surface.
 
    Features added in PR 8:
      - PanelFrame port (away from the older .insp-* namespace).
@@ -27,18 +26,30 @@ import InspectorTabs from "./inspector/InspectorTabs";
    (COLUMNS on a freshly selected entity) is the cheapest one — the
    others only load the first time the user clicks their tab. */
 const ColumnsView     = React.lazy(() => import("./inspector/ColumnsView"));
+const ConceptDetailsView = React.lazy(() => import("./inspector/ConceptDetailsView"));
 const RelationsView   = React.lazy(() => import("./inspector/RelationsView"));
 const IndexesView     = React.lazy(() => import("./inspector/IndexesView"));
 const SqlView         = React.lazy(() => import("./inspector/SqlView"));
 const YamlEditorShell = React.lazy(() => import("./inspector/YamlEditorShell"));
 
-const TABS = [
+const BASE_TABS = [
   { id: "COLUMNS",   label: "Columns" },
   { id: "RELATIONS", label: "Relations" },
   { id: "INDEXES",   label: "Indexes" },
   { id: "SQL",       label: "SQL" },
   { id: "YAML",      label: "YAML" },
 ];
+
+const CONCEPTUAL_TABS = [
+  { id: "DETAILS",   label: "Details" },
+  { id: "RELATIONS", label: "Relationships" },
+  { id: "YAML",      label: "YAML" },
+];
+
+function relationshipEndpointLabel(endpoint, fallbackEntity) {
+  const entity = fallbackEntity || endpoint?.table || endpoint?.entity || "—";
+  return endpoint?.col ? `${entity}.${endpoint.col}` : entity;
+}
 
 /* Drag-resize handle on the LEFT edge of the right panel. Writes the
    pixel width directly to `--right-w` on the root during drag (via RAF)
@@ -96,15 +107,27 @@ function ResizeHandle({ initialWidth, onCommit }) {
 
 export default function RightPanel({
   table, rel, tables, selectedCol, setSelectedCol,
-  relationships = [], indexes = [], onDeleteEntity, onSelectRel, onExportDdl,
+  relationships = [], indexes = [], schema = null, isDiagramFile = false,
+  onDeleteEntity, onSelectRel, onExportDdl,
 }) {
   const rightPanelTab = useUiStore((s) => s.rightPanelTab);
   const setRightPanelTab = useUiStore((s) => s.setRightPanelTab);
   const rightPanelWidth = useUiStore((s) => s.rightPanelWidth);
   const setRightPanelWidth = useUiStore((s) => s.setRightPanelWidth);
+  const modelKind = String(schema?.modelKind || "physical").trim().toLowerCase();
+  const tabs = React.useMemo(() => {
+    if (modelKind === "conceptual") {
+      return CONCEPTUAL_TABS;
+    }
+    if (modelKind === "logical") {
+      return BASE_TABS.filter((tabDef) => tabDef.id !== "SQL");
+    }
+    return BASE_TABS;
+  }, [modelKind]);
 
   // Coerce to a known tab id.
-  const tab = TABS.some((t) => t.id === rightPanelTab) ? rightPanelTab : "COLUMNS";
+  const fallbackTab = modelKind === "conceptual" ? "DETAILS" : "COLUMNS";
+  const tab = tabs.some((t) => t.id === rightPanelTab) ? rightPanelTab : fallbackTab;
 
   /* ── Header content varies by selection kind ──────────────── */
   const header = React.useMemo(() => {
@@ -113,19 +136,22 @@ export default function RightPanel({
         icon: <GitBranch size={14} />,
         eyebrow: "Relationship",
         title: rel.name,
-        subtitle: `${rel.from.table}.${rel.from.col} → ${rel.to.table}.${rel.to.col}`,
+        subtitle: `${relationshipEndpointLabel(rel.from, rel._fromEntityName)} → ${relationshipEndpointLabel(rel.to, rel._toEntityName)}`,
         statusTone: "accent",
-        statusLabel: "Relationship",
+        statusLabel: !rel.from?.col && !rel.to?.col ? "Conceptual" : "Relationship",
       };
     }
     if (table) {
+      const isConcept = modelKind === "conceptual" || String(table.type || "").toLowerCase() === "concept";
       return {
         icon: <Box size={14} />,
-        eyebrow: table.subject || table.cat || null,
+        eyebrow: isConcept ? "Business concept" : (table.subject || table.cat || null),
         title: table.name,
-        subtitle: `${table.schema}.${table.name} · ${table.columns.length} columns${table.rowCount ? ` · ${table.rowCount}` : ""}`,
+        subtitle: isConcept
+          ? `${schema?.domain || table?.domain || "Shared domain"} · ${table.subject_area || "Unassigned subject area"}`
+          : `${table.schema}.${table.name} · ${table.columns.length} columns${table.rowCount ? ` · ${table.rowCount}` : ""}`,
         statusTone: table.kind === "ENUM" ? "warning" : "accent",
-        statusLabel: table.kind || "Table",
+        statusLabel: isConcept ? "Concept" : (table.type || table.kind || "Table"),
       };
     }
     return {
@@ -165,12 +191,30 @@ export default function RightPanel({
   let body;
   if (tab === "YAML") {
     body = <YamlEditorShell />;
+  } else if (tab === "SQL") {
+    body = (isDiagramFile && schema?.tables?.length)
+      ? <SqlView table={table} schema={schema} isDiagramFile={true} onExport={onExportDdl} />
+      : table
+        ? <SqlView table={table} schema={schema} isDiagramFile={false} onExport={onExportDdl} />
+        : <PanelEmpty icon={Database} title="SQL preview" description="Select a table to see its CREATE statement." />;
   } else if (noSelection) {
     body = (
       <PanelEmpty
         icon={Database}
         title="No selection"
-        description="Pick a table or relationship on the canvas to inspect it. The YAML tab is always available to edit the file directly."
+        description={
+          modelKind === "conceptual"
+            ? "Pick a concept or business relationship on the canvas. Use the studio below to add concepts, then edit the selected concept here."
+            : "Pick a table or relationship on the canvas to inspect it. The YAML tab is always available to edit the file directly."
+        }
+      />
+    );
+  } else if (tab === "DETAILS") {
+    body = (
+      <ConceptDetailsView
+        table={table}
+        schema={schema}
+        relationships={relationships}
       />
     );
   } else if (tab === "COLUMNS") {
@@ -194,10 +238,6 @@ export default function RightPanel({
     body = table
       ? <IndexesView table={table} indexes={indexes} />
       : <PanelEmpty icon={Database} title="Indexes" description="Select a table to view its indexes." />;
-  } else if (tab === "SQL") {
-    body = table
-      ? <SqlView table={table} onExport={onExportDdl} />
-      : <PanelEmpty icon={Database} title="SQL preview" description="Select a table to see its CREATE statement." />;
   }
 
   return (
@@ -216,7 +256,7 @@ export default function RightPanel({
           <InspectorTabs
             tab={tab}
             setTab={setRightPanelTab}
-            tabs={TABS}
+            tabs={tabs}
           />
         }
         bodyPadding={0}

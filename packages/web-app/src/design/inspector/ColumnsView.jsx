@@ -78,6 +78,36 @@ export default function ColumnsView({ table, col, setSelectedCol, entityName, on
   const lintByColumn = useEntityLintByColumn(entityName);
   const selectedFindings = (col?.name && lintByColumn.get(col.name)) || [];
   const openModal = useUiStore((s) => s.openModal);
+  const addToast = useUiStore((s) => s.addToast);
+  const activeFile = useWorkspaceStore((s) => s.activeFile);
+  const isDiagramFile = /\.diagram\.ya?ml$/i.test(activeFile?.name || "");
+  const sourceFile = table?._sourceFile || "";
+
+  const applyEntityMutation = React.useCallback(async (mutate) => {
+    const s = useWorkspaceStore.getState();
+    if (isDiagramFile && !sourceFile) {
+      addToast?.({ type: "error", message: `Could not resolve the source YAML for “${entityName}”.` });
+      return null;
+    }
+    if (isDiagramFile && sourceFile) {
+      try {
+        const result = await s.mutateReferencedFile(sourceFile, (content) => mutate(content));
+        if (result?.changed && onDirty) onDirty();
+        return result?.changed ? result.content : null;
+      } catch (err) {
+        addToast?.({ type: "error", message: err?.message || String(err) });
+        return null;
+      }
+    }
+
+    const next = mutate(s.activeFileContent);
+    if (next != null) {
+      s.updateContent(next);
+      if (onDirty) onDirty();
+      s.flushAutosave?.().catch(() => {});
+    }
+    return next;
+  }, [addToast, entityName, isDiagramFile, onDirty, sourceFile]);
 
   const handleBulkRename = React.useCallback(() => {
     if (!entityName || !col?.name) return;
@@ -85,18 +115,8 @@ export default function ColumnsView({ table, col, setSelectedCol, entityName, on
   }, [openModal, entityName, col?.name]);
 
   const applyPatch = React.useCallback((patch) => {
-    const s = useWorkspaceStore.getState();
-    const next = patchField(s.activeFileContent, entityName, col?.name, patch);
-    if (next != null) {
-      s.updateContent(next);
-      if (onDirty) onDirty();
-      // Inspector edits arrive via field blur — the user has already
-      // "committed" the change by tabbing away, so collapse the 800ms
-      // debounce window and persist immediately. Code-view typing still
-      // goes through the debounced path.
-      s.flushAutosave?.().catch(() => {});
-    }
-  }, [col?.name, entityName, onDirty]);
+    void applyEntityMutation((content) => patchField(content, entityName, col?.name, patch));
+  }, [applyEntityMutation, col?.name, entityName]);
 
   /* Add a new column. We invent a non-colliding placeholder name
    * ("new_column", "new_column_2", …) so the user lands on an editable row
@@ -114,14 +134,12 @@ export default function ColumnsView({ table, col, setSelectedCol, entityName, on
     while (existing.has(name.toLowerCase())) {
       name = `${base}_${n++}`;
     }
-    const s = useWorkspaceStore.getState();
-    const next = appendField(s.activeFileContent, entityName, { name, type: "string" });
-    if (next != null) {
-      s.updateContent(next);
-      if (setSelectedCol) setSelectedCol(name);
-      if (onDirty) onDirty();
-    }
-  }, [entityName, table?.columns, setSelectedCol, onDirty]);
+    applyEntityMutation((content) => appendField(content, entityName, { name, type: "string" }))
+      .then((next) => {
+        if (next == null) return;
+        if (setSelectedCol) setSelectedCol(name);
+      });
+  }, [applyEntityMutation, entityName, table?.columns, setSelectedCol]);
 
   /* Delete the currently-selected column, with confirmation. After the
    * write lands we move selection to a sibling so the panel doesn't flash
@@ -129,17 +147,15 @@ export default function ColumnsView({ table, col, setSelectedCol, entityName, on
   const handleDeleteColumn = React.useCallback(() => {
     if (!entityName || !col?.name) return;
     if (!window.confirm(`Delete column “${col.name}” from “${entityName}”?`)) return;
-    const s = useWorkspaceStore.getState();
-    const next = deleteField(s.activeFileContent, entityName, col.name);
-    if (next != null) {
-      s.updateContent(next);
-      if (setSelectedCol) {
-        const siblings = (table?.columns || []).filter((c) => c.name !== col.name);
-        setSelectedCol(siblings[0]?.name || null);
-      }
-      if (onDirty) onDirty();
-    }
-  }, [entityName, col?.name, table?.columns, setSelectedCol, onDirty]);
+    applyEntityMutation((content) => deleteField(content, entityName, col.name))
+      .then((next) => {
+        if (next == null) return;
+        if (setSelectedCol) {
+          const siblings = (table?.columns || []).filter((c) => c.name !== col.name);
+          setSelectedCol(siblings[0]?.name || null);
+        }
+      });
+  }, [applyEntityMutation, entityName, col?.name, table?.columns, setSelectedCol]);
 
   if (!col) {
     return (
@@ -283,11 +299,11 @@ export default function ColumnsView({ table, col, setSelectedCol, entityName, on
 
           <label>Flags</label>
           <div className="panel-btn-row" style={{ gap: 6, flexWrap: "wrap" }}>
-            {flag("PK",       !!col.pk,       () => applyPatch({ primary_key: !col.pk }),           "warning")}
-            {flag("NOT NULL", !!col.nn,       () => applyPatch({ nullable: col.nn ? undefined : false }), "accent")}
-            {flag("UNIQUE",   !!col.unique,   () => applyPatch({ unique: !col.unique }),            "info")}
-            {flag("GENERATED",!!col.generated,() => applyPatch({ generated: !col.generated }),      "info")}
-            {flag("FK",       !!col.fk,       undefined,                                            "success")}
+            {flag("PK",       !!col.pk,       () => applyPatch({ primary_key: !col.pk }),      "warning")}
+            {flag("NOT NULL", !!col.nn,       () => applyPatch({ nullable: col.nn }),          "accent")}
+            {flag("UNIQUE",   !!col.unique,   () => applyPatch({ unique: !col.unique }),       "info")}
+            {flag("GENERATED",!!col.generated,() => applyPatch({ generated: !col.generated }), "info")}
+            {flag("FK",       !!col.fk || !!col.semanticFk,       undefined,                   "success")}
           </div>
 
           <label>Refactor</label>
@@ -360,7 +376,7 @@ export default function ColumnsView({ table, col, setSelectedCol, entityName, on
                 >
                   <td>
                     {c.pk ? <Key size={11} color="var(--pk, #f5b544)" />
-                      : c.fk ? <Link2 size={11} color="var(--fk, #f59e0b)" />
+                      : (c.fk || c.semanticFk) ? <Link2 size={11} color="var(--fk, #f59e0b)" />
                       : <span style={{ display: "inline-block", width: 4, height: 4, borderRadius: "50%", background: "var(--text-muted)" }} />}
                   </td>
                   <td style={{ fontWeight: active ? 600 : 400 }}>
@@ -387,7 +403,7 @@ export default function ColumnsView({ table, col, setSelectedCol, entityName, on
                     })()}
                   </td>
                   <td style={{ textAlign: "right", color: "var(--text-tertiary)", fontSize: 10 }}>
-                    {[c.pk && "PK", c.nn && "NN", c.unique && "UQ", c.fk && "FK"].filter(Boolean).join(" ") || "—"}
+                    {[c.pk && "PK", c.nn && "NN", c.unique && "UQ", (c.fk || c.semanticFk) && "FK", c.generated && "GN", c.default != null && "DF", c.check && "CK"].filter(Boolean).join(" ") || "—"}
                   </td>
                 </tr>
               );

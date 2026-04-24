@@ -121,23 +121,24 @@ const IS_DOCKER_RUNTIME = existsSync("/.dockerenv");
 const DIRECT_APPLY_ENABLED = ["1", "true", "yes", "on"].includes(String(process.env.DM_ENABLE_DIRECT_APPLY || "").toLowerCase());
 const DATALEX_CONFIG_DIRNAME = ".datalex";
 const DATALEX_PROJECT_CONFIG = join(DATALEX_CONFIG_DIRNAME, "project.json");
+const DATALEX_WORKSPACE_ROOT = "DataLex";
 const DATALEX_DEFAULT_STRUCTURE = {
   version: 1,
   // Default to snowflake so baseline DDL generation works for new projects without extra config.
   // Connector pulls can still set this explicitly based on the chosen connector.
   defaultDialect: "snowflake",
-  modelsDir: "models",
-  migrationsDir: "migrations",
-  ddlDir: "ddl",
+  modelsDir: DATALEX_WORKSPACE_ROOT,
+  migrationsDir: `${DATALEX_WORKSPACE_ROOT}/generated-sql/migrations`,
+  ddlDir: `${DATALEX_WORKSPACE_ROOT}/generated-sql/ddl`,
   migrationDialects: {
-    snowflake: "migrations/snowflake",
-    databricks: "migrations/databricks",
-    bigquery: "migrations/bigquery",
+    snowflake: `${DATALEX_WORKSPACE_ROOT}/generated-sql/migrations/snowflake`,
+    databricks: `${DATALEX_WORKSPACE_ROOT}/generated-sql/migrations/databricks`,
+    bigquery: `${DATALEX_WORKSPACE_ROOT}/generated-sql/migrations/bigquery`,
   },
   ddlDialects: {
-    snowflake: "ddl/snowflake",
-    databricks: "ddl/databricks",
-    bigquery: "ddl/bigquery",
+    snowflake: `${DATALEX_WORKSPACE_ROOT}/generated-sql/ddl/snowflake`,
+    databricks: `${DATALEX_WORKSPACE_ROOT}/generated-sql/ddl/databricks`,
+    bigquery: `${DATALEX_WORKSPACE_ROOT}/generated-sql/ddl/bigquery`,
   },
 };
 
@@ -413,7 +414,10 @@ async function bootstrapProjectStructure(projectPath, { initializeGit = false } 
   const isInsideExistingRepo = Boolean(gitRoot) && isPathInside(gitRoot, absoluteProjectPath);
 
   const dirs = [
-    "models",
+    DATALEX_WORKSPACE_ROOT,
+    join(DATALEX_WORKSPACE_ROOT, "diagrams"),
+    join(DATALEX_WORKSPACE_ROOT, "domains"),
+    join(DATALEX_WORKSPACE_ROOT, "projects"),
     "migrations/snowflake",
     "migrations/databricks",
     "migrations/bigquery",
@@ -436,7 +440,7 @@ async function bootstrapProjectStructure(projectPath, { initializeGit = false } 
     "",
     "## Structure",
     "",
-    "- models/: source .model.yaml files",
+    `- ${DATALEX_WORKSPACE_ROOT}/: DataLex modeling workspace (diagrams, domains, projects, YAML assets)`,
     "- migrations/: generated SQL artifacts by connector",
     "- guides/: team onboarding and runbooks",
     "- .github/workflows/: CI/CD automation templates",
@@ -485,7 +489,7 @@ async function bootstrapProjectStructure(projectPath, { initializeGit = false } 
     join(absoluteProjectPath, DATALEX_PROJECT_CONFIG),
     `${JSON.stringify(DATALEX_DEFAULT_STRUCTURE, null, 2)}\n`
   );
-  await writeFileIfMissing(join(absoluteProjectPath, "models", ".gitkeep"), "");
+  await writeFileIfMissing(join(absoluteProjectPath, DATALEX_WORKSPACE_ROOT, ".gitkeep"), "");
   await writeFileIfMissing(
     join(absoluteProjectPath, "guides", "README.md"),
     "# Guides\n\nAdd setup, GitOps, and testing playbooks for your team.\n"
@@ -768,6 +772,43 @@ async function appendConnectionImportEvent({ connectionId, connector, params = {
   return conn;
 }
 
+function sanitizeConnectionParams(params = {}) {
+  return Object.fromEntries(
+    Object.entries(params).filter(([, value]) => value !== "__redacted__")
+  );
+}
+
+async function resolveConnectionRequest({ connector, connectionId = null, params = {} }) {
+  const incoming = sanitizeConnectionParams(params);
+  if (!connectionId) {
+    if (!connector) throw new ApiError(400, "VALIDATION", "Missing connector type");
+    if (connector === "bigquery" && incoming.db_schema && !incoming.dataset) {
+      incoming.dataset = incoming.db_schema;
+    }
+    return { connector, params: incoming };
+  }
+
+  const connections = await loadConnections();
+  const profile = connections.find((entry) => entry.id === connectionId);
+  if (!profile) {
+    throw new ApiError(404, "NOT_FOUND", `Connection not found: ${connectionId}`);
+  }
+  if (connector && profile.connector && connector !== profile.connector) {
+    throw new ApiError(400, "VALIDATION", "Connector does not match saved connection");
+  }
+
+  const resolvedConnector = profile.connector || connector;
+  const merged = {
+    ...(profile.details || {}),
+    ...(profile.secrets || {}),
+    ...incoming,
+  };
+  if (resolvedConnector === "bigquery" && merged.db_schema && !merged.dataset) {
+    merged.dataset = merged.db_schema;
+  }
+  return { connector: resolvedConnector, params: merged, profile };
+}
+
 // List all registered projects
 app.get("/api/projects", async (_req, res) => {
   try {
@@ -925,10 +966,10 @@ app.get("/api/projects/:id/files", async (req, res) => {
     if (!existsSync(structure.modelPath)) {
       await mkdir(structure.modelPath, { recursive: true });
     }
-    // Project-open hook: keep the conventional diagrams folder visible in
+    // Project-open hook: keep the conventional workspace folders visible in
     // Explorer even for projects that weren't created via dbt import. Safe
     // to call every time — idempotent and never rewrites existing files.
-    ensureDiagramsFolder(structure.modelPath);
+    ensureWorkspaceFolders(structure.modelPath);
 
     const files = await walkYamlFiles(structure.modelPath);
     res.json({
@@ -2077,17 +2118,19 @@ async function resolveProjectAndModelPath(projectId) {
 // later doc declares the same entity. The CLI still uses the richer Python
 // merge for two-way sync; this JS variant is scoped to the "N candidates,
 // no prior current" save-all path.
-// Ensure `datalex/diagrams/` exists under the given root. Idempotent —
-// never touches existing files; writes `.gitkeep` only when the folder
-// is freshly created so the empty folder round-trips through git.
-// Silent on errors (callers are project-open hooks, not actionable).
-function ensureDiagramsFolder(rootPath) {
+// Ensure the conventional DataLex workspace folders exist under the current
+// model root. Idempotent — never touches existing files; writes `.gitkeep`
+// only when a folder is freshly created so the empty structure round-trips
+// through git. Silent on errors (callers are project-open hooks, not actionable).
+function ensureWorkspaceFolders(rootPath) {
   try {
-    const diagramsDir = join(rootPath, "datalex", "diagrams");
-    if (!existsSync(diagramsDir)) {
-      mkdirSync(diagramsDir, { recursive: true });
-      const keepFile = join(diagramsDir, ".gitkeep");
-      if (!existsSync(keepFile)) writeFileSync(keepFile, "", "utf-8");
+    for (const rel of ["diagrams", "domains", "projects"]) {
+      const fullDir = join(rootPath, rel);
+      if (!existsSync(fullDir)) {
+        mkdirSync(fullDir, { recursive: true });
+        const keepFile = join(fullDir, ".gitkeep");
+        if (!existsSync(keepFile)) writeFileSync(keepFile, "", "utf-8");
+      }
     }
     return { ok: true };
   } catch (err) {
@@ -3278,7 +3321,7 @@ app.post("/api/dbt/import", requireAdmin, express.json({ limit: "2mb" }), async 
     const hasDiagram = tree.some((e) => /\.diagram\.ya?ml$/i.test(e.path));
     if (!hasDiagram) {
       tree.push({
-        path: "datalex/diagrams/overview.diagram.yaml",
+        path: "diagrams/overview.diagram.yaml",
         content:
           "kind: diagram\n" +
           "name: overview\n" +
@@ -3298,14 +3341,17 @@ app.post("/api/dbt/import", requireAdmin, express.json({ limit: "2mb" }), async 
     // `success: true`; now we return 207 with the failure list.
     const writeFailures = [];
     if (editInPlace && resolvedProjectDir) {
+      const workspaceRoot = join(resolvedProjectDir, DATALEX_WORKSPACE_ROOT);
+      ensureWorkspaceFolders(workspaceRoot);
       for (const entry of tree) {
         // `.diagram.yaml` is a DataLex convention — keep that exact
         // extension. Everything else (dbt model/source files) converts
-        // back to `.yml` to match what's on disk in a dbt repo.
+        // to `.yml`, but lands inside the dedicated DataLex workspace
+        // instead of mutating the original dbt source tree.
         const destRel = /\.diagram\.ya?ml$/i.test(entry.path)
           ? entry.path
           : entry.path.replace(/\.yaml$/i, ".yml");
-        const destAbs = join(resolvedProjectDir, destRel);
+        const destAbs = join(workspaceRoot, destRel);
         try {
           if (!existsSync(destAbs)) {
             mkdirSync(dirname(destAbs), { recursive: true });
@@ -3319,13 +3365,32 @@ app.post("/api/dbt/import", requireAdmin, express.json({ limit: "2mb" }), async 
           });
         }
       }
-      // Seed `datalex/diagrams/` so the Explorer shows the conventional
-      // diagrams location immediately after import. Shared with the
+      try {
+        const configPath = join(resolvedProjectDir, DATALEX_PROJECT_CONFIG);
+        let existingConfig = {};
+        if (existsSync(configPath)) {
+          existingConfig = JSON.parse(readFileSync(configPath, "utf-8")) || {};
+        }
+        mkdirSync(dirname(configPath), { recursive: true });
+        writeFileSync(
+          configPath,
+          `${JSON.stringify({ ...DATALEX_DEFAULT_STRUCTURE, ...existingConfig, modelsDir: DATALEX_WORKSPACE_ROOT }, null, 2)}\n`,
+          "utf-8"
+        );
+      } catch (err) {
+        writeFailures.push({
+          path: DATALEX_PROJECT_CONFIG,
+          code: "INTERNAL",
+          error: String(err?.message || err).slice(0, 400),
+        });
+      }
+      // Seed the DataLex workspace folders so the Explorer shows the conventional
+      // modeling layout immediately after import. Shared with the
       // project-open hook on GET /files.
-      const seed = ensureDiagramsFolder(resolvedProjectDir);
+      const seed = ensureWorkspaceFolders(workspaceRoot);
       if (!seed.ok) {
         writeFailures.push({
-          path: "datalex/diagrams/.gitkeep",
+          path: `${DATALEX_WORKSPACE_ROOT}/diagrams/.gitkeep`,
           code: "INTERNAL",
           error: seed.error,
         });
@@ -3397,6 +3462,7 @@ app.post("/api/forward/apply", express.json({ limit: "10mb" }), async (req, res)
   try {
     const {
       connector,
+      connection_id,
       dialect,
       sql_file,
       sql,
@@ -3428,8 +3494,9 @@ app.post("/api/forward/apply", express.json({ limit: "10mb" }), async (req, res)
       return res.status(400).json({ error: "Provide exactly one input mode: sql_file, sql, or old_model+new_model" });
     }
 
-    conn = buildConnArgs(params);
-    const args = [join(REPO_ROOT, "datalex"), "apply", String(connector), "--dialect", String(dialect || connector), ...conn.args];
+    const resolved = await resolveConnectionRequest({ connector, connectionId: connection_id, params });
+    conn = buildConnArgs(resolved.params);
+    const args = [join(REPO_ROOT, "datalex"), "apply", String(resolved.connector), "--dialect", String(dialect || resolved.connector), ...conn.args];
 
     if (model_schema) args.push("--model-schema", String(model_schema));
     if (migration_name) args.push("--migration-name", String(migration_name));
@@ -3468,11 +3535,12 @@ app.post("/api/forward/apply", express.json({ limit: "10mb" }), async (req, res)
     }
     res.json({
       success: true,
-      connector: String(connector),
+      connector: String(resolved.connector),
       summary,
       output: summary ? null : trimmed,
     });
   } catch (err) {
+    if (err instanceof ApiError) return apiFail(res, err.status, err.code, err.message, err.details);
     const stderr = err.stderr || err.message;
     const stdout = err.stdout || "";
     res.status(500).json({ error: String(stderr).trim(), output: String(stdout).trim() || null });
@@ -3668,11 +3736,11 @@ app.post("/api/connectors/test", express.json(), async (req, res) => {
   let conn = { args: [], cleanup: () => {} };
   const startedAt = Date.now();
   try {
-    const { connector, connection_name, connection_id: _connectionId, ...params } = req.body;
-    if (!connector) return res.status(400).json({ error: "Missing connector type" });
+    const { connector, connection_name, connection_id: connectionId, ...params } = req.body || {};
+    const resolved = await resolveConnectionRequest({ connector, connectionId, params });
 
-    conn = buildConnArgs(params);
-    const args = [join(REPO_ROOT, "datalex"), "pull", connector, "--test", ...conn.args];
+    conn = buildConnArgs(resolved.params);
+    const args = [join(REPO_ROOT, "datalex"), "pull", resolved.connector, "--test", ...conn.args];
 
     try {
       const output = execFileSync(PYTHON, args, { encoding: "utf-8", timeout: 30000, cwd: REPO_ROOT });
@@ -3682,8 +3750,8 @@ app.post("/api/connectors/test", express.json(), async (req, res) => {
       let saved = null;
       if (ok) {
         saved = await upsertConnectionProfile({
-          connector,
-          params,
+          connector: resolved.connector,
+          params: resolved.params,
           connectionName: connection_name,
         });
       }
@@ -3706,6 +3774,7 @@ app.post("/api/connectors/test", express.json(), async (req, res) => {
       conn.cleanup();
     }
   } catch (err) {
+    if (err instanceof ApiError) return apiFail(res, err.status, err.code, err.message, err.details);
     res.status(500).json({ error: err.message });
   }
 });
@@ -3732,15 +3801,16 @@ function extractServerVersion(output) {
 app.post("/api/connectors/schemas", express.json(), async (req, res) => {
   let conn = { args: [], cleanup: () => {} };
   try {
-    const { connector, ...params } = req.body;
-    if (!connector) return res.status(400).json({ error: "Missing connector type" });
+    const { connector, connection_id: connectionId, ...params } = req.body || {};
+    const resolved = await resolveConnectionRequest({ connector, connectionId, params });
 
-    conn = buildConnArgs(params);
-    const args = [join(REPO_ROOT, "datalex"), "schemas", connector, "--output-json", ...conn.args];
+    conn = buildConnArgs(resolved.params);
+    const args = [join(REPO_ROOT, "datalex"), "schemas", resolved.connector, "--output-json", ...conn.args];
     const output = execFileSync(PYTHON, args, { encoding: "utf-8", timeout: 30000, cwd: REPO_ROOT });
     const schemas = JSON.parse(output);
     res.json(schemas);
   } catch (err) {
+    if (err instanceof ApiError) return apiFail(res, err.status, err.code, err.message, err.details);
     const stderr = err.stderr || err.message;
     res.status(500).json({ error: stderr });
   } finally {
@@ -3752,15 +3822,16 @@ app.post("/api/connectors/schemas", express.json(), async (req, res) => {
 app.post("/api/connectors/tables", express.json(), async (req, res) => {
   let conn = { args: [], cleanup: () => {} };
   try {
-    const { connector, ...params } = req.body;
-    if (!connector) return res.status(400).json({ error: "Missing connector type" });
+    const { connector, connection_id: connectionId, ...params } = req.body || {};
+    const resolved = await resolveConnectionRequest({ connector, connectionId, params });
 
-    conn = buildConnArgs(params);
-    const args = [join(REPO_ROOT, "datalex"), "tables", connector, "--output-json", ...conn.args];
+    conn = buildConnArgs(resolved.params);
+    const args = [join(REPO_ROOT, "datalex"), "tables", resolved.connector, "--output-json", ...conn.args];
     const output = execFileSync(PYTHON, args, { encoding: "utf-8", timeout: 30000, cwd: REPO_ROOT });
     const tables = JSON.parse(output);
     res.json(tables);
   } catch (err) {
+    if (err instanceof ApiError) return apiFail(res, err.status, err.code, err.message, err.details);
     const stderr = err.stderr || err.message;
     res.status(500).json({ error: stderr });
   } finally {
@@ -3780,11 +3851,11 @@ app.post("/api/connectors/pull", express.json(), async (req, res) => {
       project_id,
       project_path,
       ...params
-    } = req.body;
-    if (!connector) return res.status(400).json({ error: "Missing connector type" });
+    } = req.body || {};
+    const resolved = await resolveConnectionRequest({ connector, connectionId: connection_id, params });
 
-    conn = buildConnArgs(params);
-    const args = [join(REPO_ROOT, "datalex"), "pull", connector, ...conn.args];
+    conn = buildConnArgs(resolved.params);
+    const args = [join(REPO_ROOT, "datalex"), "pull", resolved.connector, ...conn.args];
     if (model_name) { args.push("--model-name", model_name); }
     if (tables) {
       const tableList = typeof tables === "string" ? tables.split(",").map(t => t.trim()).filter(Boolean) : tables;
@@ -3804,12 +3875,12 @@ app.post("/api/connectors/pull", express.json(), async (req, res) => {
     const indexes = model?.indexes || [];
     const fieldCount = entities.reduce((sum, e) => sum + (e.fields || []).length, 0);
 
-    const schemaName = params.db_schema || params.dataset || model_name || "default";
+    const schemaName = resolved.params.db_schema || resolved.params.dataset || model_name || "default";
 
     const savedConnection = await appendConnectionImportEvent({
       connectionId: connection_id,
-      connector,
-      params,
+      connector: resolved.connector,
+      params: resolved.params,
       event: {
         mode: "pull-single",
         projectId: project_id || null,
@@ -3832,6 +3903,7 @@ app.post("/api/connectors/pull", express.json(), async (req, res) => {
       connectionId: savedConnection?.id || null,
     });
   } catch (err) {
+    if (err instanceof ApiError) return apiFail(res, err.status, err.code, err.message, err.details);
     const stderr = err.stderr || err.message;
     res.status(500).json({ error: stderr });
   } finally {
@@ -3851,14 +3923,15 @@ app.post("/api/connectors/pull-multi", express.json(), async (req, res) => {
       project_id,
       project_path,
       ...params
-    } = req.body;
-    if (!connector) return res.status(400).json({ error: "Missing connector type" });
+    } = req.body || {};
     if (!schemaList || !Array.isArray(schemaList) || schemaList.length === 0) {
       return res.status(400).json({ error: "Missing schemas array" });
     }
 
+    const resolved = await resolveConnectionRequest({ connector, connectionId: connection_id, params });
+
     // Build base args once (handles temp key file)
-    baseConn = buildConnArgs(params);
+    baseConn = buildConnArgs(resolved.params);
 
     const results = [];
     const errors = [];
@@ -3869,10 +3942,10 @@ app.post("/api/connectors/pull-multi", express.json(), async (req, res) => {
 
       try {
         const schemaParams = { db_schema: schemaName };
-        if (connector === "bigquery") schemaParams.dataset = schemaName;
+        if (resolved.connector === "bigquery") schemaParams.dataset = schemaName;
         const schemaConn = buildConnArgs(schemaParams);
 
-        const args = [join(REPO_ROOT, "datalex"), "pull", connector, ...baseConn.args, ...schemaConn.args];
+        const args = [join(REPO_ROOT, "datalex"), "pull", resolved.connector, ...baseConn.args, ...schemaConn.args];
         args.push("--model-name", schemaName);
 
         if (tablesToPull && Array.isArray(tablesToPull) && tablesToPull.length > 0) {
@@ -3915,8 +3988,8 @@ app.post("/api/connectors/pull-multi", express.json(), async (req, res) => {
 
     const savedConnection = await appendConnectionImportEvent({
       connectionId: connection_id,
-      connector,
-      params,
+      connector: resolved.connector,
+      params: resolved.params,
       event: {
         mode: "pull-multi",
         projectId: project_id || null,
@@ -3941,6 +4014,7 @@ app.post("/api/connectors/pull-multi", express.json(), async (req, res) => {
       connectionId: savedConnection?.id || null,
     });
   } catch (err) {
+    if (err instanceof ApiError) return apiFail(res, err.status, err.code, err.message, err.details);
     res.status(500).json({ error: err.message });
   } finally {
     baseConn.cleanup();
@@ -3970,9 +4044,6 @@ app.post("/api/connectors/pull/stream", express.json(), async (req, res) => {
     dbt_layout,
     ...params
   } = req.body || {};
-  if (!connector) {
-    return res.status(400).json({ error: "Missing connector type" });
-  }
 
   res.setHeader("Content-Type", "text/event-stream");
   res.setHeader("Cache-Control", "no-cache");
@@ -3986,14 +4057,16 @@ app.post("/api/connectors/pull/stream", express.json(), async (req, res) => {
   };
 
   let conn = { args: [], cleanup: () => {} };
+  let resolved = null;
   try {
-    conn = buildConnArgs(params);
+    resolved = await resolveConnectionRequest({ connector, connectionId: connection_id, params });
+    conn = buildConnArgs(resolved.params);
   } catch (err) {
     writeEvent("error", { message: err.message });
     return res.end();
   }
 
-  const pullArgs = ["pull", connector, ...conn.args];
+  const pullArgs = ["pull", resolved.connector, ...conn.args];
   if (model_name) pullArgs.push("--model-name", model_name);
   if (tables) {
     const list = typeof tables === "string"
@@ -4009,7 +4082,7 @@ app.post("/api/connectors/pull/stream", express.json(), async (req, res) => {
   let stdoutBuf = "";
   let stderrBuf = "";
 
-  writeEvent("start", { connector, pid: child.pid });
+  writeEvent("start", { connector: resolved.connector, pid: child.pid });
 
   const emitLines = (buf, streamName) => {
     const lines = buf.split(/\r?\n/);
@@ -4076,13 +4149,13 @@ app.post("/api/connectors/pull/stream", express.json(), async (req, res) => {
     try {
       const saved = await appendConnectionImportEvent({
         connectionId: connection_id,
-        connector,
-        params,
+        connector: resolved.connector,
+        params: resolved.params,
         event: {
           mode: "pull-stream",
           projectId: project_id || null,
           projectPath: project_path || null,
-          schemas: [params.db_schema || params.dataset || model_name || "default"],
+          schemas: [resolved.params.db_schema || resolved.params.dataset || model_name || "default"],
           files: [],
           totalEntities: 0,
           totalFields: 0,

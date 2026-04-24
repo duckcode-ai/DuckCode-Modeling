@@ -333,8 +333,8 @@ export function removeEntity(yamlText, entityName) {
     // Clean up relationships
     if (Array.isArray(model.relationships)) {
       model.relationships = model.relationships.filter((r) => {
-        const fromEntity = r.from?.split(".")[0];
-        const toEntity = r.to?.split(".")[0];
+        const fromEntity = typeof r.from === "string" ? r.from.split(".")[0] : String(r?.from?.entity || r?.from?.table || "");
+        const toEntity = typeof r.to === "string" ? r.to.split(".")[0] : String(r?.to?.entity || r?.to?.table || "");
         return fromEntity !== entityName && toEntity !== entityName;
       });
     }
@@ -393,8 +393,20 @@ export function renameField(yamlText, entityName, oldFieldName, newFieldName) {
     // Update relationships that point at this field
     if (Array.isArray(model.relationships)) {
       model.relationships = model.relationships.map((r) => {
-        const from = r.from === `${entityName}.${oldFieldName}` ? `${entityName}.${next}` : r.from;
-        const to = r.to === `${entityName}.${oldFieldName}` ? `${entityName}.${next}` : r.to;
+        let from = r.from;
+        let to = r.to;
+        if (r.from === `${entityName}.${oldFieldName}`) from = `${entityName}.${next}`;
+        else if (r.from && typeof r.from === "object" && (r.from.entity === entityName || r.from.table === entityName)) {
+          if (r.from.field === oldFieldName) from = { ...r.from, field: next };
+          else if (r.from.column === oldFieldName) from = { ...r.from, column: next };
+          else if (r.from.col === oldFieldName) from = { ...r.from, col: next };
+        }
+        if (r.to === `${entityName}.${oldFieldName}`) to = `${entityName}.${next}`;
+        else if (r.to && typeof r.to === "object" && (r.to.entity === entityName || r.to.table === entityName)) {
+          if (r.to.field === oldFieldName) to = { ...r.to, field: next };
+          else if (r.to.column === oldFieldName) to = { ...r.to, column: next };
+          else if (r.to.col === oldFieldName) to = { ...r.to, col: next };
+        }
         return (from === r.from && to === r.to) ? r : { ...r, from, to };
       });
     }

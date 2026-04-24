@@ -157,6 +157,7 @@ export default function EnumsView() {
       return;
     }
     updateContent(next);
+    useWorkspaceStore.getState().flushAutosave?.().catch(() => {});
     addToast({ type: "success", message: `Added enum “${name}”.` });
     setNewName("");
     setNewValues("");
@@ -170,6 +171,7 @@ export default function EnumsView() {
       return;
     }
     updateContent(next);
+    useWorkspaceStore.getState().flushAutosave?.().catch(() => {});
   };
 
   const handleRemove = (name) => {
@@ -181,6 +183,7 @@ export default function EnumsView() {
       return;
     }
     updateContent(next);
+    useWorkspaceStore.getState().flushAutosave?.().catch(() => {});
     addToast({ type: "success", message: `Deleted enum “${name}”.` });
   };
 

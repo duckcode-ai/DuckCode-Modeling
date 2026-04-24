@@ -37,6 +37,7 @@ export function computeEntityCompleteness(entity, model, glossaryRefs) {
   const entityType = entity?.type || "table";
   const fields = Array.isArray(entity?.fields) ? entity.fields : [];
   const modelLayer = String(model?.model?.layer || "").toLowerCase().trim();
+  const modelKind = currentModelKind(model);
   const govClassification = (model?.governance?.classification) || {};
 
   // description
@@ -80,34 +81,50 @@ export function computeEntityCompleteness(entity, model, glossaryRefs) {
   const sla = entity?.sla || {};
   const hasSla = !!(sla.freshness || sla.quality_score);
 
-  const dimensions = {
-    description: hasDescription,
-    owner: hasOwner,
-    grain: hasGrain,
-    field_descriptions: hasFieldDescriptions,
-    classification: hasClassification,
-    glossary_linked: hasGlossaryLinked,
-    tags: hasTags,
-    layer: hasLayer,
-    sla: hasSla,
-  };
+  const dimensions = modelKind === "conceptual"
+    ? {
+        description: hasDescription,
+        owner: hasOwner,
+        field_descriptions: hasFieldDescriptions,
+        glossary_linked: hasGlossaryLinked,
+        tags: hasTags,
+      }
+    : {
+        description: hasDescription,
+        owner: hasOwner,
+        grain: hasGrain,
+        field_descriptions: hasFieldDescriptions,
+        classification: hasClassification,
+        glossary_linked: hasGlossaryLinked,
+        tags: hasTags,
+        layer: hasLayer,
+        sla: hasSla,
+      };
 
   const score = Object.entries(dimensions).reduce(
     (sum, [dim, passed]) => sum + (passed ? (COMPLETENESS_WEIGHTS[dim] || 0) : 0),
     0
   );
 
-  const missingLabels = {
-    description: "entity description",
-    owner: "owner",
-    grain: "grain definition",
-    field_descriptions: `field descriptions (${fieldDescPct}% covered, need ≥80%)`,
-    classification: "sensitivity classification on sensitive fields",
-    glossary_linked: "glossary term cross-reference",
-    tags: "tags",
-    layer: "model layer (source/transform/report)",
-    sla: "SLA (freshness or quality_score)",
-  };
+  const missingLabels = modelKind === "conceptual"
+    ? {
+        description: "business concept description",
+        owner: "owner or steward",
+        field_descriptions: `business attribute descriptions (${fieldDescPct}% covered, need ≥80%)`,
+        glossary_linked: "glossary term cross-reference",
+        tags: "tags",
+      }
+    : {
+        description: "entity description",
+        owner: "owner",
+        grain: "grain definition",
+        field_descriptions: `field descriptions (${fieldDescPct}% covered, need ≥80%)`,
+        classification: "sensitivity classification on sensitive fields",
+        glossary_linked: "glossary term cross-reference",
+        tags: "tags",
+        layer: "model layer (source/transform/report)",
+        sla: "SLA (freshness or quality_score)",
+      };
 
   const missing = Object.entries(dimensions)
     .filter(([, passed]) => !passed)
@@ -140,6 +157,7 @@ function nudgeIssues(model) {
   const issues = [];
   const entities = Array.isArray(model.entities) ? model.entities : [];
   const modelLayer = String(model?.model?.layer || "").toLowerCase().trim();
+  const modelKind = currentModelKind(model);
   const govClassification = (model?.governance?.classification) || {};
   const glossaryTerms = Array.isArray(model.glossary) ? model.glossary : [];
   const relationships = Array.isArray(model.relationships) ? model.relationships : [];
@@ -149,8 +167,9 @@ function nudgeIssues(model) {
   const relEntityNames = new Set();
   relationships.forEach((rel) => {
     ["from", "to"].forEach((side) => {
-      const ref = rel?.[side] || "";
-      if (ref.includes(".")) relEntityNames.add(ref.split(".")[0]);
+      const ref = relationshipRefString(rel?.[side]);
+      if (!ref) return;
+      relEntityNames.add(ref.split(".")[0]);
     });
   });
 
@@ -177,15 +196,52 @@ function nudgeIssues(model) {
     const fieldCount = fields.length;
     const path = `/entities/${entityName}`;
 
+    if (modelKind === "conceptual") {
+      if (!entity?.description?.trim()) {
+        issues.push(issue("warn", "CONCEPTUAL_MISSING_DESCRIPTION",
+          `Concept '${entityName}' has no business description. Add one so stakeholders know what the concept means.`,
+          path));
+      }
+      if (!entity?.owner?.trim()) {
+        issues.push(issue("warn", "CONCEPTUAL_MISSING_OWNER",
+          `Concept '${entityName}' has no owner or steward. Assign one so business accountability is clear.`,
+          path));
+      }
+      if (!entity?.subject_area?.trim()) {
+        issues.push(issue("warn", "CONCEPTUAL_MISSING_SUBJECT_AREA",
+          `Concept '${entityName}' is not assigned to a subject area or bounded context.`,
+          `${path}/subject_area`));
+      }
+      const glossaryLinks = glossaryTerms.some((term) => {
+        const related = Array.isArray(term?.related_fields) ? term.related_fields : [];
+        return related.some((ref) => String(ref || "").split(".")[0] === entityName);
+      });
+      if (!glossaryLinks) {
+        issues.push(issue("warn", "CONCEPTUAL_MISSING_GLOSSARY_LINK",
+          `Concept '${entityName}' is not linked to any glossary term. Tie it to the business dictionary for enterprise traceability.`,
+          path));
+      }
+      const touchedByRelationship = relationships.some((rel) => {
+        const fromEntity = relationshipRefParts(rel?.from).entity;
+        const toEntity = relationshipRefParts(rel?.to).entity;
+        return fromEntity === entityName || toEntity === entityName;
+      });
+      if (!touchedByRelationship) {
+        issues.push(issue("warn", "CONCEPTUAL_ORPHAN_CONCEPT",
+          `Concept '${entityName}' has no relationships. Connect it to the surrounding business concepts or remove it from the conceptual view.`,
+          path));
+      }
+    }
+
     // Nudge 1: Missing entity description
-    if (!entity?.description?.trim()) {
+    if (modelKind !== "conceptual" && !entity?.description?.trim()) {
       issues.push(issue("warn", "MISSING_ENTITY_DESCRIPTION",
         `Entity '${entityName}' has no description. Add a business-facing description so consumers know what this entity represents.`,
         path));
     }
 
     // Nudge 2: Missing entity owner
-    if (!entity?.owner?.trim()) {
+    if (modelKind !== "conceptual" && !entity?.owner?.trim()) {
       issues.push(issue("warn", "MISSING_ENTITY_OWNER",
         `Entity '${entityName}' has no owner. Assign an owner (email or team alias) for accountability.`,
         path));
@@ -331,6 +387,28 @@ function nudgeIssues(model) {
     }
   }
 
+  if (modelKind === "conceptual") {
+    if (!String(model?.model?.domain || "").trim()) {
+      issues.push(issue("warn", "CONCEPTUAL_MISSING_DOMAIN",
+        "Conceptual models should declare model.domain so bounded contexts are explicit.",
+        "/model/domain"));
+    }
+    relationships.forEach((rel, idx) => {
+      const fromEntity = relationshipRefParts(rel?.from).entity;
+      const toEntity = relationshipRefParts(rel?.to).entity;
+      if (!fromEntity || !toEntity || fromEntity === toEntity) return;
+      const from = entities.find((entity) => entity?.name === fromEntity);
+      const to = entities.find((entity) => entity?.name === toEntity);
+      const fromArea = String(from?.subject_area || "").trim();
+      const toArea = String(to?.subject_area || "").trim();
+      if (fromArea && toArea && fromArea !== toArea && !String(rel?.description || "").trim()) {
+        issues.push(issue("warn", "CONCEPTUAL_CROSS_DOMAIN_REL_NO_DESCRIPTION",
+          `Cross-domain relationship '${rel?.name || `${fromEntity}_to_${toEntity}`}' has no description. Explain why these bounded contexts connect.`,
+          `/relationships/${idx}`));
+      }
+    });
+  }
+
   // Nudge 12: Imported entities unused in relationships or FK refs
   if (importedEntityNames.size > 0) {
     importedEntityNames.forEach((entName) => {
@@ -354,6 +432,7 @@ const EMAIL = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
 const ENTITY_NAME = /^[A-Z][A-Za-z0-9]*$/;
 const FIELD_NAME = /^[a-z][a-z0-9_]*$/;
 const REF_NAME = /^[A-Z][A-Za-z0-9]*\.[a-z][a-z0-9_]*$/;
+const ENTITY_REF = /^[A-Z][A-Za-z0-9]*$/;
 
 const ALLOWED_STATES = new Set(["draft", "approved", "deprecated"]);
 const ALLOWED_LAYERS = new Set(["source", "transform", "report"]);
@@ -395,6 +474,38 @@ function isObject(value) {
   return !!value && typeof value === "object" && !Array.isArray(value);
 }
 
+function currentModelKind(model) {
+  const declared = String(model?.model?.kind || "").trim().toLowerCase();
+  if (declared === "conceptual" || declared === "logical" || declared === "physical") return declared;
+  const entityTypes = new Set(
+    (Array.isArray(model?.entities) ? model.entities : [])
+      .map((entity) => String(entity?.type || "").trim().toLowerCase())
+      .filter(Boolean)
+  );
+  if (entityTypes.has("concept")) return "conceptual";
+  if (entityTypes.has("logical_entity")) return "logical";
+  return "physical";
+}
+
+function relationshipRefString(ref) {
+  if (typeof ref === "string") return ref.trim();
+  if (isObject(ref)) {
+    const entity = String(ref.entity || ref.table || "").trim();
+    const field = String(ref.field || ref.col || ref.column || "").trim();
+    if (entity && field) return `${entity}.${field}`;
+    if (entity) return entity;
+  }
+  return "";
+}
+
+function relationshipRefParts(ref) {
+  const text = relationshipRefString(ref);
+  if (!text) return { entity: "", field: "" };
+  if (!text.includes(".")) return { entity: text, field: "" };
+  const [entity, field] = text.split(".");
+  return { entity, field: field || "" };
+}
+
 function parseYaml(yamlText) {
   try {
     const parsed = yaml.load(yamlText);
@@ -427,6 +538,7 @@ function looksLikeDbtSchemaDocument(model) {
 
 function structuralIssues(model) {
   const issues = [];
+  const modelKind = currentModelKind(model);
 
   if (!isObject(model.model)) {
     issues.push(issue("error", "MISSING_MODEL_SECTION", "Missing required 'model' object.", "/model"));
@@ -544,7 +656,8 @@ function structuralIssues(model) {
           });
         }
       }
-      if (!Array.isArray(entity.fields) || entity.fields.length === 0) {
+      const requiresFields = modelKind !== "conceptual";
+      if (requiresFields && (!Array.isArray(entity.fields) || entity.fields.length === 0)) {
         issues.push(
           issue(
             "error",
@@ -553,7 +666,7 @@ function structuralIssues(model) {
             `/entities/${entityIdx}/fields`
           )
         );
-      } else {
+      } else if (Array.isArray(entity.fields)) {
         entity.fields.forEach((field, fieldIdx) => {
           if (!isObject(field)) {
             issues.push(
@@ -607,14 +720,18 @@ function structuralIssues(model) {
         if (typeof rel.name !== "string" || rel.name.length === 0) {
           issues.push(issue("error", "INVALID_RELATIONSHIP_NAME", "Relationship name is required.", `/relationships/${idx}/name`));
         }
-        if (typeof rel.from !== "string" || !REF_NAME.test(rel.from)) {
+        const fromRef = relationshipRefString(rel.from);
+        const toRef = relationshipRefString(rel.to);
+        const endpointPattern = modelKind === "conceptual" ? ENTITY_REF : REF_NAME;
+        const endpointLabel = modelKind === "conceptual" ? "Entity" : "Entity.field";
+        if (!endpointPattern.test(fromRef)) {
           issues.push(
-            issue("error", "INVALID_RELATIONSHIP_FROM", "relationships.from must be Entity.field.", `/relationships/${idx}/from`)
+            issue("error", "INVALID_RELATIONSHIP_FROM", `relationships.from must be ${endpointLabel}.`, `/relationships/${idx}/from`)
           );
         }
-        if (typeof rel.to !== "string" || !REF_NAME.test(rel.to)) {
+        if (!endpointPattern.test(toRef)) {
           issues.push(
-            issue("error", "INVALID_RELATIONSHIP_TO", "relationships.to must be Entity.field.", `/relationships/${idx}/to`)
+            issue("error", "INVALID_RELATIONSHIP_TO", `relationships.to must be ${endpointLabel}.`, `/relationships/${idx}/to`)
           );
         }
         if (typeof rel.cardinality !== "string" || !ALLOWED_CARDINALITY.has(rel.cardinality)) {
@@ -854,13 +971,9 @@ function relationshipGraph(model) {
   const relationships = Array.isArray(model.relationships) ? model.relationships : [];
 
   relationships.forEach((rel) => {
-    const fromRef = rel?.from || "";
-    const toRef = rel?.to || "";
-    if (!fromRef.includes(".") || !toRef.includes(".")) {
-      return;
-    }
-    const source = fromRef.split(".")[0];
-    const target = toRef.split(".")[0];
+    const source = relationshipRefParts(rel?.from).entity;
+    const target = relationshipRefParts(rel?.to).entity;
+    if (!source || !target) return;
     if (!graph.has(source)) graph.set(source, new Set());
     if (!graph.has(target)) graph.set(target, new Set());
     graph.get(source).add(target);
@@ -902,6 +1015,7 @@ function semanticIssues(model) {
   const entities = Array.isArray(model.entities) ? model.entities : [];
   const refs = fieldRefs(model);
   const modelLayer = String(model.model?.layer || "").trim().toLowerCase();
+  const modelKind = currentModelKind(model);
   const requiresGrain = modelLayer === "transform" || modelLayer === "report";
   const entityFieldMap = new Map();
   entities.forEach((entity) => {
@@ -950,7 +1064,7 @@ function semanticIssues(model) {
       }
     });
 
-    if (PK_REQUIRED_TYPES.has(entity.type) && !hasPk) {
+    if (modelKind !== "conceptual" && PK_REQUIRED_TYPES.has(entity.type) && !hasPk) {
       issues.push(
         issue(
           "error",
@@ -990,7 +1104,7 @@ function semanticIssues(model) {
     });
 
     const entityGrain = Array.isArray(entity.grain) ? entity.grain : [];
-    if (requiresGrain && GRAIN_REQUIRED_TYPES.has(entity.type) && entityGrain.length === 0) {
+    if (modelKind !== "conceptual" && requiresGrain && GRAIN_REQUIRED_TYPES.has(entity.type) && entityGrain.length === 0) {
       issues.push(
         issue(
           "error",
@@ -1090,22 +1204,49 @@ function semanticIssues(model) {
   const hasImports = Array.isArray(model.model?.imports) && model.model.imports.length > 0;
   relationships.forEach((rel, idx) => {
     const relName = rel?.name || `<relationship-${idx}>`;
-    if (typeof rel?.from === "string" && !refs.has(rel.from)) {
+    const fromRef = relationshipRefString(rel?.from);
+    const toRef = relationshipRefString(rel?.to);
+    const fromParts = relationshipRefParts(rel?.from);
+    const toParts = relationshipRefParts(rel?.to);
+    if (modelKind === "conceptual") {
+      if (fromParts.entity && !entityFieldMap.has(fromParts.entity)) {
+        issues.push(
+          issue(
+            hasImports ? "warn" : "error",
+            "RELATIONSHIP_REF_NOT_FOUND",
+            `Relationship '${relName}' source '${fromParts.entity}' does not exist.${hasImports ? " (may be in an imported model)" : ""}`,
+            `/relationships/${idx}/from`
+          )
+        );
+      }
+      if (toParts.entity && !entityFieldMap.has(toParts.entity)) {
+        issues.push(
+          issue(
+            hasImports ? "warn" : "error",
+            "RELATIONSHIP_REF_NOT_FOUND",
+            `Relationship '${relName}' target '${toParts.entity}' does not exist.${hasImports ? " (may be in an imported model)" : ""}`,
+            `/relationships/${idx}/to`
+          )
+        );
+      }
+      return;
+    }
+    if (fromRef && !refs.has(fromRef)) {
       issues.push(
         issue(
           hasImports ? "warn" : "error",
           "RELATIONSHIP_REF_NOT_FOUND",
-          `Relationship '${relName}' source '${rel.from}' does not exist.${hasImports ? " (may be in an imported model)" : ""}`,
+          `Relationship '${relName}' source '${fromRef}' does not exist.${hasImports ? " (may be in an imported model)" : ""}`,
           `/relationships/${idx}/from`
         )
       );
     }
-    if (typeof rel?.to === "string" && !refs.has(rel.to)) {
+    if (toRef && !refs.has(toRef)) {
       issues.push(
         issue(
           hasImports ? "warn" : "error",
           "RELATIONSHIP_REF_NOT_FOUND",
-          `Relationship '${relName}' target '${rel.to}' does not exist.${hasImports ? " (may be in an imported model)" : ""}`,
+          `Relationship '${relName}' target '${toRef}' does not exist.${hasImports ? " (may be in an imported model)" : ""}`,
           `/relationships/${idx}/to`
         )
       );
@@ -1310,7 +1451,7 @@ function fieldMap(entity) {
 }
 
 function relationshipKey(rel) {
-  return `${rel?.name || ""}|${rel?.from || ""}|${rel?.to || ""}|${rel?.cardinality || ""}`;
+  return `${rel?.name || ""}|${relationshipRefString(rel?.from)}|${relationshipRefString(rel?.to)}|${rel?.cardinality || ""}`;
 }
 
 function metricMap(model) {

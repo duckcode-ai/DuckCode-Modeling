@@ -314,7 +314,7 @@ function buildDefaultMigrationPath(projectPath, modelPath, connectorType = "snow
   const modelStem = sanitizeModelStem(modelName.replace(/\.model\.ya?ml$/i, ""), "model");
   const stamp = formatUtcMigrationTimestamp();
   const connectorFolder = sanitizeModelStem(String(connectorType || "snowflake"), "snowflake");
-  return joinPath(basePath, `migrations/${connectorFolder}/${stamp}__${modelStem}.sql`);
+  return joinPath(basePath, `DataLex/generated-sql/migrations/${connectorFolder}/${stamp}__${modelStem}.sql`);
 }
 
 function buildDefaultDdlPath(projectPath, modelPath, connectorType = "snowflake") {
@@ -325,7 +325,7 @@ function buildDefaultDdlPath(projectPath, modelPath, connectorType = "snowflake"
     .pop() || "model";
   const modelStem = sanitizeModelStem(modelName.replace(/\.model\.ya?ml$/i, ""), "model");
   const connectorFolder = sanitizeModelStem(String(connectorType || "snowflake"), "snowflake");
-  return joinPath(basePath, `ddl/${connectorFolder}/${modelStem}.sql`);
+  return joinPath(basePath, `DataLex/generated-sql/ddl/${connectorFolder}/${modelStem}.sql`);
 }
 
 const FORWARD_GITOPS_CONNECTORS = new Set(["snowflake", "databricks", "bigquery"]);
@@ -438,7 +438,14 @@ export default function ConnectorsPanel() {
     loadProjects,
     selectProject,
   } = useWorkspaceStore();
-  const { addToast, setBottomPanelTab, pendingConnectorType, setPendingConnectorType } = useUiStore();
+  const {
+    addToast,
+    setBottomPanelTab,
+    pendingConnectorType,
+    setPendingConnectorType,
+    pendingConnectionId,
+    setPendingConnectionId,
+  } = useUiStore();
 
   // Deep-link from sidebar connector click
   useEffect(() => {
@@ -541,7 +548,7 @@ export default function ConnectorsPanel() {
     resetWizard();
   };
 
-  const loadSavedConnection = (connection) => {
+  const loadSavedConnection = useCallback((connection) => {
     const details = connection?.details || {};
     const secrets = connection?.secrets || {};
     const restored = {};
@@ -560,7 +567,15 @@ export default function ConnectorsPanel() {
     setFormValues(restored);
     setShowSecrets({});
     resetWizard();
-  };
+  }, []);
+
+  useEffect(() => {
+    if (!pendingConnectionId || !savedConnections.length) return;
+    const connection = savedConnections.find((entry) => entry.id === pendingConnectionId);
+    if (!connection) return;
+    loadSavedConnection(connection);
+    setPendingConnectionId(null);
+  }, [loadSavedConnection, pendingConnectionId, savedConnections, setPendingConnectionId]);
 
   const handleFieldChange = (key, value) => {
     setFormValues((prev) => ({ ...prev, [key]: value }));
@@ -611,7 +626,11 @@ export default function ConnectorsPanel() {
     setLoading(true);
     setError(null);
     try {
-      const data = await apiPost("/api/connectors/schemas", { connector: selectedConnector, ...formValues });
+      const data = await apiPost("/api/connectors/schemas", {
+        connector: selectedConnector,
+        connection_id: activeConnectionId,
+        ...formValues,
+      });
       setSchemas(data);
       // Auto-select all schemas by default
       setSelectedSchemas(new Set(data.map((s) => s.name)));
@@ -644,7 +663,12 @@ export default function ConnectorsPanel() {
     setError(null);
     setPreviewSchema(schemaName);
     try {
-      const params = { connector: selectedConnector, ...formValues, db_schema: schemaName };
+      const params = {
+        connector: selectedConnector,
+        connection_id: activeConnectionId,
+        ...formValues,
+        db_schema: schemaName,
+      };
       if (selectedConnector === "bigquery") params.dataset = schemaName;
       const data = await apiPost("/api/connectors/tables", params);
       setPreviewTables(data);

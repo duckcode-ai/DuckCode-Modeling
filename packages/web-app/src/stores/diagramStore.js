@@ -51,7 +51,7 @@ const useDiagramStore = create((set, get) => ({
   setGraph: ({ nodes, edges, warnings, model }) => {
     const { selectedEntityId, model: previousModel, modelingViewMode } = get();
     const selectedEntity = selectedEntityId
-      ? (model?.entities || []).find((e) => e.name === selectedEntityId) || null
+      ? (model?.entities || []).find((e) => e.id === selectedEntityId || e.name === selectedEntityId) || null
       : null;
     const nextKind = model?.model?.kind || "";
     const prevKind = previousModel?.model?.kind || "";
@@ -75,7 +75,7 @@ const useDiagramStore = create((set, get) => ({
   selectEntity: (entityId) => {
     const { model } = get();
     const entity = entityId
-      ? (model?.entities || []).find((e) => e.name === entityId) || null
+      ? (model?.entities || []).find((e) => e.id === entityId || e.name === entityId) || null
       : null;
     set({ selectedEntityId: entityId, selectedEntity: entity });
   },

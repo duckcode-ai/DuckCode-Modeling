@@ -78,6 +78,47 @@ metrics:
   assert.ok(codes.includes("METRIC_TIME_DIMENSION_NOT_FOUND"));
 });
 
+test("runModelChecks accepts object-shaped relationship endpoints", () => {
+  const yamlText = `${BASE_HEADER}
+  layer: transform
+
+entities:
+  - name: Customer
+    type: table
+    grain: [customer_id]
+    fields:
+      - name: customer_id
+        type: integer
+        primary_key: true
+      - name: customer_name
+        type: text
+  - name: Order
+    type: table
+    grain: [order_id]
+    fields:
+      - name: order_id
+        type: integer
+        primary_key: true
+      - name: customer_id
+        type: integer
+
+relationships:
+  - name: order_customer
+    from:
+      entity: Order
+      field: customer_id
+    to:
+      entity: Customer
+      field: customer_id
+    cardinality: many_to_one
+`;
+
+  const check = runModelChecks(yamlText);
+  const codes = check.errors.map((item) => item.code);
+  assert.equal(codes.includes("INVALID_RELATIONSHIP_FROM"), false);
+  assert.equal(codes.includes("INVALID_RELATIONSHIP_TO"), false);
+});
+
 test("runGate reports metric contract breaking changes", () => {
   const oldYamlText = `${BASE_HEADER}
   layer: report
@@ -134,4 +175,38 @@ metrics:
   assert.equal(gate.blockedByBreaking, true);
   assert.equal(gate.diff.summary.changed_metrics, 1);
   assert.ok(gate.diff.breaking_changes.includes("Metric contract changed: revenue"));
+});
+
+test("runModelChecks applies conceptual validation rules to entity-level models", () => {
+  const yamlText = `model:
+  name: insurance_concepts
+  kind: conceptual
+  domain: insurance
+  owners: []
+  state: draft
+
+entities:
+  - name: Customer
+    type: concept
+  - name: Policy
+    type: concept
+
+relationships:
+  - name: customer_holds_policy
+    from:
+      entity: Customer
+    to:
+      entity: Policy
+    cardinality: one_to_many
+`;
+
+  const check = runModelChecks(yamlText);
+  const codes = check.warnings.map((item) => item.code);
+  const errorCodes = check.errors.map((item) => item.code);
+  assert.ok(codes.includes("CONCEPTUAL_MISSING_DESCRIPTION"));
+  assert.ok(codes.includes("CONCEPTUAL_MISSING_OWNER"));
+  assert.ok(codes.includes("CONCEPTUAL_MISSING_SUBJECT_AREA"));
+  assert.ok(codes.includes("CONCEPTUAL_MISSING_GLOSSARY_LINK"));
+  assert.equal(errorCodes.includes("INVALID_RELATIONSHIP_FROM"), false);
+  assert.equal(errorCodes.includes("INVALID_RELATIONSHIP_TO"), false);
 });

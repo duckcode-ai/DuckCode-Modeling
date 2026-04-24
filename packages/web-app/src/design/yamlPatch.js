@@ -19,18 +19,229 @@ function dump(doc) {
   return yaml.dump(doc, { lineWidth: 120, noRefs: true, sortKeys: false });
 }
 
+function normalizePathLike(value) {
+  return String(value || "").replace(/\\/g, "/").replace(/^[/\\]+/, "");
+}
+
+function collectReferencedEntityNames(yamlText) {
+  const doc = loadDoc(yamlText);
+  if (!doc) return [];
+  const names = [];
+  const seen = new Set();
+  const add = (value) => {
+    const name = String(value || "").trim();
+    if (!name) return;
+    const key = name.toLowerCase();
+    if (seen.has(key)) return;
+    seen.add(key);
+    names.push(name);
+  };
+
+  if (Array.isArray(doc.entities)) {
+    doc.entities.forEach((entity) => add(entity?.name));
+  }
+  if (Array.isArray(doc.models)) {
+    doc.models.forEach((model) => add(model?.name));
+  }
+  if (Array.isArray(doc.sources)) {
+    doc.sources.forEach((source) => {
+      (source?.tables || []).forEach((table) => add(table?.name));
+    });
+  }
+
+  const kind = String(doc.kind || "").toLowerCase();
+  if ((kind === "model" || kind === "entity" || kind === "source") && doc.name) {
+    add(doc.name);
+  }
+  if (kind === "source" && Array.isArray(doc.tables)) {
+    doc.tables.forEach((table) => add(table?.name));
+  }
+
+  return names;
+}
+
+function normalizeForeignKeyTarget(foreignKey, legacyFkString) {
+  if (foreignKey && typeof foreignKey === "object") {
+    const entity = String(foreignKey.entity || foreignKey.table || foreignKey.references || "").trim();
+    const field = String(foreignKey.field || foreignKey.column || "").trim();
+    if (entity && field) return `${entity}.${field}`.toLowerCase();
+  }
+  if (typeof foreignKey === "string" && foreignKey.trim()) {
+    return foreignKey.trim().toLowerCase();
+  }
+  if (typeof legacyFkString === "string" && legacyFkString.trim()) {
+    return legacyFkString.trim().toLowerCase();
+  }
+  return null;
+}
+
+function dbtRelationshipTestTarget(test) {
+  if (!test || typeof test !== "object") return null;
+  const rel = test.relationships;
+  if (!rel || typeof rel !== "object") return null;
+  const raw = String(rel.to || "").trim();
+  const refMatch = raw.match(/ref\(\s*['"]([^'"]+)['"]\s*\)/);
+  const srcMatch = raw.match(/source\(\s*['"][^'"]+['"]\s*,\s*['"]([^'"]+)['"]\s*\)/);
+  const entity = refMatch ? refMatch[1] : (srcMatch ? srcMatch[1] : "");
+  const field = String(rel.field || "id").trim();
+  if (!entity || !field) return null;
+  return `${entity}.${field}`.toLowerCase();
+}
+
+function parseRelationshipEndpoint(value) {
+  const raw = String(value || "").trim();
+  if (!raw) return null;
+  const dot = raw.lastIndexOf(".");
+  if (dot <= 0 || dot === raw.length - 1) {
+    return { entity: raw, field: "" };
+  }
+  return {
+    entity: raw.slice(0, dot),
+    field: raw.slice(dot + 1),
+  };
+}
+
+function relationshipEndpointKey(value) {
+  if (typeof value === "string") return value.trim().toLowerCase();
+  if (value && typeof value === "object") {
+    const entity = String(value.entity || value.table || "").trim().toLowerCase();
+    const field = String(value.field || value.column || value.col || "").trim().toLowerCase();
+    if (entity && field) return `${entity}.${field}`;
+    if (entity) return entity;
+  }
+  return "";
+}
+
+function normalizedRelationshipEndpoint(value) {
+  if (typeof value === "string") return parseRelationshipEndpoint(value);
+  if (value && typeof value === "object") {
+    const entity = String(value.entity || value.table || "").trim();
+    const field = String(value.field || value.column || value.col || "").trim();
+    if (entity) return { entity, field };
+  }
+  return null;
+}
+
+function canonicalizeDiagramRelationship(entry) {
+  if (!entry || typeof entry !== "object") return null;
+  const from = normalizedRelationshipEndpoint(entry.from);
+  const to = normalizedRelationshipEndpoint(entry.to);
+  if (!from || !to) return null;
+  const out = {
+    name: String(entry.name || `${from.entity}_to_${to.entity}`).trim() || `${from.entity}_to_${to.entity}`,
+    from: { entity: from.entity, field: from.field },
+    to: { entity: to.entity, field: to.field },
+  };
+  if (entry.cardinality != null && String(entry.cardinality).trim()) out.cardinality = String(entry.cardinality).trim();
+  if (entry.identifying) out.identifying = true;
+  if (entry.optional) out.optional = true;
+  if (entry.label != null && String(entry.label).trim()) out.label = String(entry.label);
+  if (entry.description != null && String(entry.description).trim()) out.description = String(entry.description);
+  if (entry.relationship_type != null && String(entry.relationship_type).trim()) out.relationship_type = String(entry.relationship_type).trim();
+  if (entry.rationale != null && String(entry.rationale).trim()) out.rationale = String(entry.rationale).trim();
+  if (entry.source_of_truth != null && String(entry.source_of_truth).trim()) out.source_of_truth = String(entry.source_of_truth).trim();
+  if (entry.on_delete != null && String(entry.on_delete).trim()) out.on_delete = String(entry.on_delete).trim().toUpperCase();
+  if (entry.on_update != null && String(entry.on_update).trim()) out.on_update = String(entry.on_update).trim().toUpperCase();
+  return out;
+}
+
+function diagramRelationshipSignature(entry) {
+  const fromKey = relationshipEndpointKey(entry?.from);
+  const toKey = relationshipEndpointKey(entry?.to);
+  if (!fromKey || !toKey) return "";
+  return `${fromKey}|${toKey}`;
+}
+
+export function normalizeDiagramYaml(yamlText) {
+  const doc = loadDoc(yamlText);
+  if (!doc) return null;
+  if (String(doc.kind || "").toLowerCase() !== "diagram") return yamlText;
+
+  if (Array.isArray(doc.relationships)) {
+    const canonicalBySignature = new Map();
+    const lastIndexBySignature = new Map();
+    const passthrough = [];
+
+    doc.relationships.forEach((entry, index) => {
+      const canonical = canonicalizeDiagramRelationship(entry);
+      if (!canonical) {
+        passthrough.push({ index, entry });
+        return;
+      }
+      const signature = diagramRelationshipSignature(canonical);
+      if (!signature) {
+        passthrough.push({ index, entry });
+        return;
+      }
+      canonicalBySignature.set(signature, canonical);
+      lastIndexBySignature.set(signature, index);
+    });
+
+    const normalizedRelationships = [
+      ...passthrough.map(({ index, entry }) => ({ index, entry })),
+      ...Array.from(canonicalBySignature.entries()).map(([signature, entry]) => ({
+        index: lastIndexBySignature.get(signature) ?? 0,
+        entry,
+      })),
+    ]
+      .sort((left, right) => left.index - right.index)
+      .map(({ entry }) => entry);
+
+    doc.relationships = normalizedRelationships;
+    if (doc.relationships.length === 0) delete doc.relationships;
+  }
+
+  return dump(doc);
+}
+
 /* Find an entity by its name (case-insensitive match because the adapter
    lowercases ids when surfacing them). */
 function findEntity(doc, entityName) {
-  if (!doc || !Array.isArray(doc.entities)) return null;
   const target = String(entityName || "").toLowerCase();
-  return doc.entities.find((e) => String(e.name || "").toLowerCase() === target) || null;
+  if (!doc || !target) return null;
+  if (Array.isArray(doc.entities)) {
+    const hit = doc.entities.find((e) => String(e.name || "").toLowerCase() === target);
+    if (hit) return hit;
+  }
+  const kind = String(doc.kind || "").toLowerCase();
+  if ((kind === "model" || kind === "entity" || kind === "source") && String(doc.name || "").toLowerCase() === target) {
+    return doc;
+  }
+  if (kind === "source" && Array.isArray(doc.tables)) {
+    const hit = doc.tables.find((t) => String(t?.name || "").toLowerCase() === target);
+    if (hit) return hit;
+  }
+  if (Array.isArray(doc.models)) {
+    const hit = doc.models.find((m) => String(m?.name || "").toLowerCase() === target);
+    if (hit) return hit;
+  }
+  if (Array.isArray(doc.sources)) {
+    for (const source of doc.sources) {
+      const hit = (source?.tables || []).find((t) => String(t?.name || "").toLowerCase() === target);
+      if (hit) return hit;
+    }
+  }
+  return null;
 }
 
 function findField(entity, fieldName) {
-  if (!entity || !Array.isArray(entity.fields)) return null;
   const target = String(fieldName || "").toLowerCase();
-  return entity.fields.find((f) => String(f.name || "").toLowerCase() === target) || null;
+  const fields = Array.isArray(entity?.fields)
+    ? entity.fields
+    : (Array.isArray(entity?.columns) ? entity.columns : []);
+  return fields.find((f) => String(f.name || "").toLowerCase() === target) || null;
+}
+
+function ensureFieldList(entity) {
+  if (!entity || typeof entity !== "object") return null;
+  if (Array.isArray(entity.fields)) return entity.fields;
+  if (Array.isArray(entity.columns)) return entity.columns;
+  if (Object.prototype.hasOwnProperty.call(entity, "columns")) {
+    entity.columns = [];
+    return entity.columns;
+  }
+  entity.fields = [];
+  return entity.fields;
 }
 
 /* Patch a single field on an entity. `patch` is an object of changes:
@@ -115,8 +326,9 @@ export function appendField(yamlText, entityName, fieldSpec) {
   if (!doc) return null;
   const entity = findEntity(doc, entityName);
   if (!entity) return null;
-  entity.fields = entity.fields || [];
-  entity.fields.push(fieldSpec);
+  const fields = ensureFieldList(entity);
+  if (!fields) return null;
+  fields.push(fieldSpec);
   return dump(doc);
 }
 
@@ -233,10 +445,65 @@ export function deleteField(yamlText, entityName, fieldName) {
   const entity = findEntity(doc, entityName);
   if (!entity) return null;
   const target = String(fieldName).toLowerCase();
-  entity.fields = (entity.fields || []).filter(
-    (f) => String(f.name || "").toLowerCase() !== target
-  );
+  if (Array.isArray(entity.fields)) {
+    entity.fields = entity.fields.filter((f) => String(f.name || "").toLowerCase() !== target);
+  } else if (Array.isArray(entity.columns)) {
+    entity.columns = entity.columns.filter((f) => String(f.name || "").toLowerCase() !== target);
+  } else {
+    return null;
+  }
   return dump(doc);
+}
+
+/* Remove a relationship/fk edge anchored on a specific field. Supports:
+   - top-level relationships[] entries (string or object endpoints)
+   - field.foreign_key / field.fk declarations
+   - dbt `tests: [{relationships: ...}]` blocks on columns
+   Returns new YAML, or null if nothing matched / YAML invalid. */
+export function removeFieldRelationship(yamlText, fromEntity, fromField, toEntity, toField) {
+  const doc = loadDoc(yamlText);
+  if (!doc) return null;
+  const sourceEntity = findEntity(doc, fromEntity);
+  if (!sourceEntity) return null;
+  const field = findField(sourceEntity, fromField);
+  if (!field) return null;
+
+  const sourceKey = `${String(fromEntity || "").toLowerCase()}.${String(fromField || "").toLowerCase()}`;
+  const targetKey = `${String(toEntity || "").toLowerCase()}.${String(toField || "").toLowerCase()}`;
+  let changed = false;
+
+  if (Array.isArray(doc.relationships)) {
+    const before = doc.relationships.length;
+    doc.relationships = doc.relationships.filter((relationship) => {
+      const fromStr = typeof relationship?.from === "string" ? relationship.from.toLowerCase() : "";
+      const toStr = typeof relationship?.to === "string" ? relationship.to.toLowerCase() : "";
+      const fromObj = relationship?.from && typeof relationship.from === "object"
+        ? `${String(relationship.from.entity || relationship.from.table || "").toLowerCase()}.${String(relationship.from.field || relationship.from.col || "").toLowerCase()}`
+        : "";
+      const toObj = relationship?.to && typeof relationship.to === "object"
+        ? `${String(relationship.to.entity || relationship.to.table || "").toLowerCase()}.${String(relationship.to.field || relationship.to.col || "").toLowerCase()}`
+        : "";
+      const relFrom = fromStr || fromObj;
+      const relTo = toStr || toObj;
+      return !(relFrom === sourceKey && relTo === targetKey);
+    });
+    if (doc.relationships.length !== before) changed = true;
+  }
+
+  const fkTarget = normalizeForeignKeyTarget(field.foreign_key, field.fk);
+  if (fkTarget === targetKey) {
+    if ("foreign_key" in field) delete field.foreign_key;
+    if ("fk" in field) delete field.fk;
+    changed = true;
+  }
+
+  if (Array.isArray(field.tests)) {
+    const before = field.tests.length;
+    field.tests = field.tests.filter((test) => dbtRelationshipTestTarget(test) !== targetKey);
+    if (field.tests.length !== before) changed = true;
+  }
+
+  return changed ? dump(doc) : null;
 }
 
 /* Write canvas-layout hints into an entity's `display:` sub-map. This is the
@@ -385,12 +652,101 @@ export function addDiagramEntries(yamlText, newEntries) {
   return dump(doc);
 }
 
+/* Remove an entity reference from a `.diagram.yaml`.
+ *
+ * Concrete entries (`{file, entity: "orders"}`) are removed directly.
+ * Wildcard entries (`{file, entity: "*"}`) need expansion so removing one
+ * entity does not also drop every other entity from the same source file.
+ * `referencedYamlText` should be the referenced model/schema YAML so we can
+ * enumerate the remaining entities for that file. */
+export function deleteDiagramEntity(yamlText, file, entityName, referencedYamlText = "") {
+  const doc = loadDoc(yamlText);
+  if (!doc) return null;
+  if (!Array.isArray(doc.entities)) return null;
+
+  const fileKey = normalizePathLike(file);
+  const entityKey = String(entityName || "").trim().toLowerCase();
+  if (!fileKey || !entityKey) return null;
+
+  const impact = { entity: false, relationships: 0 };
+  const kept = [];
+  const wildcardEntries = [];
+
+  for (const entry of doc.entities) {
+    const entryFile = normalizePathLike(entry?.file);
+    if (entryFile !== fileKey) {
+      kept.push(entry);
+      continue;
+    }
+
+    const rawEntity = String(entry?.entity || "").trim();
+    const entryEntity = rawEntity.toLowerCase();
+    const isWildcard = rawEntity === "" || rawEntity === "*";
+
+    if (isWildcard) {
+      wildcardEntries.push(entry);
+      continue;
+    }
+    if (entryEntity === entityKey) {
+      impact.entity = true;
+      continue;
+    }
+    kept.push(entry);
+  }
+
+  if (wildcardEntries.length > 0) {
+    const remainingNames = collectReferencedEntityNames(referencedYamlText)
+      .filter((name) => String(name || "").trim().toLowerCase() !== entityKey);
+
+    if (remainingNames.length > 0) {
+      const existing = new Set(
+        kept.map((entry) => `${normalizePathLike(entry?.file)}::${String(entry?.entity || "").trim().toLowerCase()}`)
+      );
+      wildcardEntries.forEach((entry, index) => {
+        remainingNames.forEach((name) => {
+          const key = `${fileKey}::${String(name).toLowerCase()}`;
+          if (existing.has(key)) return;
+          existing.add(key);
+          const next = { file: fileKey, entity: name };
+          // If the wildcard only expands to one survivor, preserve its saved
+          // coordinates instead of dropping the layout hint on delete.
+          if (remainingNames.length === 1 && index === 0) {
+            if (Number.isFinite(Number(entry?.x))) next.x = Math.round(Number(entry.x));
+            if (Number.isFinite(Number(entry?.y))) next.y = Math.round(Number(entry.y));
+            if (Number.isFinite(Number(entry?.width))) next.width = Math.round(Number(entry.width));
+          }
+          kept.push(next);
+        });
+      });
+      impact.entity = true;
+    } else if (collectReferencedEntityNames(referencedYamlText).length > 0) {
+      impact.entity = true;
+    }
+  }
+
+  if (!impact.entity) return null;
+
+  doc.entities = kept;
+
+  if (Array.isArray(doc.relationships)) {
+    const before = doc.relationships.length;
+    doc.relationships = doc.relationships.filter((rel) => {
+      const from = String(rel?.from?.entity || rel?.from?.table || "").toLowerCase();
+      const to = String(rel?.to?.entity || rel?.to?.table || "").toLowerCase();
+      return from !== entityKey && to !== entityKey;
+    });
+    impact.relationships = before - doc.relationships.length;
+  }
+
+  return { yaml: dump(doc), impact };
+}
+
 /* Append a diagram-level relationship to a `.diagram.yaml` document.
  * Diagram-level relationships carry FKs authored on the canvas (drag-to-
  * relate, "Add Relationship" dialog) without mutating any of the
  * referenced model files. Shape matches `diagram.schema.json`:
  *   {name, from:{entity,field}, to:{entity,field}, cardinality,
- *    identifying?, label?}
+ *    identifying?, label?, description?, verb?, relationship_type?, rationale?, source_of_truth?}
  *
  * Dedupes by `{from, to}` endpoint pair — the same edge authored twice
  * is a no-op. Returns new YAML text, or null when the doc doesn't
@@ -406,25 +762,24 @@ export function addDiagramRelationship(yamlText, rel) {
 
   if (!Array.isArray(doc.relationships)) doc.relationships = [];
   const dupe = doc.relationships.some((r) =>
-    String(r?.from?.entity || "").toLowerCase() === fromEnt.toLowerCase() &&
-    String(r?.from?.field || "").toLowerCase() === fromFld.toLowerCase() &&
-    String(r?.to?.entity || "").toLowerCase() === toEnt.toLowerCase() &&
-    String(r?.to?.field || "").toLowerCase() === toFld.toLowerCase()
+    relationshipEndpointKey(r?.from) === `${fromEnt}.${fromFld}`.toLowerCase() &&
+    relationshipEndpointKey(r?.to) === `${toEnt}.${toFld}`.toLowerCase()
   );
   if (dupe) return yamlText;
 
   const entry = {
     name: rel?.name ? String(rel.name) : `${fromEnt}_to_${toEnt}`.toLowerCase(),
-    from: { entity: fromEnt, ...(fromFld ? { field: fromFld } : {}) },
-    to: { entity: toEnt, ...(toFld ? { field: toFld } : {}) },
+    from: fromFld ? { entity: fromEnt, field: fromFld } : { entity: fromEnt },
+    to: toFld ? { entity: toEnt, field: toFld } : { entity: toEnt },
   };
   if (rel?.cardinality) entry.cardinality = String(rel.cardinality);
   if (rel?.identifying) entry.identifying = true;
-  if (rel?.optional) entry.optional = true;
-  if (rel?.on_delete) entry.on_delete = String(rel.on_delete);
   if (rel?.label) entry.label = String(rel.label);
-  if (rel?.verb) entry.verb = String(rel.verb);
   if (rel?.description) entry.description = String(rel.description);
+  if (rel?.verb) entry.verb = String(rel.verb);
+  if (rel?.relationship_type) entry.relationship_type = String(rel.relationship_type);
+  if (rel?.rationale) entry.rationale = String(rel.rationale);
+  if (rel?.source_of_truth) entry.source_of_truth = String(rel.source_of_truth);
   doc.relationships.push(entry);
   return dump(doc);
 }
@@ -524,16 +879,76 @@ export function patchRelationship(yamlText, relName, patch) {
   const doc = loadDoc(yamlText);
   if (!doc) return null;
   if (!Array.isArray(doc.relationships)) return null;
+  const isDiagram = String(doc.kind || "").toLowerCase() === "diagram";
   const target = String(relName || "").toLowerCase();
   if (!target) return null;
-  const rel = doc.relationships.find(
-    (r) => String(r?.name || "").toLowerCase() === target
-  );
-  if (!rel) return null;
+  const originalFromKey = relationshipEndpointKey(patch?._match?.from);
+  const originalToKey = relationshipEndpointKey(patch?._match?.to);
+  const matchingIndexes = [];
+  doc.relationships.forEach((r, index) => {
+    const nameMatch = String(r?.name || "").toLowerCase() === target;
+    const endpointMatch = originalFromKey && originalToKey
+      && relationshipEndpointKey(r?.from) === originalFromKey
+      && relationshipEndpointKey(r?.to) === originalToKey;
+    if (nameMatch || endpointMatch) matchingIndexes.push(index);
+  });
+  if (matchingIndexes.length === 0) return null;
+  const selectedIndex = matchingIndexes.find((index) =>
+    originalFromKey && originalToKey
+      && relationshipEndpointKey(doc.relationships[index]?.from) === originalFromKey
+      && relationshipEndpointKey(doc.relationships[index]?.to) === originalToKey
+  ) ?? matchingIndexes[0];
+  const rel = doc.relationships[selectedIndex];
 
   if (patch.name != null && patch.name !== rel.name) rel.name = String(patch.name);
-  if (patch.from != null) rel.from = String(patch.from);
-  if (patch.to != null)   rel.to = String(patch.to);
+  if (patch.from != null) {
+    if (rel.from && typeof rel.from === "object" && !Array.isArray(rel.from)) {
+      const parsed = parseRelationshipEndpoint(patch.from);
+      if (parsed) {
+        if (Object.prototype.hasOwnProperty.call(rel.from, "entity")) rel.from.entity = parsed.entity;
+        else if (Object.prototype.hasOwnProperty.call(rel.from, "table")) rel.from.table = parsed.entity;
+        else rel.from.entity = parsed.entity;
+        if (parsed.field) {
+          if (Object.prototype.hasOwnProperty.call(rel.from, "field")) rel.from.field = parsed.field;
+          else if (Object.prototype.hasOwnProperty.call(rel.from, "column")) rel.from.column = parsed.field;
+          else if (Object.prototype.hasOwnProperty.call(rel.from, "col")) rel.from.col = parsed.field;
+          else rel.from.field = parsed.field;
+        } else {
+          delete rel.from.field;
+          delete rel.from.column;
+          delete rel.from.col;
+        }
+      } else {
+        rel.from = String(patch.from);
+      }
+    } else {
+      rel.from = String(patch.from);
+    }
+  }
+  if (patch.to != null) {
+    if (rel.to && typeof rel.to === "object" && !Array.isArray(rel.to)) {
+      const parsed = parseRelationshipEndpoint(patch.to);
+      if (parsed) {
+        if (Object.prototype.hasOwnProperty.call(rel.to, "entity")) rel.to.entity = parsed.entity;
+        else if (Object.prototype.hasOwnProperty.call(rel.to, "table")) rel.to.table = parsed.entity;
+        else rel.to.entity = parsed.entity;
+        if (parsed.field) {
+          if (Object.prototype.hasOwnProperty.call(rel.to, "field")) rel.to.field = parsed.field;
+          else if (Object.prototype.hasOwnProperty.call(rel.to, "column")) rel.to.column = parsed.field;
+          else if (Object.prototype.hasOwnProperty.call(rel.to, "col")) rel.to.col = parsed.field;
+          else rel.to.field = parsed.field;
+        } else {
+          delete rel.to.field;
+          delete rel.to.column;
+          delete rel.to.col;
+        }
+      } else {
+        rel.to = String(patch.to);
+      }
+    } else {
+      rel.to = String(patch.to);
+    }
+  }
   if (patch.cardinality != null) rel.cardinality = String(patch.cardinality);
   if (patch.description !== undefined) {
     if (patch.description) rel.description = String(patch.description);
@@ -542,6 +957,18 @@ export function patchRelationship(yamlText, relName, patch) {
   if (patch.verb !== undefined) {
     if (patch.verb) rel.verb = String(patch.verb);
     else delete rel.verb;
+  }
+  if (patch.relationship_type !== undefined) {
+    if (patch.relationship_type) rel.relationship_type = String(patch.relationship_type);
+    else delete rel.relationship_type;
+  }
+  if (patch.rationale !== undefined) {
+    if (patch.rationale) rel.rationale = String(patch.rationale);
+    else delete rel.rationale;
+  }
+  if (patch.source_of_truth !== undefined) {
+    if (patch.source_of_truth) rel.source_of_truth = String(patch.source_of_truth);
+    else delete rel.source_of_truth;
   }
   if (patch.on_delete !== undefined) {
     const v = String(patch.on_delete || "").trim();
@@ -561,5 +988,39 @@ export function patchRelationship(yamlText, relName, patch) {
     if (patch.optional) rel.optional = true;
     else delete rel.optional;
   }
+
+  if (isDiagram) {
+    const from = normalizedRelationshipEndpoint(rel.from);
+    const to = normalizedRelationshipEndpoint(rel.to);
+    if (!from || !to) return null;
+    rel.from = from.field ? { entity: from.entity, field: from.field } : { entity: from.entity };
+    rel.to = to.field ? { entity: to.entity, field: to.field } : { entity: to.entity };
+
+    const finalName = String(rel?.name || "").toLowerCase();
+    const finalFromKey = relationshipEndpointKey(rel.from);
+    const finalToKey = relationshipEndpointKey(rel.to);
+    const seen = new Set();
+    const deduped = [];
+    doc.relationships.forEach((entry, index) => {
+      const entryName = String(entry?.name || "").toLowerCase();
+      const entryFromKey = relationshipEndpointKey(entry?.from);
+      const entryToKey = relationshipEndpointKey(entry?.to);
+      const matchesEdited = index === selectedIndex
+        || (entryName === target)
+        || (originalFromKey && originalToKey && entryFromKey === originalFromKey && entryToKey === originalToKey)
+        || (finalName && entryName === finalName)
+        || (entryFromKey === finalFromKey && entryToKey === finalToKey);
+      if (!matchesEdited) {
+        deduped.push(entry);
+        return;
+      }
+      const signature = `${finalName}|${finalFromKey}|${finalToKey}`;
+      if (seen.has(signature)) return;
+      seen.add(signature);
+      deduped.push(rel);
+    });
+    doc.relationships = deduped;
+  }
+
   return dump(doc);
 }

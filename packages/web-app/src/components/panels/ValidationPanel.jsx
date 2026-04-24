@@ -71,8 +71,25 @@ const DIMENSIONAL_CODES = new Set([
 /* ────────────────────────────────────────────────────────────────── */
 function scoreBand(score) {
   if (score >= 80) return { tone: "success", color: "var(--cat-billing)", label: "Good" };
-  if (score >= 60) return { tone: "warning", color: "var(--pk)", label: "Partial" };
-  return { tone: "error", color: "#ef4444", label: "Gaps" };
+  if (score >= 60) return { tone: "info", color: "var(--accent)", label: "Core Coverage" };
+  return { tone: "warning", color: "var(--pk)", label: "Needs Coverage" };
+}
+
+function summarizeCoverageMissing(entity) {
+  const missing = Array.isArray(entity?.missing) ? entity.missing : [];
+  if (missing.length === 0) return "Fully covered";
+  if (missing.length <= 2) return missing.join(" · ");
+  return `${missing.slice(0, 2).join(" · ")} · +${missing.length - 2} more`;
+}
+
+function coverageStatusCopy(entity) {
+  const score = Number(entity?.score || 0);
+  const missingCount = Array.isArray(entity?.missing) ? entity.missing.length : 0;
+  const name = String(entity?.entityName || "This entity");
+  if (missingCount === 0) return `${name} is fully covered for documentation and contract quality.`;
+  if (score >= 80) return `${name} is close to complete but still has ${missingCount} coverage gap${missingCount === 1 ? "" : "s"} to close.`;
+  if (score >= 60) return `${name} has core metadata in place, but it still needs ${missingCount} coverage improvement${missingCount === 1 ? "" : "s"}.`;
+  return `${name} is missing several metadata and contract signals, so people will have less context when using it.`;
 }
 
 function severityConfig(severity) {
@@ -85,6 +102,130 @@ function severityConfig(severity) {
     default:
       return { tone: "info", Icon: Info, label: "Info" };
   }
+}
+
+const ISSUE_GUIDANCE = {
+  MISSING_GRAIN: {
+    why: "Grain defines the row-level meaning of the model. Without it, metrics, joins, and downstream modeling assumptions drift.",
+    nextStep: "Declare the business grain on the entity using the field or fields that uniquely identify one record.",
+  },
+  MISSING_PRIMARY_KEY: {
+    why: "Primary keys anchor uniqueness, relationship wiring, and entity identity across the model.",
+    nextStep: "Mark at least one field as the primary key, or switch the entity type if the object is intentionally keyless.",
+  },
+  RELATIONSHIP_REF_NOT_FOUND: {
+    why: "Broken relationship endpoints make joins unreliable and usually indicate a rename, deletion, or stale foreign-key reference.",
+    nextStep: "Update the relationship to point to an existing entity.field pair, or remove it if the dependency no longer exists.",
+  },
+  INVALID_RELATIONSHIP_FROM: {
+    why: "The source side of the relationship is malformed, so the model cannot reason about lineage or cardinality.",
+    nextStep: "Set the relationship source to a valid Entity.field endpoint.",
+  },
+  INVALID_RELATIONSHIP_TO: {
+    why: "The target side of the relationship is malformed, so the model cannot reason about lineage or cardinality.",
+    nextStep: "Set the relationship target to a valid Entity.field endpoint.",
+  },
+  DIMENSION_REF_NOT_FOUND: {
+    why: "A fact table references a dimension that is not present, which weakens the star schema and breaks navigation.",
+    nextStep: "Point dimension_refs to an existing dimension entity or import the missing dimension into the model.",
+  },
+  FACT_TABLE_NO_METRICS: {
+    why: "A report-layer fact without metrics usually means the semantic layer is incomplete for business consumption.",
+    nextStep: "Define at least one metric on the fact table so consumers have a supported KPI entry point.",
+  },
+  MISSING_ENTITY_DESCRIPTION: {
+    why: "Without a description, consumers do not know what this model represents or when to use it.",
+    nextStep: "Add a short business-facing description that explains the entity’s purpose and scope.",
+  },
+  MISSING_ENTITY_OWNER: {
+    why: "Ownership is needed so quality issues, access requests, and change decisions have a clear accountable team.",
+    nextStep: "Assign an owner such as a team alias or responsible email.",
+  },
+  CONCEPTUAL_MISSING_DESCRIPTION: {
+    why: "A conceptual model is meant to communicate business meaning first. Without a description, the concept is just a label.",
+    nextStep: "Add a short business definition that explains what the concept represents and where it applies.",
+  },
+  CONCEPTUAL_MISSING_OWNER: {
+    why: "Conceptual models need a steward so business questions and definition changes have a clear owner.",
+    nextStep: "Assign a business owner or steward for this concept.",
+  },
+  CONCEPTUAL_MISSING_SUBJECT_AREA: {
+    why: "Subject areas are how enterprise teams group concepts into bounded contexts.",
+    nextStep: "Assign the concept to a subject area or bounded context.",
+  },
+  CONCEPTUAL_MISSING_GLOSSARY_LINK: {
+    why: "Without glossary linkage, the conceptual model stays disconnected from the business dictionary.",
+    nextStep: "Link the concept to one or more glossary terms through related_fields or concept references.",
+  },
+  CONCEPTUAL_ORPHAN_CONCEPT: {
+    why: "Concepts with no relationships are often placeholders or disconnected ideas, which weakens the enterprise story.",
+    nextStep: "Relate this concept to adjacent business concepts or remove it from the conceptual model.",
+  },
+  CONCEPTUAL_CROSS_DOMAIN_REL_NO_DESCRIPTION: {
+    why: "Cross-domain relationships are where business boundaries blur, so they need explicit explanation.",
+    nextStep: "Add a description that explains why the two bounded contexts connect and what the relationship means.",
+  },
+  CONCEPTUAL_MISSING_DOMAIN: {
+    why: "The model domain tells consumers which business area owns the conceptual view.",
+    nextStep: "Set model.domain to the bounded context or enterprise domain this conceptual model covers.",
+  },
+  LOW_FIELD_DESCRIPTION_COVERAGE: {
+    why: "Poor field coverage makes the model hard to trust and slows adoption in analytics and AI workflows.",
+    nextStep: "Fill in descriptions for the highest-usage columns first, then raise the coverage across the remaining fields.",
+  },
+  REPORT_ENTITY_NO_METRICS: {
+    why: "Report-layer models should expose business measures, not just raw shape.",
+    nextStep: "Add metrics that define how the report entity should be queried and interpreted.",
+  },
+  GLOSSARY_NO_FIELD_REFS: {
+    why: "Glossary terms without field links stay detached from the actual data model.",
+    nextStep: "Connect business terms to concrete fields through related_fields so users can navigate from concept to implementation.",
+  },
+};
+
+function issueGuidance(issue) {
+  const direct = ISSUE_GUIDANCE[issue?.code];
+  if (direct) return direct;
+  if (issue?.severity === "error") {
+    return {
+      why: "This issue blocks the model from passing validation or semantic gate checks.",
+      nextStep: "Fix the referenced field, relationship, or metadata shape so the model becomes structurally valid.",
+    };
+  }
+  if (issue?.severity === "warn") {
+    return {
+      why: "This is a quality or modeling risk that can lead to weak contracts, poor discoverability, or confusing downstream usage.",
+      nextStep: "Address the missing metadata or modeling mismatch before promoting the model further.",
+    };
+  }
+  return {
+    why: "This is informational guidance intended to improve model clarity and completeness.",
+    nextStep: "Use it as a cleanup item to strengthen the model contract.",
+  };
+}
+
+function issueTarget(issue) {
+  const path = String(issue?.path || "");
+  const entityMatch = path.match(/^\/entities\/([^/]+)/);
+  if (entityMatch) return entityMatch[1];
+  if (path.startsWith("/relationships")) return "Relationships";
+  if (path.startsWith("/metrics")) return "Metrics";
+  if (path.startsWith("/glossary")) return "Glossary";
+  if (path.startsWith("/indexes")) return "Indexes";
+  if (path.startsWith("/model")) return "Model";
+  const quoted = String(issue?.message || "").match(/'([^']+)'/);
+  if (quoted) return quoted[1];
+  return "General";
+}
+
+function groupIssuesByTarget(issues) {
+  const groups = new Map();
+  (issues || []).forEach((issue) => {
+    const target = issueTarget(issue);
+    if (!groups.has(target)) groups.set(target, []);
+    groups.get(target).push(issue);
+  });
+  return [...groups.entries()].map(([target, items]) => ({ target, items }));
 }
 
 /* ────────────────────────────────────────────────────────────────── */
@@ -150,6 +291,10 @@ function RingGauge({ value = 0, size = 72, stroke = 7 }) {
 function EntityCompletenessRow({ entity }) {
   const [open, setOpen] = useState(false);
   const band = scoreBand(entity.score);
+  const entityName = String(entity?.entityName || "Unnamed entity");
+  const missing = Array.isArray(entity?.missing) ? entity.missing : [];
+  const missingSummary = summarizeCoverageMissing(entity);
+  const missingCount = missing.length;
 
   return (
     <div
@@ -181,20 +326,34 @@ function EntityCompletenessRow({ entity }) {
         ) : (
           <ChevronRight size={11} style={{ color: "var(--text-tertiary)", flexShrink: 0 }} />
         )}
-        <span
-          style={{
-            flex: 1,
-            fontSize: 11.5,
-            fontWeight: 500,
-            overflow: "hidden",
-            textOverflow: "ellipsis",
-            whiteSpace: "nowrap",
-            fontFamily: "var(--font-mono)",
-          }}
-          title={entity.entityName}
-        >
-          {entity.entityName}
-        </span>
+        <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", gap: 2 }}>
+          <span
+            style={{
+              fontSize: 11.5,
+              fontWeight: 600,
+              overflow: "hidden",
+              textOverflow: "ellipsis",
+              whiteSpace: "nowrap",
+              color: "var(--text-primary)",
+              fontFamily: "var(--font-mono)",
+            }}
+            title={entityName}
+          >
+            {entityName}
+          </span>
+          <span
+            style={{
+              fontSize: 10.5,
+              color: "var(--text-tertiary)",
+              overflow: "hidden",
+              textOverflow: "ellipsis",
+              whiteSpace: "nowrap",
+            }}
+            title={missingSummary}
+          >
+            {missingCount === 0 ? "No coverage gaps" : `${missingCount} gap${missingCount === 1 ? "" : "s"}: ${missingSummary}`}
+          </span>
+        </div>
         <StatusPill tone={band.tone}>{entity.score}%</StatusPill>
       </button>
 
@@ -220,7 +379,7 @@ function EntityCompletenessRow({ entity }) {
         </div>
       </div>
 
-      {open && entity.missing.length > 0 && (
+      {open && missing.length > 0 && (
         <div
           style={{
             borderTop: "1px solid var(--border-subtle)",
@@ -231,25 +390,36 @@ function EntityCompletenessRow({ entity }) {
             gap: 4,
           }}
         >
-          {entity.missing.map((m, i) => (
-            <div
-              key={i}
-              style={{
-                display: "flex",
-                alignItems: "flex-start",
-                gap: 6,
-                fontSize: 11,
-                color: "var(--text-secondary)",
-              }}
-            >
-              <span style={{ color: "var(--pk)", flexShrink: 0, marginTop: 1 }}>↳</span>
-              <span>{m}</span>
+          <div style={{ fontSize: 11, color: "var(--text-secondary)", lineHeight: 1.45, marginBottom: 4 }}>
+            {coverageStatusCopy(entity)}
+          </div>
+          <div
+            style={{
+              padding: "8px 10px",
+              borderRadius: 6,
+              background: "var(--bg-1)",
+              border: "1px solid var(--border-subtle)",
+              fontSize: 11,
+              color: "var(--text-secondary)",
+              lineHeight: 1.45,
+            }}
+          >
+            <div style={{ fontSize: 10, letterSpacing: "0.06em", textTransform: "uppercase", color: "var(--text-tertiary)", marginBottom: 4 }}>
+              What this score means
             </div>
-          ))}
+            <div>
+              Coverage tracks trust signals like ownership, grain, descriptions, tags, glossary links, and SLA. Low coverage is guidance, not a hard validation failure.
+            </div>
+          </div>
+          <CoverageList
+            title="Coverage Missing"
+            items={missing}
+            emptyLabel="Coverage is complete."
+          />
         </div>
       )}
 
-      {open && entity.missing.length === 0 && (
+      {open && missing.length === 0 && (
         <div
           style={{
             borderTop: "1px solid var(--border-subtle)",
@@ -273,8 +443,28 @@ function EntityCompletenessRow({ entity }) {
 /* ────────────────────────────────────────────────────────────────── */
 /* IssueRow — one issue rendered as a toned PanelCard                 */
 /* ────────────────────────────────────────────────────────────────── */
-function IssueRow({ issue }) {
-  const { tone, Icon } = severityConfig(issue.severity);
+function toneIconFor(tone) {
+  switch (tone) {
+    case "error":
+      return AlertCircle;
+    case "warning":
+      return AlertTriangle;
+    case "success":
+      return CheckCircle2;
+    case "info":
+    case "accent":
+    case "neutral":
+    default:
+      return Info;
+  }
+}
+
+function IssueRow({ issue, toneOverride = "" }) {
+  const { tone: severityTone, Icon: severityIcon } = severityConfig(issue.severity);
+  const tone = toneOverride || severityTone;
+  const Icon = toneOverride ? toneIconFor(toneOverride) : severityIcon;
+  const guidance = issueGuidance(issue);
+  const target = issueTarget(issue);
   return (
     <PanelCard tone={tone} dense>
       <div style={{ display: "flex", alignItems: "flex-start", gap: 10 }}>
@@ -290,6 +480,7 @@ function IssueRow({ issue }) {
         />
         <div style={{ minWidth: 0, flex: 1 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+            <StatusPill tone={tone}>{target}</StatusPill>
             <span
               style={{
                 fontSize: 10,
@@ -320,9 +511,102 @@ function IssueRow({ issue }) {
           <p style={{ margin: "3px 0 0", fontSize: 11.5, color: "var(--text-secondary)", lineHeight: 1.45 }}>
             {issue.message}
           </p>
+          <div style={{ display: "grid", gap: 6, marginTop: 8 }}>
+            <div
+              style={{
+                padding: "8px 10px",
+                borderRadius: 6,
+                background: "var(--bg-0)",
+                border: "1px solid var(--border-subtle)",
+              }}
+            >
+              <div style={{ fontSize: 10, letterSpacing: "0.06em", textTransform: "uppercase", color: "var(--text-tertiary)", marginBottom: 4 }}>
+                Why This Matters
+              </div>
+              <div style={{ fontSize: 11, color: "var(--text-secondary)", lineHeight: 1.45 }}>
+                {guidance.why}
+              </div>
+            </div>
+            <div
+              style={{
+                padding: "8px 10px",
+                borderRadius: 6,
+                background: "var(--bg-0)",
+                border: "1px solid var(--border-subtle)",
+              }}
+            >
+              <div style={{ fontSize: 10, letterSpacing: "0.06em", textTransform: "uppercase", color: "var(--text-tertiary)", marginBottom: 4 }}>
+                Next Step
+              </div>
+              <div style={{ fontSize: 11, color: "var(--text-secondary)", lineHeight: 1.45 }}>
+                {guidance.nextStep}
+              </div>
+            </div>
+          </div>
         </div>
       </div>
     </PanelCard>
+  );
+}
+
+function IssueGroups({ issues, prefix, toneOverride = "" }) {
+  const groups = groupIssuesByTarget(issues);
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+      {groups.map((group, groupIdx) => (
+        <div
+          key={`${prefix}-${group.target}-${groupIdx}`}
+          style={{
+            display: "flex",
+            flexDirection: "column",
+            gap: 6,
+            padding: 10,
+            borderRadius: 8,
+            background: "var(--bg-1)",
+            border: "1px solid var(--border-default)",
+          }}
+        >
+          <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+            <div style={{ fontSize: 12, fontWeight: 600, color: "var(--text-primary)" }}>{group.target}</div>
+            <StatusPill tone={toneOverride || "neutral"}>
+              {group.items.length} {group.items.length === 1 ? "finding" : "findings"}
+            </StatusPill>
+          </div>
+          {group.items.map((iss, idx) => (
+            <IssueRow key={`${prefix}-${group.target}-${idx}`} issue={iss} toneOverride={toneOverride} />
+          ))}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function CoverageList({ title, items, emptyLabel }) {
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+      <div style={{ fontSize: 10, letterSpacing: "0.06em", textTransform: "uppercase", color: "var(--text-tertiary)" }}>
+        {title}
+      </div>
+      {items.length > 0 ? (
+        items.map((item, idx) => (
+          <div
+            key={`${title}-${idx}`}
+            style={{
+              display: "flex",
+              alignItems: "flex-start",
+              gap: 6,
+              fontSize: 11,
+              color: "var(--text-secondary)",
+            }}
+          >
+            <span style={{ color: "var(--accent)", flexShrink: 0, marginTop: 1 }}>•</span>
+            <span>{item}</span>
+          </div>
+        ))
+      ) : (
+        <div style={{ fontSize: 11, color: "var(--cat-billing)" }}>{emptyLabel}</div>
+      )}
+    </div>
   );
 }
 
@@ -389,41 +673,34 @@ export default function ValidationPanel() {
   const dimensionalIssues = allNudges.filter((w) => DIMENSIONAL_CODES.has(w.code));
   const gaps = allNudges.filter((w) => !DIMENSIONAL_CODES.has(w.code));
   const completeness = currentCheck?.completeness || null;
+  const modelQualityIssues = [...warnings, ...dimensionalIssues];
+  const coverageIssues = [...gaps, ...dbtFindings];
 
   /* Summary cluster shown in the header's `actions` slot. One status
      pill per category; zero-count categories collapse to a single
      "No errors" success pill so the header never feels empty. */
   const totalIssues =
     errors.length + warnings.length + dimensionalIssues.length + gaps.length + dbtFindings.length;
+  const blockerCount = errors.length + danglingFindings.length;
   const headerStatus = activeFileContent ? (
     <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
-      {errors.length > 0 ? (
+      {blockerCount > 0 ? (
         <StatusPill tone="error" icon={<AlertCircle size={10} />}>
-          {errors.length} {errors.length === 1 ? "error" : "errors"}
+          {blockerCount} {blockerCount === 1 ? "blocker" : "blockers"}
         </StatusPill>
       ) : (
         <StatusPill tone="success" icon={<CheckCircle2 size={10} />}>
-          No errors
+          No blockers
         </StatusPill>
       )}
-      {warnings.length > 0 && (
+      {modelQualityIssues.length > 0 && (
         <StatusPill tone="warning" icon={<AlertTriangle size={10} />}>
-          {warnings.length} {warnings.length === 1 ? "warning" : "warnings"}
+          {modelQualityIssues.length} model quality
         </StatusPill>
       )}
-      {dimensionalIssues.length > 0 && (
-        <StatusPill tone="info" icon={<Layers size={10} />}>
-          {dimensionalIssues.length} dimensional
-        </StatusPill>
-      )}
-      {gaps.length > 0 && (
-        <StatusPill tone="accent" icon={<Gauge size={10} />}>
-          {gaps.length} {gaps.length === 1 ? "gap" : "gaps"}
-        </StatusPill>
-      )}
-      {dbtFindings.length > 0 && (
+      {coverageIssues.length > 0 && (
         <StatusPill tone="info" icon={<Info size={10} />}>
-          {dbtFindings.length} dbt
+          {coverageIssues.length} coverage
         </StatusPill>
       )}
     </div>
@@ -450,6 +727,35 @@ export default function ValidationPanel() {
       subtitle={totalIssues === 0 ? "All checks passed" : `${totalIssues} total findings`}
       actions={headerStatus}
     >
+      <PanelSection
+        title="How To Read This"
+        icon={<Info size={11} />}
+        description="This page now separates blockers from quality guidance and documentation coverage."
+      >
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(210px, 1fr))", gap: 8 }}>
+          <PanelCard
+            dense
+            tone={blockerCount > 0 ? "error" : "success"}
+            title={blockerCount > 0 ? `${blockerCount} blockers to fix first` : "No blocking issues"}
+            subtitle="Start here"
+          >
+            <div style={{ fontSize: 11, color: "var(--text-secondary)", lineHeight: 1.45 }}>
+              These findings will break validation, semantic checks, or relationship integrity.
+            </div>
+          </PanelCard>
+          <PanelCard dense tone={modelQualityIssues.length > 0 ? "warning" : "neutral"} title="Model quality issues" subtitle="Design and structure">
+            <div style={{ fontSize: 11, color: "var(--text-secondary)", lineHeight: 1.45 }}>
+              Warnings and dimensional issues highlight modeling choices that can confuse joins, metrics, and downstream use.
+            </div>
+          </PanelCard>
+          <PanelCard dense tone={coverageIssues.length > 0 || completeness ? "info" : "neutral"} title="Coverage missing" subtitle="Trust and discoverability">
+            <div style={{ fontSize: 11, color: "var(--text-secondary)", lineHeight: 1.45 }}>
+              Coverage shows what is still missing for documentation, ownership, testing, and contract clarity. It is not the same as a hard failure.
+            </div>
+          </PanelCard>
+        </div>
+      </PanelSection>
+
       {/* Dangling relationships banner (Phase 4.4) */}
       {danglingFindings.length > 0 && (
         <PanelSection
@@ -470,35 +776,12 @@ export default function ValidationPanel() {
         >
           <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
             {danglingFindings.map((d) => (
-              <PanelCard key={`dangle-${d.index}`} tone="error" dense>
-                <div
-                  style={{
-                    display: "flex",
-                    flexDirection: "column",
-                    gap: 2,
-                    minWidth: 0,
-                  }}
-                >
-                  <div
-                    style={{
-                      fontSize: 12,
-                      fontWeight: 600,
-                      color: "var(--text-primary)",
-                      fontFamily: "var(--font-mono)",
-                    }}
-                  >
-                    {d.name}
-                  </div>
-                  <div
-                    style={{
-                      fontSize: 11,
-                      color: "var(--text-secondary)",
-                      fontFamily: "var(--font-mono)",
-                    }}
-                  >
-                    {d.from} <span style={{ opacity: 0.5 }}>→</span> {d.to}
-                  </div>
+              <PanelCard key={`dangle-${d.index}`} tone="error" dense title={d.name} subtitle={`${d.from} → ${d.to}`}>
+                <div style={{ display: "grid", gap: 6 }}>
                   <div style={{ fontSize: 11, color: "#ef4444" }}>{d.reason}</div>
+                  <div style={{ fontSize: 11, color: "var(--text-secondary)", lineHeight: 1.45 }}>
+                    This relationship points to an entity or column that no longer exists, so the diagram and semantic checks cannot trust it.
+                  </div>
                 </div>
               </PanelCard>
             ))}
@@ -509,11 +792,12 @@ export default function ValidationPanel() {
       {/* Completeness gauge + per-entity list */}
       {completeness && (
         <PanelSection
-          title="Completeness"
+          title="Documentation & Contract Coverage"
           icon={<Gauge size={11} />}
+          description="Coverage scores show how well each entity is documented and governed. Low scores are not blockers by themselves."
           action={
             <StatusPill tone={scoreBand(completeness.modelScore).tone}>
-              {completeness.fullyComplete}/{completeness.totalEntities} complete
+              {completeness.fullyComplete}/{completeness.totalEntities} fully covered
             </StatusPill>
           }
         >
@@ -521,15 +805,15 @@ export default function ValidationPanel() {
             <RingGauge value={completeness.modelScore} />
             <div style={{ minWidth: 0, flex: 1, display: "flex", flexDirection: "column", gap: 4 }}>
               <div style={{ fontSize: 12, fontWeight: 600, color: "var(--text-primary)" }}>
-                Model score {completeness.modelScore}%
+                Coverage score {completeness.modelScore}%
               </div>
               <div style={{ fontSize: 11, color: "var(--text-secondary)", lineHeight: 1.45 }}>
-                {completeness.fullyComplete} of {completeness.totalEntities} entities are fully complete
+                {completeness.fullyComplete} of {completeness.totalEntities} entities have full documentation and contract coverage
                 {completeness.needsAttention.length > 0 && (
                   <>
                     {" · "}
-                    <span style={{ color: "#ef4444" }}>
-                      {completeness.needsAttention.length} need attention
+                    <span style={{ color: "var(--accent)" }}>
+                      {completeness.needsAttention.length} still need coverage work
                     </span>
                   </>
                 )}
@@ -549,80 +833,36 @@ export default function ValidationPanel() {
       {/* Errors */}
       {errors.length > 0 && (
         <PanelSection
-          title="Errors"
+          title="Blocking issues"
           count={errors.length}
           icon={<AlertCircle size={11} style={{ color: "var(--cat-users)" }} />}
-          description="Blocking issues that will fail the semantic gate."
+          description="These are the findings that can fail validation or semantic gate checks. Fix these first."
         >
-          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-            {errors.map((iss, idx) => (
-              <IssueRow key={`err-${idx}`} issue={iss} />
-            ))}
-          </div>
+          <IssueGroups issues={errors} prefix="err" toneOverride="error" />
         </PanelSection>
       )}
 
-      {/* Structural / semantic warnings (non-nudge) */}
-      {warnings.length > 0 && (
+      {/* Structural / semantic warnings and dimensional issues */}
+      {modelQualityIssues.length > 0 && (
         <PanelSection
-          title="Warnings"
-          count={warnings.length}
-          icon={<AlertTriangle size={11} style={{ color: "var(--cat-billing)" }} />}
-          description="Structural concerns that should be resolved before release."
+          title="Model quality issues"
+          count={modelQualityIssues.length}
+          icon={<Layers size={11} style={{ color: "var(--cat-billing)" }} />}
+          description="These issues usually do not hard-fail immediately, but they weaken model design, semantics, and downstream usability."
         >
-          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-            {warnings.map((iss, idx) => (
-              <IssueRow key={`warn-${idx}`} issue={iss} />
-            ))}
-          </div>
+          <IssueGroups issues={modelQualityIssues} prefix="quality" toneOverride="warning" />
         </PanelSection>
       )}
 
-      {/* Dimensional modeling nudges */}
-      {dimensionalIssues.length > 0 && (
+      {/* Coverage issues */}
+      {coverageIssues.length > 0 && (
         <PanelSection
-          title="Dimensional Modeling"
-          count={dimensionalIssues.length}
-          icon={<Layers size={11} style={{ color: "var(--cat-product)" }} />}
-          description="Fact / dimension hygiene — surrogate keys, grain clarity, metric coverage."
-        >
-          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-            {dimensionalIssues.map((iss, idx) => (
-              <IssueRow key={`dim-${idx}`} issue={iss} />
-            ))}
-          </div>
-        </PanelSection>
-      )}
-
-      {/* Gaps / completeness nudges */}
-      {gaps.length > 0 && (
-        <PanelSection
-          title="Gaps"
-          count={gaps.length}
-          icon={<Gauge size={11} style={{ color: "var(--cat-system)" }} />}
-          description="Recommended improvements that raise the completeness score."
-        >
-          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-            {gaps.map((iss, idx) => (
-              <IssueRow key={`gap-${idx}`} issue={iss} />
-            ))}
-          </div>
-        </PanelSection>
-      )}
-
-      {/* dbt metadata findings (separate from DataLex completeness) */}
-      {dbtFindings.length > 0 && (
-        <PanelSection
-          title="dbt Metadata"
-          count={dbtFindings.length}
+          title="Coverage missing"
+          count={coverageIssues.length}
           icon={<Info size={11} style={{ color: "var(--cat-product)" }} />}
-          description="Missing descriptions, types, and test coverage — dbt contracts will fail without these."
+          description="These findings show what is still missing in metadata, descriptions, tests, and contract coverage. They are guidance unless they also appear as blockers above."
         >
-          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-            {dbtFindings.map((iss, idx) => (
-              <IssueRow key={`dbt-${idx}`} issue={iss} />
-            ))}
-          </div>
+          <IssueGroups issues={coverageIssues} prefix="coverage" toneOverride="info" />
         </PanelSection>
       )}
 

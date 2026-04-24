@@ -108,6 +108,7 @@ export default function TableView({
       return;
     }
     updateContent(next);
+    useWorkspaceStore.getState().flushAutosave?.().catch(() => {});
     addToast({
       type: "success",
       message: area.trim()

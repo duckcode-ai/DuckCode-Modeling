@@ -55,6 +55,29 @@ export async function fetchConnections() {
   return data.connections || [];
 }
 
+export async function fetchConnectionSchemas({ connector, connectionId }) {
+  return request("/connectors/schemas", {
+    method: "POST",
+    body: JSON.stringify({
+      connector,
+      connection_id: connectionId,
+    }),
+  });
+}
+
+export async function fetchConnectionTables({ connector, connectionId, schemaName }) {
+  const payload = {
+    connector,
+    connection_id: connectionId,
+  };
+  if (connector === "bigquery") payload.dataset = schemaName;
+  else payload.db_schema = schemaName;
+  return request("/connectors/tables", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
 export async function addProject(name, path, createIfMissing = false, options = {}) {
   const { scaffoldRepo = false, initializeGit = false, createSubfolder = false } = options || {};
   const data = await request("/projects", {
