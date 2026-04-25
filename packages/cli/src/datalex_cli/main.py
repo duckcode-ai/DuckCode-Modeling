@@ -1464,6 +1464,31 @@ def cmd_serve(args: argparse.Namespace) -> int:
         )
         return 1
 
+    # Source checkout convenience: the wheel bundles api-server dependencies,
+    # but a fresh clone needs packages/api-server/node_modules before Node can
+    # import express/js-yaml/glob. Install them once, matching the web auto-build
+    # behavior above.
+    if repo_root is not None:
+        api_src = repo_root / "packages" / "api-server"
+        try:
+            if Path(server_js).resolve() == (api_src / "index.js").resolve() and not (api_src / "node_modules").exists():
+                npm = shutil.which("npm")
+                if not npm:
+                    print(
+                        "ERROR: api-server dependencies are missing and `npm` was not found on PATH.\n"
+                        "Install Node 20+ with npm, then re-run `datalex serve`, or run "
+                        "`npm --prefix packages/api-server install` from the repo.",
+                        file=sys.stderr,
+                    )
+                    return 1
+                print("[datalex] API server dependencies not found — installing once with `npm install`...")
+                subprocess.run([npm, "install", "--silent"], cwd=str(api_src), check=True)
+                print("[datalex]   api-server dependencies installed.")
+        except subprocess.CalledProcessError as err:
+            print(f"ERROR: failed to install api-server dependencies: {err}", file=sys.stderr)
+            print("Run `npm --prefix packages/api-server install` manually and retry.", file=sys.stderr)
+            return 1
+
     port = int(getattr(args, "port", 3030) or 3030)
     env = os.environ.copy()
     env["PORT"] = str(port)

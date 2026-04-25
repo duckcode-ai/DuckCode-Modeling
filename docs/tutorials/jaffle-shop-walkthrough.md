@@ -1,20 +1,25 @@
 # Jaffle-shop end-to-end walkthrough
 
-The fastest way to see every DataLex feature with a real, canonical
-dbt project: clone `dbt-labs/jaffle-shop` from GitHub and drive the
-full round-trip — import → diagram → edit → autosave → git.
+The fastest way to see every DataLex feature is the dedicated
+`duckcode-ai/jaffle-shop-DataLex` repository. It keeps the familiar
+jaffle-shop domain, but adds the pieces needed to exercise DataLex end
+to end: DuckDB seeds, dbt staging and marts, semantic models,
+conceptual/logical/physical diagrams, generated SQL/YAML, Interface
+metadata, and project-local modeling skills.
 
 You'll end with:
 
-- A browser tab showing the full jaffle-shop model (staging + marts)
-  as both a file tree and an ER diagram
-- Inline lint warnings for every column missing `description`,
-  `data_type`, or primary-key tests
+- A browser tab showing dbt files, DataLex diagrams, generated SQL, and
+  project skills in one tree
+- Conceptual, logical, and physical diagrams that demonstrate the three
+  modeling layers
+- Interface readiness checks on shared dbt models such as
+  `dim_customers` and `fct_orders`
 - A real `.git` history of your edits — DataLex writes back into the
   cloned repo, so `git log` / `git diff` show normal dbt changes
 
-**Time:** 5 minutes. **Prerequisites:** Python 3.9+, Git, and network
-access to `github.com`.
+**Time:** 5 minutes. **Prerequisites:** Python 3.11 or 3.12 for dbt,
+Git, and network access to `github.com`.
 
 ---
 
@@ -24,6 +29,10 @@ access to `github.com`.
 pip install 'datalex-cli[serve]'     # CLI + bundled Node, one command
 datalex serve                        # opens http://localhost:3030
 ```
+
+On Python 3.13+ or 3.14+, install Node 20+ first. The `[serve]` extra
+bundles Node for Python 3.9-3.12, but the portable Node wheel is not
+published for newer Python versions yet.
 
 The first `datalex serve` call prints something like:
 
@@ -37,90 +46,70 @@ The first `datalex serve` call prints something like:
 A browser tab opens on `http://localhost:3030`. If it doesn't, open
 that URL manually or re-run with `--no-browser` and copy the link.
 
-## Step 2 — Import jaffle-shop from GitHub
+## Step 2 — Clone and build the DataLex jaffle-shop repo
 
-Two equivalent paths — pick whichever fits your workflow.
-
-### Option A — Let DataLex do the clone for you
-
-1. In the top bar, click **Import dbt repo** (the folder-with-arrow
-   icon). The **Import dbt repository** dialog opens on the **Git URL**
-   tab by default.
-2. Paste `https://github.com/dbt-labs/jaffle-shop` into the **Git URL**
-   field. Leave the branch as `main`. Keep **Skip live warehouse
-   introspection** checked (we don't have warehouse creds yet).
-3. Click **Import**. DataLex shells out to `git clone` on the API
-   server, runs `datalex dbt import` against the checkout, and shows
-   the **Import Results** panel.
-4. Skim the report: how many models imported, the manifest-only banner
-   (no warehouse creds was fine), any columns with `type: unknown`,
-   and any unresolved relationships. Click **Open project**.
-
-This path is read-only by design — the import tree lives in memory so
-you can explore without mutating anything on disk. Save All is
-disabled. If you want edits to persist, use Option B.
-
-### Option B — Clone yourself, then open as a project
+Use the example repo as the project root. It is designed for DataLex,
+so you do not need to start from the generic starter repo.
 
 ```bash
-git clone https://github.com/dbt-labs/jaffle-shop ~/src/jaffle-shop
+git clone https://github.com/duckcode-ai/jaffle-shop-DataLex ~/src/jaffle-shop-DataLex
+cd ~/src/jaffle-shop-DataLex
+python3.12 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+dbt seed --profiles-dir .
+dbt build --profiles-dir .
 ```
 
-1. Back in the UI, open **Import dbt repo** → **Local folder** tab.
-2. Paste the absolute path, e.g. `/Users/you/src/jaffle-shop`.
-3. Leave **Edit in place** checked (the default). This registers the
-   folder as a DataLex project: Save All writes edits back into each
-   model's original `.yml`, and `git diff` in the clone shows normal
-   dbt changes.
-4. Click **Import**, review the Results panel, then **Open project**.
+This creates `jaffle_shop.duckdb` locally. The database file is ignored
+by git.
 
-Whichever path you pick, the Explorer (left panel) populates with the
-full jaffle-shop tree:
+Use Python 3.11 or 3.12 for this dbt example. Python 3.14 currently
+breaks in dbt's serializer stack; use Docker if you do not want to
+manage Python versions locally.
+
+Now start DataLex against the clone:
+
+```bash
+datalex serve --project-dir ~/src/jaffle-shop-DataLex
+```
+
+The Explorer should show this project shape:
 
 ```
+DataLex/
+  commerce/
+    Conceptual/commerce_concepts.diagram.yaml
+    Logical/commerce_logical.diagram.yaml
+    Physical/duckdb/commerce_physical.diagram.yaml
+    Generated/dbt/customer_order_summary.sql
 models/
   staging/
-    stg_customers.yml
-    stg_orders.yml
-    stg_order_items.yml
-    stg_products.yml
-    stg_supplies.yml
-    stg_locations.yml
+    jaffle_shop/
   marts/
-    customers.yml
-    orders.yml
-    order_items.yml
-    products.yml
-    locations.yml
+    core/
+  semantic/
 ```
 
-## Step 3 — Build your first diagram
+## Step 3 — Review the three DataLex layers
 
-The Explorer tree is your source of truth; diagrams are how you pick
-which models to visualize together.
+The example repo already includes diagrams that demonstrate the three
+DataLex layers.
 
-1. In the Explorer toolbar, click **New Diagram** (the Layers icon).
-   A new file `datalex/diagrams/untitled.diagram.yaml` is created and
-   opens on the canvas (empty). You can also right-click any folder
-   in the Explorer → **New diagram here…** to seed the file next to
-   the models.
-2. On the canvas toolbar, click **Add Entities**. The picker lists
-   every entity resolved from the project, with a search box and a
-   domain filter. Tick `stg_customers` and `stg_orders`, then
-   **Add**. Both entities land on the canvas and auto-lay-out via
-   ELK; the dashed FK edge between `stg_orders.customer_id` and
-   `stg_customers.customer_id` renders automatically — inferred from
-   the dbt `tests: - relationships:` on that column.
-3. (Alternative) Drag `models/staging/stg_customers.yml` from the
-   Explorer onto the canvas. Each model still renders as an entity —
-   the picker and drag-drop are interchangeable.
-4. Reposition nodes by dragging. The positions land in the diagram
-   YAML's `entities[].x/y` — not in the model files — so you can have
-   a second diagram with different coordinates for the same models.
+1. Open `DataLex/commerce/Conceptual/commerce_concepts.diagram.yaml`.
+   It uses business concepts and verbs: Customer places Order, Order
+   contains Order Item, Product describes Order Item, and Supply
+   supports Product.
+2. Open `DataLex/commerce/Logical/commerce_logical.diagram.yaml`. It
+   adds attributes, keys, candidate keys, business keys, and the Order
+   Line associative entity.
+3. Open `DataLex/commerce/Physical/duckdb/commerce_physical.diagram.yaml`.
+   It references dbt YAML files under `models/`, shows physical columns,
+   and maps relationships to dbt/database intent.
 
 ## Step 4 — Open a model in the inspector
 
-Click `models/staging/stg_customers.yml` in the Explorer.
+Click `models/marts/core/dim_customers.yml` in the Explorer.
 
 - **Centre canvas** renders the entity as an ER node with columns
   listed inline. Other entities it references (via FKs) are positioned
@@ -137,22 +126,26 @@ something, blur. The YAML updates in-memory and **autosave** flushes
 the change to disk ~800ms later — you'll see the **Diff** panel at
 the bottom transition from pending to clean.
 
-## Step 5 — Rename an entity and watch the cascade
+## Step 5 — Check Interface readiness
 
-1. In the Explorer, right-click `stg_customers.yml` → **Rename
-   entity…**
-2. Change the entity name from `stg_customers` to `stg_customer`.
-3. Preview the rename. DataLex scans the whole project and lists
-   every file that will be rewritten — `stg_orders.yml`,
-   `customers.yml`, the diagram, and so on — each FK and relationship
-   ref updated atomically.
-4. Click **Rename**. The server snapshots every target file, applies
-   the rewrites in a single transaction, and only then moves the file.
-   If any write fails, the whole thing rolls back.
+Open `models/marts/core/dim_customers.yml` and
+`models/marts/core/fct_orders.yml`. Both are marked as shared DataLex
+Interfaces under `meta.datalex.interface`.
 
-On Option B (edit-in-place), run `git diff` in the jaffle-shop clone —
-you'll see the refactor as a coherent commit-sized change across
-multiple files.
+From a DataLex source checkout, run:
+
+```bash
+cd /Users/Kranthi_1/DataLex
+.venv/bin/python ./datalex datalex mesh check /Users/Kranthi_1/DuckCode-DQL/jaffle-shop-DataLex --strict
+```
+
+Expected result:
+
+```text
+DataLex mesh Interface check: /Users/Kranthi_1/DuckCode-DQL/jaffle-shop-DataLex
+  strict: yes
+  interfaces: ready
+```
 
 ## Step 6 — Turn on auto-commit (optional)
 
@@ -167,7 +160,20 @@ Failure mode: if the commit fails (e.g. missing `user.email`), the
 save itself still succeeds — the auto-commit error surfaces as a
 toast so you can fix the config and retry manually.
 
-## Step 7 — Apply DDL to a warehouse (optional)
+## Step 7 — Review generated dbt assets
+
+Open `DataLex/commerce/Generated/dbt/customer_order_summary.sql` and
+`DataLex/commerce/Generated/dbt/customer_order_summary.yml`. These show
+how DataLex-generated dbt work can stay staged and reviewable before it
+is promoted into `models/marts/core/`.
+
+After promoting generated dbt assets, run:
+
+```bash
+dbt build --profiles-dir .
+```
+
+## Step 8 — Apply DDL to a warehouse (optional)
 
 1. In an open `.model.yaml`, press `⌘K` → **Apply to warehouse…**
 2. Pick a dialect (DuckDB for a throwaway local run, Snowflake / BQ /
@@ -183,7 +189,7 @@ The endpoint is gated by `DM_ENABLE_DIRECT_APPLY` on the server. When
 disabled (the GitOps default), the dialog instead instructs you to
 commit the generated SQL and deploy via CI/CD.
 
-## Step 8 — Export a PNG of the diagram
+## Step 9 — Export a PNG of the diagram
 
 With any diagram open, press `⌘⇧E`. A PNG of the current canvas
 downloads. That same action lives in the diagram toolbar overflow
@@ -200,8 +206,9 @@ menu for discoverability.
 
 | Symptom                                     | Fix                                                                |
 |---------------------------------------------|--------------------------------------------------------------------|
-| Git-URL import fails with a network error   | Check that the API server has GitHub access (firewalls, proxies). Re-try with Option B: clone locally, then use the **Local folder** tab. |
-| Import Results banner says "manifest-only"  | Expected — jaffle-shop doesn't ship a `profiles.yml` wired to your machine. Column `data_type`s show `unknown` until you add warehouse creds. |
+| Clone fails with a network error            | Check GitHub access, firewalls, proxies, or clone the repo through your normal Git credentials. |
+| `dbt build` cannot find a profile           | Run dbt commands from the repo root and include `--profiles-dir .`; the example ships a DuckDB `profiles.yml`. |
 | Rename cascade complains about a file       | The atomic endpoint rolls the whole rename back on any write failure. Fix the reported file (permissions, locks) and retry. |
 | Diff panel keeps showing changes after save | Stale editor state — hit `⌘R`. The in-flight Zustand store and the on-disk bytes should match. |
 | Auto-commit produces no commit              | Check `git config user.email` inside the cloned repo. The Chrome status bar shows the last auto-commit error as a toast. |
+| `ERR_MODULE_NOT_FOUND ... providerMeta.js` during `datalex serve` | Upgrade to `datalex-cli` 1.3.4 or newer. The older wheel is missing API server runtime files. |

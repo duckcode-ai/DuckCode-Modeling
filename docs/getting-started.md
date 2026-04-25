@@ -2,7 +2,8 @@
 
 Pick the path that matches what you have in hand. Every path finishes
 with a reviewable YAML tree on disk and a live ER diagram in the
-browser. No Docker, no second terminal, no config files to hand-edit.
+browser. The normal path needs no Docker, no second terminal, and no
+config files to hand-edit; Docker is available as an isolated fallback.
 
 ## 60-second install
 
@@ -11,9 +12,11 @@ pip install 'datalex-cli[serve]'     # CLI + bundled Node runtime
 datalex serve                        # opens http://localhost:3030
 ```
 
-That's it. `[serve]` pulls a portable Node so you don't need to install
-Node separately. If you already have Node 20+ on your PATH, plain
-`pip install datalex-cli` works too.
+That's it for most machines. On Python 3.9-3.12, `[serve]` pulls a
+portable Node runtime so you do not need to install Node separately. On
+Python 3.13+ or 3.14+, install Node 20+ first because the portable Node
+wheel is not published for those Python versions yet. If you already
+have Node 20+ on your PATH, plain `pip install datalex-cli` works too.
 
 Want your own warehouse drivers? Add a connector extra:
 
@@ -27,6 +30,41 @@ Verify the installed package before opening a real repo:
 ```bash
 datalex --version
 ```
+
+If startup fails with
+`ERR_MODULE_NOT_FOUND ... datalex_core/_server/ai/providerMeta.js`,
+upgrade to `datalex-cli` 1.3.4 or newer. That error means the installed
+wheel is missing API server runtime files, not that your dbt repo is
+wrong.
+
+---
+
+## Docker fallback
+
+Docker is optional. Use it when you want a fully isolated install path
+or your local Python/Node versions are getting in the way.
+
+```bash
+git clone https://github.com/duckcode-ai/DataLex.git
+cd DataLex
+docker build -t datalex:local .
+docker run --rm -p 3030:3001 datalex:local
+```
+
+Open `http://localhost:3030`.
+
+For an existing dbt repo:
+
+```bash
+cd ~/path/to/your-dbt-project
+docker run --rm -p 3030:3001 \
+  -v "$PWD":/workspace \
+  -e REPO_ROOT=/workspace \
+  -e DM_CLI=/app/datalex \
+  datalex:local
+```
+
+In the UI, use `/workspace` as the dbt repository path.
 
 ---
 
@@ -42,27 +80,39 @@ datalex --version
 
 ---
 
-## Scenario 1 — Clone jaffle-shop
+## Scenario 1 — Clone jaffle-shop DataLex
 
-The fastest way to see if DataLex fits how you think. Uses the real
-`dbt-labs/jaffle-shop` repo — no bundled demo, no surprises when you
-switch to your own project later.
+The fastest way to see the full DataLex workflow is the dedicated
+`duckcode-ai/jaffle-shop-DataLex` repo. It extends jaffle-shop with
+DuckDB seeds, dbt staging and marts, semantic models, DataLex
+conceptual/logical/physical diagrams, generated SQL, Interface metadata,
+and project-local modeling skills.
 
 ```bash
 pip install 'datalex-cli[serve]'
-git clone https://github.com/dbt-labs/jaffle-shop ~/src/jaffle-shop
-datalex serve
+git clone https://github.com/duckcode-ai/jaffle-shop-DataLex ~/src/jaffle-shop-DataLex
+cd ~/src/jaffle-shop-DataLex
+python3.12 -m venv .venv && source .venv/bin/activate
+pip install -r requirements.txt
+dbt seed --profiles-dir .
+dbt build --profiles-dir .
+datalex serve --project-dir .
 ```
 
-In the UI: **Import dbt repo → Git URL tab** → paste
-`https://github.com/dbt-labs/jaffle-shop` → **Import**. The API
-server clones on your behalf, runs the importer, and shows the
-**Import Results** panel. Click **Open project**.
+Use Python 3.11 or 3.12 for this dbt example. Python 3.14 currently
+breaks in dbt's serializer stack; use the Docker fallback if you do not
+want to manage Python versions locally.
 
-Prefer Save-All-writes-to-disk? Use the **Local folder** tab instead,
-point it at the clone you just made (`~/src/jaffle-shop`), keep
-**Edit in place** checked. Every UI edit then lands in the clone and
-`git diff` shows normal dbt changes.
+Open the project in the UI and start with these files:
+
+- `DataLex/commerce/Conceptual/commerce_concepts.diagram.yaml`
+- `DataLex/commerce/Logical/commerce_logical.diagram.yaml`
+- `DataLex/commerce/Physical/duckdb/commerce_physical.diagram.yaml`
+- `models/marts/core/dim_customers.yml`
+- `models/marts/core/fct_orders.yml`
+
+Every UI edit lands in the clone, so `git diff` shows normal dbt and
+DataLex YAML changes.
 
 📖 **Full walkthrough:** [tutorials/jaffle-shop-walkthrough.md](tutorials/jaffle-shop-walkthrough.md)
 

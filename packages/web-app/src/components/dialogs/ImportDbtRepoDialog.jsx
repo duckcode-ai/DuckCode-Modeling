@@ -11,8 +11,9 @@
  * at each file's source path. Without "Edit in place" (or for git imports),
  * the tree lives in memory only.
  *
- * To try DataLex with a canonical dbt project, paste the public jaffle-shop
- * repo URL into the Git URL tab: https://github.com/dbt-labs/jaffle-shop
+ * To try DataLex with the full example project, paste the public
+ * jaffle-shop DataLex repo URL into the Git URL tab:
+ * https://github.com/duckcode-ai/jaffle-shop-DataLex
  */
 import React, { useState } from "react";
 import { GitBranch, FolderOpen, AlertCircle, Loader2 } from "lucide-react";
@@ -330,8 +331,8 @@ export default function ImportDbtRepoDialog() {
                 autoFocus
               />
               <p className="dlx-modal-hint">
-                Public HTTPS URL. To try it with a canonical dbt project, paste{" "}
-                <code>https://github.com/dbt-labs/jaffle-shop</code>. For private repos,
+                Public HTTPS URL. To try it with the DataLex-ready jaffle-shop project, paste{" "}
+                <code>https://github.com/duckcode-ai/jaffle-shop-DataLex</code>. For private repos,
                 clone locally and use the <strong>Local folder</strong> tab.
               </p>
             </div>

@@ -32,12 +32,13 @@ COPY --from=api-deps /app/packages/api-server/node_modules ./packages/api-server
 COPY --from=web-build /app/packages/web-app/dist ./packages/web-app/dist
 COPY model-examples/ ./model-examples/
 COPY schemas/ ./schemas/
-COPY dm ./datalex
+COPY datalex ./datalex
 RUN chmod +x ./datalex
 
 ENV PORT=3001
 ENV REPO_ROOT=/app
 ENV WEB_DIST=/app/packages/web-app/dist
+ENV DM_CLI=/app/datalex
 ENV PATH="/app/.venv/bin:${PATH}"
 
 EXPOSE 3001

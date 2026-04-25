@@ -53,13 +53,11 @@ jobs:
           rm -rf "$dest_core/_webapp" "$dest_core/_server"
           mkdir -p "$dest_core/_webapp" "$dest_core/_server"
           cp -R packages/web-app/dist/. "$dest_core/_webapp/"
-          # Only ship the api-server entry point + its package.json; npm
-          # deps are installed at wheel-build time in the next step so
-          # node_modules is self-contained inside the wheel.
-          cp packages/api-server/index.js \
-             packages/api-server/package.json \
-             packages/api-server/package-lock.json \
-             "$dest_core/_server/"
+          # Ship the full runtime api-server tree. index.js imports sibling
+          # modules such as ai/providerMeta.js, so copying only index.js makes
+          # the installed wheel fail at ModuleJob.link with ERR_MODULE_NOT_FOUND.
+          cp -R packages/api-server/. "$dest_core/_server/"
+          rm -rf "$dest_core/_server/test" "$dest_core/_server/node_modules"
           (cd "$dest_core/_server" && npm ci --omit=dev && rm -f package-lock.json)
 
       - name: Install build tooling
@@ -95,6 +93,15 @@ jobs:
           webapp = [n for n in names if n.startswith("datalex_core/_webapp/")]
           if not any(n.endswith("_server/index.js") for n in server):
               print(f"FAIL: _server/index.js missing from wheel ({len(server)} entries)", file=sys.stderr)
+              sys.exit(1)
+          required_server_files = [
+              "datalex_core/_server/ai/providerMeta.js",
+              "datalex_core/_server/ai/providers.js",
+              "datalex_core/_server/ai/agentStore.js",
+          ]
+          missing = [n for n in required_server_files if n not in names]
+          if missing:
+              print(f"FAIL: bundled api-server missing runtime modules: {missing}", file=sys.stderr)
               sys.exit(1)
           if not any(n.endswith("_webapp/index.html") for n in webapp):
               print(f"FAIL: _webapp/index.html missing from wheel ({len(webapp)} entries)", file=sys.stderr)

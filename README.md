@@ -37,9 +37,12 @@ pip install -U 'datalex-cli[serve]'    # CLI + bundled Node — one command, no 
 datalex serve                          # opens http://localhost:3030
 ```
 
-That's it. No Node install, no Docker, no database. `[serve]` pulls a
-portable Node runtime so Python alone is enough. If you already have
-Node 20+ on PATH, plain `pip install datalex-cli` works too.
+That's it for most machines. No Docker, no database, and only one
+terminal. On Python 3.9-3.12, `[serve]` also pulls a portable Node
+runtime. On Python 3.13+ or 3.14+, install Node 20+ first because the
+portable Node wheel is not published for those Python versions yet. If
+you already have Node 20+ on PATH, plain `pip install datalex-cli`
+works too.
 
 **Point it at your dbt repo:**
 
@@ -179,7 +182,17 @@ per-dialect over time).
 
 ## Install
 
-**For users** — from [PyPI](https://pypi.org/project/datalex-cli/):
+Use the path that matches what you are trying to do:
+
+| Goal | Recommended path |
+|---|---|
+| Try DataLex or use it with your dbt repo | [PyPI install](#pypi-install-recommended) |
+| Develop DataLex itself from this repo | [Source checkout](#source-checkout-for-contributors) |
+| Avoid local Python/Node setup differences | [Docker fallback](#docker-fallback-optional) |
+
+### PyPI Install (Recommended)
+
+From [PyPI](https://pypi.org/project/datalex-cli/):
 
 ```bash
 pip install -U 'datalex-cli[serve]'                 # CLI + UI (recommended)
@@ -191,7 +204,9 @@ pip install -U datalex-cli                          # CLI-only, no UI
 Available extras: `serve`, `duckdb`, `postgres`, `mysql`, `snowflake`,
 `bigquery`, `databricks`, `sqlserver`, `redshift`, `all`.
 
-**Prereqs:** Python 3.9+ and Git. That's it — `[serve]` bundles Node.
+**Prereqs:** Python 3.9+ and Git. Node 20+ is optional on Python
+3.9-3.12 because `[serve]` bundles it. Node 20+ is required on Python
+3.13+ until `nodejs-bin` publishes wheels for those versions.
 
 Verify the installed package:
 
@@ -210,14 +225,75 @@ For the local DuckDB-based example repo, install the matching driver too:
 pip install -U 'datalex-cli[serve,duckdb]'
 ```
 
-**For contributors** — from source:
+### Source Checkout For Contributors
 
 ```bash
 git clone https://github.com/duckcode-ai/DataLex.git
 cd DataLex
 python3 -m venv .venv && source .venv/bin/activate
 pip install -e '.[serve,duckdb]'
+npm --prefix packages/api-server install
+npm --prefix packages/web-app install
 datalex serve                                    # auto-builds the UI on first run
+```
+
+Source checkouts need Node 20+ with `npm`. If you skip the npm install
+commands, `datalex serve` will try to install missing API/web
+dependencies on first run.
+
+### Docker Fallback (Optional)
+
+Docker is useful when you want to avoid local Python/Node version drift
+or when a company laptop blocks global installs. It is not required for
+normal use.
+
+```bash
+git clone https://github.com/duckcode-ai/DataLex.git
+cd DataLex
+docker build -t datalex:local .
+docker run --rm -p 3030:3001 datalex:local
+```
+
+Open `http://localhost:3030`.
+
+To run DataLex against an existing dbt repo from Docker, mount that repo
+and point `REPO_ROOT` at the mounted path:
+
+```bash
+cd ~/path/to/your-dbt-project
+docker run --rm -p 3030:3001 \
+  -v "$PWD":/workspace \
+  -e REPO_ROOT=/workspace \
+  -e DM_CLI=/app/datalex \
+  datalex:local
+```
+
+In the UI, use `/workspace` as the dbt repository path.
+
+### Install Troubleshooting
+
+If `datalex serve` fails with:
+
+```text
+ERR_MODULE_NOT_FOUND ... datalex_core/_server/ai/providerMeta.js
+```
+
+you are using a wheel that did not include the full API server runtime.
+Upgrade to `datalex-cli` 1.3.4 or newer:
+
+```bash
+pip install -U 'datalex-cli[serve]'
+```
+
+Until that patch is available in your package index, install from the
+current source checkout:
+
+```bash
+git clone https://github.com/duckcode-ai/DataLex.git
+cd DataLex
+python3 -m venv .venv && source .venv/bin/activate
+pip install -e '.[serve,duckdb]'
+datalex serve
 ```
 
 ## Project layout
@@ -273,8 +349,9 @@ dbt parse
 - **[Getting started](docs/getting-started.md)** — the one-page map
   covering install, the three GUI paths, and the mental model.
 - **[Jaffle-shop walkthrough](docs/tutorials/jaffle-shop-walkthrough.md)** —
-  end-to-end demo: clone the real jaffle-shop repo, import it, rename an
-  entity, commit back to git.
+  end-to-end demo: clone the DataLex-ready jaffle-shop repo, build it
+  with DuckDB, review conceptual/logical/physical diagrams, and commit
+  normal dbt/DataLex YAML diffs.
 - **[Import an existing dbt project](docs/tutorials/import-existing-dbt.md)** —
   5-minute bring-your-own-repo flow (local folder or git URL).
 - **[Pull a warehouse schema](docs/tutorials/warehouse-pull.md)** —

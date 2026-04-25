@@ -7,6 +7,33 @@ from `v0.1.0` onward.
 
 ## [Unreleased]
 
+## [1.3.4] - 2026-04-25
+
+Patch release - fixes the PyPI `datalex serve` bundle and clarifies the
+supported install paths for new users.
+
+### Fixed
+
+- **PyPI wheel now ships the full API server runtime.** The release
+  workflow now bundles `packages/api-server/ai/*.js` alongside
+  `index.js`, fixing `ERR_MODULE_NOT_FOUND` for
+  `datalex_core/_server/ai/providerMeta.js` during `datalex serve`.
+- **Docker image build path is corrected.** The Dockerfile now copies
+  the checked-in `datalex` CLI shim and sets `DM_CLI` explicitly.
+- **Source checkout serving bootstraps API dependencies.** A fresh clone
+  can run `datalex serve` without first knowing that
+  `packages/api-server` needs `npm install`.
+
+### Changed
+
+- **Onboarding docs now separate three paths:** PyPI install for normal
+  users, source checkout for contributors, and Docker as an optional
+  fallback for locked-down machines or Python/Node version drift.
+- **Jaffle-shop docs now use the DataLex-ready example repo.** The
+  getting-started guide, walkthrough, import example, and contributor
+  E2E notes point to `duckcode-ai/jaffle-shop-DataLex` instead of the
+  generic starter repo.
+
 ## [1.3.0] — 2026-04-24
 
 Minor release — adds the first production-oriented agentic modeling
@@ -131,8 +158,8 @@ import / jaffle-shop / local-E2E changes from this branch.
 
 ### Changed
 
-- **The canonical "try it" path now uses the real
-  `dbt-labs/jaffle-shop` repo.** The bundled jaffle-shop fixture and the
+- **The canonical "try it" path now uses a real
+  jaffle-shop checkout.** The bundled jaffle-shop fixture and the
   one-click demo affordance are gone; the import dialog now defaults to
   **Git URL**, points users at the public upstream repo, and keeps local
   folder import as the edit-in-place path.
@@ -1126,7 +1153,8 @@ Labs** (company).
   root; a `pip install`ed package run outside the repo needs
   `--schemas-root` or the repo on disk.
 
-[Unreleased]: https://github.com/duckcode-ai/DataLex/compare/v1.3.0...HEAD
+[Unreleased]: https://github.com/duckcode-ai/DataLex/compare/v1.3.4...HEAD
+[1.3.4]: https://github.com/duckcode-ai/DataLex/compare/v1.3.0...v1.3.4
 [1.3.0]: https://github.com/duckcode-ai/DataLex/compare/v1.2.0...v1.3.0
 [1.2.0]: https://github.com/duckcode-ai/DataLex/compare/v1.1.1...v1.2.0
 [1.1.1]: https://github.com/duckcode-ai/DataLex/compare/v1.1.0...v1.1.1

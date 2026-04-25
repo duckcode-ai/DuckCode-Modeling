@@ -57,6 +57,14 @@ Before tagging, verify the artifacts build cleanly:
 ```bash
 python3 -m pip install --upgrade build twine
 rm -rf dist/ build/
+(cd packages/web-app && npm ci && npm run build)
+dest_core="packages/core_engine/src/datalex_core"
+rm -rf "$dest_core/_webapp" "$dest_core/_server"
+mkdir -p "$dest_core/_webapp" "$dest_core/_server"
+cp -R packages/web-app/dist/. "$dest_core/_webapp/"
+cp -R packages/api-server/. "$dest_core/_server/"
+rm -rf "$dest_core/_server/test" "$dest_core/_server/node_modules"
+(cd "$dest_core/_server" && npm ci --omit=dev && rm -f package-lock.json)
 python3 -m build
 python3 -m twine check dist/*
 ```

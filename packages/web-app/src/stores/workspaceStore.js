@@ -886,7 +886,7 @@ const useWorkspaceStore = create((set, get) => ({
 
      Shape of `tree` is Array<{path, content}> as returned by the api route.
      `sourceLabel` is a human-readable label for the Explorer connection chip
-     ("jaffle-shop demo", "github.com/dbt-labs/jaffle-shop", etc). */
+     ("jaffle-shop demo", "github.com/duckcode-ai/jaffle-shop-DataLex", etc). */
   loadDbtImportTree: async (tree, { sourceLabel = "dbt import" } = {}) => {
     if (!Array.isArray(tree) || tree.length === 0) {
       throw new Error("loadDbtImportTree: empty tree — nothing to load.");

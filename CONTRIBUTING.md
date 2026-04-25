@@ -94,7 +94,7 @@ built-in test runner.
 # One-time: install browsers
 npx --prefix packages/web-app playwright install chromium
 
-# Clone + parse the jaffle-shop fixture once (needs dbt-duckdb)
+# Clone + parse the DataLex-ready jaffle-shop fixture once (needs dbt-duckdb)
 cd packages/web-app/test-results/jaffle-shop   # created by global-setup
 pip install dbt-duckdb && dbt deps && dbt parse --profiles-dir .
 
@@ -102,7 +102,7 @@ pip install dbt-duckdb && dbt deps && dbt parse --profiles-dir .
 npm --prefix packages/web-app run test:e2e
 ```
 
-The E2E suite clones `https://github.com/dbt-labs/jaffle-shop` into
+The E2E suite clones `https://github.com/duckcode-ai/jaffle-shop-DataLex` into
 `packages/web-app/test-results/jaffle-shop/` on first run and reuses
 the checkout afterwards. It drives the real user journey: import →
 diagram → (with `E2E_FULL=1`) rename cascade → autosave → auto-commit

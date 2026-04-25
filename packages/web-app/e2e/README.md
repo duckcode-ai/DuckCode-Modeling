@@ -1,17 +1,17 @@
 # DataLex web-app E2E tests (local-dev only)
 
 Playwright end-to-end suite that exercises the real user journey against
-a real cloned dbt project (by default [dbt-labs/jaffle-shop][jaffle]).
+a real cloned dbt project (by default [duckcode-ai/jaffle-shop-DataLex][jaffle]).
 **This suite does not run in CI** — it needs dbt-core installed and a
 parsed `target/manifest.json` on disk, which is too heavy and too flaky
 for every PR. It stays in the tree as a local-dev tool for changes that
 touch the import or canvas flow.
 
-[jaffle]: https://github.com/dbt-labs/jaffle-shop
+[jaffle]: https://github.com/duckcode-ai/jaffle-shop-DataLex
 
 ## What runs
 
-- `global-setup.js` clones jaffle-shop into
+- `global-setup.js` clones jaffle-shop DataLex into
   `packages/web-app/test-results/jaffle-shop/` once per machine, cached
   on subsequent runs.
 - Before you run the spec, **you must parse the dbt project once** so
@@ -54,7 +54,7 @@ the critical-path spec to pass — there's no local fallback by design.
 ## Why this isn't in CI
 
 Running the full suite in CI would require: (1) a live network clone
-of jaffle-shop, (2) a Python dbt-core install, (3) `dbt parse` to emit
+of jaffle-shop DataLex, (2) a Python dbt-core install, (3) `dbt parse` to emit
 `manifest.json`, (4) a Playwright browser install, (5) a real webServer
 boot. That's multiple minutes of setup per PR plus flakiness on any
 link in the chain. The backend contract it guards is already covered by

@@ -10,6 +10,7 @@ but built from *your* models — with every `models/staging/`,
 - Python 3.9+ with pip
 - A dbt project you can read locally (either a folder path or a git URL)
 - `dbt` itself installed if your project hasn't been compiled yet
+- Node 20+ if you are running Python 3.13+ or 3.14+
 
 ---
 
@@ -26,6 +27,18 @@ The GUI defaults to in-memory for safety. After you've reviewed the
 tree, use **Save All** (top-bar button) to write it to a chosen folder.
 
 ## Option A — From a local folder
+
+Install and verify DataLex first:
+
+```bash
+pip install -U 'datalex-cli[serve]'
+datalex --version
+```
+
+If `datalex serve` fails with
+`ERR_MODULE_NOT_FOUND ... datalex_core/_server/ai/providerMeta.js`,
+upgrade to `datalex-cli` 1.3.4 or newer. That is an install bundle
+problem, not a dbt project problem.
 
 ### 1. Start the server pointed at your project
 
@@ -215,7 +228,7 @@ datalex serve
 
 1. Top bar → **Import dbt repo**.
 2. Switch to the **Git URL** tab.
-3. Enter a public URL like `https://github.com/dbt-labs/jaffle-shop.git`
+3. Enter a public URL like `https://github.com/duckcode-ai/jaffle-shop-DataLex.git`
    or a private one.
 4. Optional ref: branch, tag, or commit SHA (default: `main`).
 5. Click **Import**. The api-server clones the repo into
