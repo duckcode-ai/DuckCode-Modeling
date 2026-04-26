@@ -27,7 +27,7 @@ with contracts, lineage, ERDs, and clean round-trip back to dbt.
 </div>
 
 <p align="center">
-  <img src="Assets/Overview.png" alt="DataLex Visual Studio — file tree, YAML editor, and React Flow ERD on the same entity" width="100%" />
+  <img src="Assets/datalex-main-demo.gif" alt="DataLex Visual Studio showing dbt readiness scores, model diagrams, validation findings, and AI-assisted YAML fixes" width="100%" />
 </p>
 
 ## Quickstart — two commands
