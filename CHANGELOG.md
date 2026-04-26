@@ -7,6 +7,19 @@ from `v0.1.0` onward.
 
 ## [Unreleased]
 
+## [1.3.6] - 2026-04-26
+
+Patch release - publishes the simplified replayable onboarding tour to
+PyPI.
+
+### Changed
+
+- **Onboarding now starts lighter and teaches step by step.** The first
+  welcome modal now says "Welcome to DataLex" with a short product goal,
+  while the shared first-run/replay tour walks through the dbt problem,
+  the DataLex solution, import, readiness review, modeling layers,
+  validation, AI proposals, and reviewed YAML changes.
+
 ## [1.3.5] - 2026-04-26
 
 Patch release - adds dbt readiness review and clearer onboarding for
@@ -1178,7 +1191,8 @@ Labs** (company).
   root; a `pip install`ed package run outside the repo needs
   `--schemas-root` or the repo on disk.
 
-[Unreleased]: https://github.com/duckcode-ai/DataLex/compare/v1.3.5...HEAD
+[Unreleased]: https://github.com/duckcode-ai/DataLex/compare/v1.3.6...HEAD
+[1.3.6]: https://github.com/duckcode-ai/DataLex/compare/v1.3.5...v1.3.6
 [1.3.5]: https://github.com/duckcode-ai/DataLex/compare/v1.3.4...v1.3.5
 [1.3.4]: https://github.com/duckcode-ai/DataLex/compare/v1.3.0...v1.3.4
 [1.3.0]: https://github.com/duckcode-ai/DataLex/compare/v1.2.0...v1.3.0
