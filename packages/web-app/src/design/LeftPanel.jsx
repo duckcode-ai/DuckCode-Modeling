@@ -102,6 +102,43 @@ function ArtifactIcon({ I, meta }) {
   return <I.Table />;
 }
 
+function reviewBadgeMeta(review) {
+  const status = String(review?.status || "").toLowerCase();
+  if (status === "red") return { color: "#ef4444", label: `${review.score ?? 0} readiness score - red` };
+  if (status === "yellow") return { color: "#f59e0b", label: `${review.score ?? 0} readiness score - yellow` };
+  if (status === "green") return { color: "#10b981", label: `${review.score ?? 100} readiness score - green` };
+  return null;
+}
+
+function ReadinessBadge({ review }) {
+  const meta = reviewBadgeMeta(review);
+  if (!meta) return null;
+  const total = Number(review?.counts?.total || 0);
+  return (
+    <span
+      title={`${meta.label}${total ? ` · ${total} finding${total === 1 ? "" : "s"}` : ""}`}
+      style={{
+        display: "inline-flex",
+        alignItems: "center",
+        justifyContent: "center",
+        gap: 4,
+        minWidth: 28,
+        height: 16,
+        borderRadius: 4,
+        border: "1px solid var(--border-default)",
+        background: "var(--bg-2)",
+        color: "var(--text-secondary)",
+        fontSize: 9,
+        fontFamily: "var(--font-mono)",
+        flexShrink: 0,
+      }}
+    >
+      <span style={{ width: 6, height: 6, borderRadius: "50%", background: meta.color }} />
+      {review.score ?? ""}
+    </span>
+  );
+}
+
 const SKILL_TEMPLATES = [
   {
     id: "conceptual",
@@ -357,6 +394,9 @@ export default function LeftPanel({ activeTable, onSelectTable, tables, theme, s
   const renameFolderAction = useWorkspaceStore((s) => s.renameFolder);
   const deleteFileAction = useWorkspaceStore((s) => s.deleteFile);
   const deleteFolderAction = useWorkspaceStore((s) => s.deleteFolder);
+  const dbtReadinessReview = useWorkspaceStore((s) => s.dbtReadinessReview);
+  const dbtReadinessLoading = useWorkspaceStore((s) => s.dbtReadinessLoading);
+  const runReadinessReview = useWorkspaceStore((s) => s.runDbtReadinessReview);
   const addToast = useUiStore((s) => s.addToast);
   const openModal = useUiStore((s) => s.openModal);
   const openAiPanel = useUiStore((s) => s.openAiPanel);
@@ -369,6 +409,13 @@ export default function LeftPanel({ activeTable, onSelectTable, tables, theme, s
     () => filterTreeNodes(fileTree, explorerQuery),
     [fileTree, explorerQuery]
   );
+  const readinessByPath = React.useMemo(() => {
+    const by = {};
+    for (const file of dbtReadinessReview?.files || []) {
+      if (file?.path) by[file.path] = file;
+    }
+    return by;
+  }, [dbtReadinessReview]);
   const skillFiles = React.useMemo(() => (
     (projectFiles || [])
       .filter((file) => {
@@ -475,6 +522,14 @@ export default function LeftPanel({ activeTable, onSelectTable, tables, theme, s
         await createFolderAction(fullRel);
       } else if (actionId === "new-diagram") {
         openModal("newFile", { artifact: "diagram", targetFolder: menu.target === "folder" ? menu.path : "" });
+      } else if (actionId === "dbt-readiness") {
+        const scope = menu.target === "file" ? "file" : "all";
+        const paths = menu.target === "file" && menu.path ? [menu.path] : [];
+        const review = await runReadinessReview({ scope, paths });
+        addToast?.({
+          type: "success",
+          message: `Readiness review complete: ${review.summary.red} red, ${review.summary.yellow} yellow, ${review.summary.green} green.`,
+        });
       } else if (actionId === "rename") {
         const current = menu.path || "";
         const next = window.prompt("Rename to (full path from model root):", current);
@@ -548,6 +603,7 @@ export default function LeftPanel({ activeTable, onSelectTable, tables, theme, s
     addToast,
     openModal,
     openAiPanel,
+    runReadinessReview,
   ]);
 
   const moveExplorerItem = React.useCallback(async (item, targetPath) => {
@@ -752,6 +808,15 @@ export default function LeftPanel({ activeTable, onSelectTable, tables, theme, s
                   >
                     <I.Layers />
                   </button>
+                  <button
+                    className="icon-btn"
+                    title="Rerun dbt readiness review"
+                    onClick={() => handleCtxAction("dbt-readiness", { target: "root", path: "" })}
+                    disabled={dbtReadinessLoading}
+                    style={{ padding: 2 }}
+                  >
+                    <I.Check />
+                  </button>
                 </>
               )}
               <div style={{ fontSize: 10, color: "var(--text-tertiary)", fontFamily: "var(--font-mono)" }}>{(projectFiles || []).length}</div>
@@ -779,6 +844,7 @@ export default function LeftPanel({ activeTable, onSelectTable, tables, theme, s
               onDropOnFolder={explorerReady ? handleDropOnFolder : null}
               onMoveItem={explorerReady ? (target, path) => setMoveState({ target, path }) : null}
               dragStateRef={dragStateRef}
+              readinessByPath={readinessByPath}
             />
           )}
 
@@ -942,6 +1008,7 @@ function TreeRender({
   onDropOnFolder = null,
   onMoveItem = null,
   dragStateRef = null,
+  readinessByPath = {},
 }) {
   if (!nodes || nodes.length === 0) return null;
   // `dragOver` toggles a visual highlight on folder rows while a file is
@@ -1062,6 +1129,7 @@ function TreeRender({
                   onDropOnFolder={onDropOnFolder}
                   onMoveItem={onMoveItem}
                   dragStateRef={dragStateRef}
+                  readinessByPath={readinessByPath}
                 />
               )}
             </div>
@@ -1072,6 +1140,7 @@ function TreeRender({
         const fullPath = fd.fullPath || fd.path || n.path;
         const isActive = activeFullPath && fullPath === activeFullPath;
         const meta = artifactMeta(n.path, n.name, "file");
+        const readiness = readinessByPath[n.path] || readinessByPath[fullPath];
         return (
           <div
             key={`l:${n.path}`}
@@ -1124,6 +1193,7 @@ function TreeRender({
           >
             <span className="tree-artifact-icon"><ArtifactIcon I={I} meta={meta} /></span>
             <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{n.name}</span>
+            <ReadinessBadge review={readiness} />
             {onMoveItem && (
               <button
                 type="button"

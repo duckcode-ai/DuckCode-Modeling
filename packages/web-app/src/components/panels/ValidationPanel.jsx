@@ -209,6 +209,12 @@ const ISSUE_GUIDANCE = {
 };
 
 function issueGuidance(issue) {
+  if (issue?.rationale || issue?.suggested_fix) {
+    return {
+      why: issue.rationale || "This dbt readiness finding affects metadata quality, governance, model trust, or downstream reuse.",
+      nextStep: issue.suggested_fix || "Review the finding and apply the smallest safe YAML change.",
+    };
+  }
   const direct = ISSUE_GUIDANCE[issue?.code];
   if (direct) return direct;
   if (issue?.severity === "error") {
@@ -717,6 +723,9 @@ function CoverageList({ title, items, emptyLabel }) {
 /* ────────────────────────────────────────────────────────────────── */
 export default function ValidationPanel() {
   const { activeFileContent, activeFile, updateContent } = useWorkspaceStore();
+  const dbtReadinessReview = useWorkspaceStore((s) => s.dbtReadinessReview);
+  const dbtReadinessLoading = useWorkspaceStore((s) => s.dbtReadinessLoading);
+  const runDbtReadinessReview = useWorkspaceStore((s) => s.runDbtReadinessReview);
   const addToast = useUiStore((s) => s.addToast);
   const openAiPanel = useUiStore((s) => s.openAiPanel);
 
@@ -760,6 +769,42 @@ export default function ValidationPanel() {
         issue,
         filePath: activeFile?.path || activeFile?.fullPath || activeFile?.name || "",
       },
+    });
+  };
+
+  const activeReviewFile = useMemo(() => {
+    const filePath = activeFile?.path || activeFile?.fullPath || activeFile?.name || "";
+    if (!filePath) return null;
+    return (dbtReadinessReview?.files || []).find((file) => file.path === filePath || file.fullPath === filePath || file.name === activeFile?.name) || null;
+  }, [dbtReadinessReview, activeFile]);
+
+  const handleRerunReadiness = async () => {
+    const path = activeFile?.path || activeFile?.fullPath || activeFile?.name || "";
+    try {
+      const review = await runDbtReadinessReview({ scope: path ? "file" : "all", paths: path ? [path] : [] });
+      addToast?.({
+        type: "success",
+        message: `Readiness review complete: ${review.summary.red} red, ${review.summary.yellow} yellow, ${review.summary.green} green.`,
+      });
+    } catch (err) {
+      addToast?.({ type: "error", message: `Readiness review failed: ${err?.message || err}` });
+    }
+  };
+
+  const handleAskAiReadiness = (finding = null) => {
+    const path = activeFile?.path || activeFile?.fullPath || activeFile?.name || "";
+    openAiPanel({
+      source: "dbt-readiness",
+      targetName: finding?.code || activeReviewFile?.path || "dbt readiness",
+      context: {
+        kind: "dbt_readiness_finding",
+        filePath: path,
+        finding,
+        readiness: activeReviewFile,
+      },
+      initialMessage: finding
+        ? `Propose a focused YAML fix for this dbt readiness finding in ${path}: ${finding.message}`
+        : `Review ${path} and propose focused YAML fixes for the dbt readiness gaps.`,
     });
   };
 
@@ -815,6 +860,7 @@ export default function ValidationPanel() {
      "No errors" success pill so the header never feels empty. */
   const totalIssues =
     errors.length + warnings.length + dimensionalIssues.length + gaps.length + dbtFindings.length + interfaceFindings.length + layerFindings.length;
+  const readinessFindings = activeReviewFile?.findings || [];
   const blockerCount = errors.length + danglingFindings.length;
   const headerStatus = activeFileContent ? (
     <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
@@ -888,6 +934,64 @@ export default function ValidationPanel() {
             </div>
           </PanelCard>
         </div>
+      </PanelSection>
+
+      <PanelSection
+        title="dbt Readiness"
+        count={readinessFindings.length}
+        icon={<Gauge size={11} />}
+        description="Repo-level dbt/DataLex review for metadata, tests, governance, import health, and enterprise modeling readiness."
+        action={
+          <button
+            type="button"
+            className="panel-btn"
+            onClick={handleRerunReadiness}
+            disabled={dbtReadinessLoading}
+            title="Rerun readiness review for the active file"
+          >
+            <Wand2 size={11} /> {dbtReadinessLoading ? "Reviewing..." : "Rerun"}
+          </button>
+        }
+      >
+        {activeReviewFile ? (
+          <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+            <PanelCard
+              dense
+              tone={activeReviewFile.status === "red" ? "error" : activeReviewFile.status === "yellow" ? "warning" : "success"}
+              title={`${String(activeReviewFile.status || "green").toUpperCase()} · ${activeReviewFile.score}% readiness`}
+              subtitle={`${activeReviewFile.counts?.errors || 0} errors · ${activeReviewFile.counts?.warnings || 0} warnings · ${activeReviewFile.counts?.infos || 0} info`}
+            >
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, flexWrap: "wrap" }}>
+                <div style={{ fontSize: 11, color: "var(--text-secondary)", lineHeight: 1.45 }}>
+                  Deterministic checks are authoritative for the red/yellow/green status. Use AI only to generate reviewable YAML proposals.
+                </div>
+                <button
+                  type="button"
+                  className="panel-btn primary"
+                  onClick={() => handleAskAiReadiness(null)}
+                  title="Ask AI to propose focused YAML fixes for this file"
+                >
+                  <Wand2 size={11} /> Ask AI to fix
+                </button>
+              </div>
+            </PanelCard>
+            {readinessFindings.length > 0 ? (
+              <IssueGroups issues={readinessFindings} prefix="dbt-ready" onAskAi={handleAskAiReadiness} />
+            ) : (
+              <PanelEmpty
+                icon={CheckCircle2}
+                title="Readiness checks passed"
+                description="No dbt readiness findings were reported for this file."
+              />
+            )}
+          </div>
+        ) : (
+          <PanelCard dense tone="neutral" title="No readiness review for this file" subtitle="Run review to score this YAML">
+            <div style={{ fontSize: 11, color: "var(--text-secondary)", lineHeight: 1.45 }}>
+              Imported dbt projects are reviewed automatically. For existing projects, rerun the review from here or the Explorer.
+            </div>
+          </PanelCard>
+        )}
       </PanelSection>
 
       {/* Dangling relationships banner (Phase 4.4) */}

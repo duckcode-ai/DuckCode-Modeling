@@ -278,7 +278,7 @@ export default function AiAssistantSurface({ payload = null, onClose, compact = 
   const scrollRef = React.useRef(null);
 
   React.useEffect(() => {
-    setMessage("");
+    setMessage(payload?.initialMessage || "");
     setResult(null);
     setChatId(null);
     setTurns([]);

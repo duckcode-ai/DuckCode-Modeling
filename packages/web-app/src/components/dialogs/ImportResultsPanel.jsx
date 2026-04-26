@@ -81,8 +81,9 @@ function buildReportText(report, summary) {
   return lines.join("\n");
 }
 
-export default function ImportResultsPanel({ report, tree, sourceLabel, onClose, onCopyReport }) {
+export default function ImportResultsPanel({ report, tree, sourceLabel, readinessReview, readinessReviewError, onClose, onCopyReport }) {
   const summary = React.useMemo(() => summarizeTree(tree), [tree]);
+  const readinessSummary = readinessReview?.summary || null;
 
   const warningBanner = React.useMemo(() => {
     if (!report) return null;
@@ -175,6 +176,42 @@ export default function ImportResultsPanel({ report, tree, sourceLabel, onClose,
         {stat("Unresolved rels", summary.unresolvedRelCount, "warn")}
         {stat("Files written", report?.files_written?.length ?? tree?.length ?? 0)}
       </div>
+
+      {readinessSummary && (
+        <div style={{ marginBottom: 12 }}>
+          <div style={{ fontSize: 11, fontWeight: 600, color: "var(--text-secondary)", marginBottom: 6 }}>
+            dbt readiness review
+          </div>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            {stat("Score", readinessSummary.score ?? 100)}
+            {stat("Red", readinessSummary.red ?? 0, "warn")}
+            {stat("Yellow", readinessSummary.yellow ?? 0, "warn")}
+            {stat("Green", readinessSummary.green ?? 0)}
+            {stat("Findings", readinessSummary.findings ?? 0, "warn")}
+          </div>
+        </div>
+      )}
+
+      {readinessReviewError && (
+        <div
+          style={{
+            display: "flex",
+            alignItems: "flex-start",
+            gap: 8,
+            padding: "10px 12px",
+            borderRadius: 6,
+            border: "1px solid #f59e0b",
+            background: "rgba(245,158,11,0.08)",
+            color: "#b45309",
+            marginBottom: 12,
+            fontSize: 12,
+            lineHeight: 1.5,
+          }}
+        >
+          <AlertTriangle size={14} style={{ flexShrink: 0, marginTop: 2 }} />
+          <span>Readiness review failed: {readinessReviewError}</span>
+        </div>
+      )}
 
       {(report?.warnings || []).length > 0 && (
         <div style={{ marginBottom: 12 }}>

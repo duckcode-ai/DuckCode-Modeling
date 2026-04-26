@@ -23,6 +23,8 @@ import {
   saveAllProjectFiles,
   applyAiProposal,
   rebuildAiIndex,
+  runDbtReadinessReview as runDbtReadinessReviewApi,
+  fetchDbtReadinessReview,
   fetchModelGraph,
 } from "../lib/api";
 import { removeEntity } from "../lib/yamlRoundTrip";
@@ -665,6 +667,13 @@ const useWorkspaceStore = create((set, get) => ({
   // path". Null when no rename has happened yet.
   lastRenameCascade: null,
 
+  // Latest deterministic dbt/DataLex readiness review for imported YAML.
+  // Keyed by project in projectCache snapshots, rendered as Explorer badges
+  // and active-file guidance in Validation.
+  dbtReadinessReview: null,
+  dbtReadinessLoading: false,
+  dbtReadinessError: null,
+
   // Loading states
   loading: false,
   error: null,
@@ -963,7 +972,7 @@ const useWorkspaceStore = create((set, get) => ({
    * Detected and warned; Phase 2 will route through `datalex generate dbt`
    * for merge-safe writes.
    */
-  loadDbtImportTreeAsProject: async (tree, project) => {
+  loadDbtImportTreeAsProject: async (tree, project, options = {}) => {
     if (!Array.isArray(tree) || tree.length === 0) {
       throw new Error("loadDbtImportTreeAsProject: empty tree — nothing to load.");
     }
@@ -1047,6 +1056,8 @@ const useWorkspaceStore = create((set, get) => ({
       loading: false,
       error: null,
       dbtImportCollisions: collisions.map(([p]) => p),
+      dbtReadinessReview: options.readinessReview || null,
+      dbtReadinessError: options.readinessReviewError || null,
     });
   },
 
@@ -1097,6 +1108,8 @@ const useWorkspaceStore = create((set, get) => ({
           newState.activeFile = null;
           newState.activeFileContent = "";
           newState.openTabs = [];
+          newState.dbtReadinessReview = null;
+          newState.dbtReadinessError = null;
         }
         return newState;
       });
@@ -1128,6 +1141,8 @@ const useWorkspaceStore = create((set, get) => ({
       activeFileContent: s.activeFileContent,
       originalContent: s.originalContent,
       isDirty: s.isDirty,
+      dbtReadinessReview: s.dbtReadinessReview,
+      dbtReadinessError: s.dbtReadinessError,
     };
     set((prev) => ({ projectCache: { ...prev.projectCache, [id]: snapshot } }));
   },
@@ -1147,6 +1162,8 @@ const useWorkspaceStore = create((set, get) => ({
       activeFileContent: cached.activeFileContent || "",
       originalContent: cached.originalContent || "",
       isDirty: cached.isDirty || false,
+      dbtReadinessReview: cached.dbtReadinessReview || null,
+      dbtReadinessError: cached.dbtReadinessError || null,
       loading: false,
       error: null,
     });
@@ -1188,9 +1205,19 @@ const useWorkspaceStore = create((set, get) => ({
       activeFileContent: "",
       originalContent: "",
       isDirty: false,
+      dbtReadinessReview: null,
+      dbtReadinessError: null,
     });
     try {
       const data = await fetchProjectFiles(projectId);
+      let latestReview = null;
+      let latestReviewError = null;
+      try {
+        const review = await fetchDbtReadinessReview(projectId);
+        if (review?.runId || (Array.isArray(review?.files) && review.files.length > 0)) latestReview = review;
+      } catch (err) {
+        latestReviewError = err?.message || String(err);
+      }
       set({
         projectFiles: data.files || [],
         // Project switch invalidates client-only empty-folder entries —
@@ -1200,6 +1227,8 @@ const useWorkspaceStore = create((set, get) => ({
         projectPath: data.projectPath || "",
         projectModelPath: data.projectModelPath || data.projectPath || "",
         projectConfig: data.projectConfig || null,
+        dbtReadinessReview: latestReview,
+        dbtReadinessError: latestReviewError,
         loading: false,
       });
       // Auto-open first file
@@ -1237,6 +1266,8 @@ const useWorkspaceStore = create((set, get) => ({
         activeFileContent: "",
         originalContent: "",
         isDirty: false,
+        dbtReadinessReview: null,
+        dbtReadinessError: null,
       });
       return;
     }
@@ -1245,6 +1276,53 @@ const useWorkspaceStore = create((set, get) => ({
     // Force a fresh selection path without the early-return guard.
     set({ activeProjectId: null });
     await get().selectProject(fallbackId);
+  },
+
+  runDbtReadinessReview: async (options = {}) => {
+    const projectId = options.projectId || get().activeProjectId;
+    if (!projectId) throw new Error("Open a project before running dbt readiness review.");
+    set({ dbtReadinessLoading: true, dbtReadinessError: null });
+    try {
+      const review = await runDbtReadinessReviewApi({
+        projectId,
+        scope: options.scope || "all",
+        paths: Array.isArray(options.paths) ? options.paths : undefined,
+      });
+      let nextReview = review;
+      if ((options.scope === "file" || options.scope === "changed") && get().dbtReadinessReview?.files?.length) {
+        const existing = get().dbtReadinessReview;
+        const replacement = new Map((review.files || []).map((file) => [file.path, file]));
+        const mergedFiles = (existing.files || []).map((file) => replacement.get(file.path) || file);
+        for (const file of review.files || []) {
+          if (!mergedFiles.some((item) => item.path === file.path)) mergedFiles.push(file);
+        }
+        const summary = {
+          total_files: mergedFiles.length,
+          red: mergedFiles.filter((file) => file.status === "red").length,
+          yellow: mergedFiles.filter((file) => file.status === "yellow").length,
+          green: mergedFiles.filter((file) => file.status === "green").length,
+          findings: mergedFiles.reduce((sum, file) => sum + Number(file.counts?.total || 0), 0),
+          errors: mergedFiles.reduce((sum, file) => sum + Number(file.counts?.errors || 0), 0),
+          warnings: mergedFiles.reduce((sum, file) => sum + Number(file.counts?.warnings || 0), 0),
+          infos: mergedFiles.reduce((sum, file) => sum + Number(file.counts?.infos || 0), 0),
+          score: mergedFiles.length ? Math.round(mergedFiles.reduce((sum, file) => sum + Number(file.score || 0), 0) / mergedFiles.length) : 100,
+        };
+        nextReview = {
+          ...existing,
+          ...review,
+          scope: existing.scope || "all",
+          summary,
+          files: mergedFiles,
+          byPath: Object.fromEntries(mergedFiles.map((file) => [file.path, { status: file.status, score: file.score, counts: file.counts }])),
+        };
+      }
+      set({ dbtReadinessReview: nextReview, dbtReadinessLoading: false, dbtReadinessError: null });
+      return nextReview;
+    } catch (err) {
+      const message = err?.message || String(err);
+      set({ dbtReadinessLoading: false, dbtReadinessError: message });
+      throw err;
+    }
   },
 
   // Cycle to the next / previous open project tab. Used by Cmd+Tab.

@@ -150,6 +150,7 @@ const DATALEX_PROJECT_CONFIG = join(DATALEX_CONFIG_DIRNAME, "project.json");
 const DATALEX_WORKSPACE_ROOT = "DataLex";
 const DATALEX_SKILLS_DIR = "Skills";
 const AI_INDEX_CACHE = new Map();
+const DBT_REVIEW_CACHE = new Map();
 const DATALEX_DEFAULT_STRUCTURE = {
   version: 1,
   // Default to snowflake so baseline DDL generation works for new projects without extra config.
@@ -2274,6 +2275,518 @@ function safeYamlLoad(content) {
   }
 }
 
+function reviewHasValue(value) {
+  if (value === null || value === undefined) return false;
+  if (typeof value === "string") return value.trim().length > 0;
+  if (Array.isArray(value)) return value.length > 0;
+  if (typeof value === "object") return Object.keys(value).length > 0;
+  return Boolean(value);
+}
+
+function reviewArray(value) {
+  return Array.isArray(value) ? value : [];
+}
+
+function reviewColumns(entity) {
+  if (!entity || typeof entity !== "object") return [];
+  if (Array.isArray(entity.columns)) return entity.columns;
+  if (Array.isArray(entity.fields)) return entity.fields;
+  return [];
+}
+
+function reviewEntityName(entity, fallback = "model") {
+  return String(entity?.name || entity?.entity || entity?.table || fallback);
+}
+
+function reviewTests(column) {
+  return reviewArray(column?.tests || column?.data_tests);
+}
+
+function reviewTestName(test) {
+  if (typeof test === "string") return test;
+  if (test && typeof test === "object") return Object.keys(test)[0] || "";
+  return "";
+}
+
+function reviewHasTest(column, name) {
+  const expected = String(name || "").toLowerCase();
+  return reviewTests(column).some((test) => reviewTestName(test).toLowerCase() === expected);
+}
+
+function reviewHasRelationshipTest(column) {
+  return reviewTests(column).some((test) => reviewTestName(test).toLowerCase() === "relationships");
+}
+
+function reviewIsPk(column) {
+  return Boolean(
+    column?.primary_key
+    || column?.primaryKey
+    || column?.is_primary_key
+    || reviewArray(column?.constraints).some((constraint) => String(constraint?.type || constraint).toLowerCase() === "primary_key")
+    || reviewArray(column?.tags).some((tag) => String(tag).toLowerCase() === "primary_key")
+  );
+}
+
+function reviewIsSensitive(column) {
+  const text = [
+    column?.name,
+    column?.description,
+    column?.sensitivity,
+    column?.classification,
+    ...(reviewArray(column?.tags)),
+  ].join(" ").toLowerCase();
+  return /\b(pii|phi|pci|email|phone|ssn|passport|address|dob|birth|salary|confidential|restricted)\b/.test(text);
+}
+
+function reviewMaterialization(entity) {
+  return entity?.config?.materialized || entity?.materialized || entity?.materialization || entity?.meta?.materialized || "";
+}
+
+function reviewFileKind(path, doc) {
+  const p = String(path || "").toLowerCase();
+  if (Array.isArray(doc?.models) || Array.isArray(doc?.sources) || Array.isArray(doc?.exposures) || Array.isArray(doc?.metrics)) return "dbt";
+  if (doc?.kind === "model" || doc?.kind === "source") return "dbt-imported";
+  if (doc?.kind === "diagram" || /\.diagram\.ya?ml$/i.test(p)) return "diagram";
+  if (doc?.model || Array.isArray(doc?.entities)) return String(doc?.model?.kind || doc?.layer || "datalex").toLowerCase();
+  return "yaml";
+}
+
+function reviewCollectEntities(doc) {
+  const entities = [];
+  if (!doc || typeof doc !== "object") return entities;
+  if (Array.isArray(doc.models)) {
+    for (const model of doc.models) entities.push({ entity: model, resourceType: "model", container: null });
+  }
+  if (Array.isArray(doc.sources)) {
+    for (const source of doc.sources) {
+      for (const table of reviewArray(source?.tables)) {
+        entities.push({ entity: table, resourceType: "source", container: source });
+      }
+    }
+  }
+  if (doc.kind === "model") entities.push({ entity: doc, resourceType: "model", container: null });
+  if (doc.kind === "source") {
+    if (Array.isArray(doc.tables)) {
+      for (const table of doc.tables) entities.push({ entity: table, resourceType: "source", container: doc });
+    } else {
+      entities.push({ entity: doc, resourceType: "source", container: null });
+    }
+  }
+  if (Array.isArray(doc.entities)) {
+    for (const entity of doc.entities) {
+      if (entity?.file) continue;
+      entities.push({ entity, resourceType: "entity", container: null });
+    }
+  }
+  return entities;
+}
+
+function reviewFinding({ severity = "warn", category, code, path, message, rationale, suggestedFix, target = "", weight = 5 }) {
+  return {
+    severity,
+    category,
+    code,
+    path: path || "/",
+    target,
+    message,
+    rationale,
+    suggested_fix: suggestedFix,
+    weight,
+    remediation: {
+      mode: "ai_proposal",
+      prompt: `${message}\n\nWhy it matters: ${rationale}\n\nSuggested YAML change: ${suggestedFix}`,
+    },
+  };
+}
+
+function reviewAddEntityFindings(findings, filePath, item, doc) {
+  const entity = item.entity;
+  const container = item.container;
+  const name = reviewEntityName(entity);
+  const base = `/${item.resourceType}s/${name}`;
+  const columns = reviewColumns(entity);
+  const materialization = String(reviewMaterialization(entity)).toLowerCase();
+  const type = String(entity?.type || entity?.resource_type || item.resourceType || "").toLowerCase();
+  const owner = entity?.owner || entity?.meta?.owner || entity?.config?.meta?.owner || container?.owner || container?.meta?.owner;
+  const domain = entity?.domain || entity?.meta?.domain || entity?.config?.meta?.domain || doc?.model?.domain || doc?.domain || container?.domain || container?.meta?.domain;
+
+  if (!reviewHasValue(entity?.description)) {
+    findings.push(reviewFinding({
+      category: "metadata",
+      code: "DBT_READINESS_MISSING_MODEL_DESCRIPTION",
+      path: base,
+      target: name,
+      message: `${name} is missing a model-level description.`,
+      rationale: "Model descriptions are the first trust signal consumers see in dbt docs, catalogs, and DataLex reviews.",
+      suggestedFix: "Add a concise business-facing description that explains the model purpose, grain, and intended consumers.",
+      weight: 8,
+    }));
+  }
+  if (!reviewHasValue(owner)) {
+    findings.push(reviewFinding({
+      category: "metadata",
+      code: "DBT_READINESS_MISSING_OWNER",
+      path: `${base}/owner`,
+      target: name,
+      message: `${name} has no owner or steward metadata.`,
+      rationale: "Ownership is required for issue routing, access decisions, freshness accountability, and enterprise governance.",
+      suggestedFix: "Add owner metadata using the project convention, such as owner, meta.owner, or config.meta.owner.",
+      weight: 6,
+    }));
+  }
+  if (!reviewHasValue(domain)) {
+    findings.push(reviewFinding({
+      category: "metadata",
+      code: "DBT_READINESS_MISSING_DOMAIN",
+      path: `${base}/domain`,
+      target: name,
+      message: `${name} is not mapped to a domain or subject area.`,
+      rationale: "Enterprise model review needs domain context so conceptual and logical models can be generated with the right bounded context.",
+      suggestedFix: "Add domain or meta.domain metadata, or place the model under the appropriate DataLex domain folder.",
+      weight: 4,
+    }));
+  }
+  if (columns.length === 0) {
+    findings.push(reviewFinding({
+      severity: "error",
+      category: "import_health",
+      code: "DBT_READINESS_NO_COLUMNS",
+      path: `${base}/columns`,
+      target: name,
+      message: `${name} has no declared columns or fields.`,
+      rationale: "Column metadata is required to assess contracts, tests, data dictionary coverage, and physical-to-logical mapping.",
+      suggestedFix: "Run dbt parse/docs generation or add column metadata to the YAML file.",
+      weight: 18,
+    }));
+    return;
+  }
+
+  const described = columns.filter((column) => reviewHasValue(column?.description)).length;
+  const coverage = Math.round((described / columns.length) * 100);
+  if (coverage < 80) {
+    findings.push(reviewFinding({
+      category: "metadata",
+      code: "DBT_READINESS_LOW_COLUMN_DESCRIPTION_COVERAGE",
+      path: `${base}/columns`,
+      target: name,
+      message: `${name} has ${coverage}% column description coverage; enterprise readiness expects at least 80%.`,
+      rationale: "Sparse column descriptions slow reuse, weaken AI context, and make downstream semantic modeling harder.",
+      suggestedFix: "Fill descriptions for key, metric, date, status, and consumer-facing columns first, then complete the remaining columns.",
+      weight: coverage < 40 ? 12 : 7,
+    }));
+  }
+
+  const hasPk = columns.some(reviewIsPk);
+  const hasUnique = columns.some((column) => reviewHasTest(column, "unique"));
+  if (!hasPk && !hasUnique && !["view", "ephemeral"].includes(type) && materialization !== "ephemeral") {
+    findings.push(reviewFinding({
+      category: "dbt_quality",
+      code: "DBT_READINESS_NO_IDENTITY_TEST",
+      path: `${base}/columns`,
+      target: name,
+      message: `${name} has no primary key marker or unique test.`,
+      rationale: "Identity checks anchor joins, relationship tests, duplicate detection, and conceptual/logical entity mapping.",
+      suggestedFix: "Mark the primary key column and add unique plus not_null tests where the model grain is known.",
+      weight: 9,
+    }));
+  }
+
+  const grain = entity?.grain || entity?.meta?.grain || entity?.config?.meta?.grain;
+  const nameLower = name.toLowerCase();
+  if (!reviewHasValue(grain) && /(^fct_|fact|_fact$|mart|marts)/.test(nameLower)) {
+    findings.push(reviewFinding({
+      category: "modeling",
+      code: "DBT_READINESS_FACT_GRAIN_MISSING",
+      path: `${base}/grain`,
+      target: name,
+      message: `${name} looks like a fact or mart model but has no grain definition.`,
+      rationale: "Fact model grain is the most important modeling contract for reliable metrics and joins.",
+      suggestedFix: "Add grain metadata that states what one row represents, using the identifying column or business event.",
+      weight: 10,
+    }));
+  }
+
+  if (/^stg_|\/staging\//.test(nameLower) && materialization && !["view", "ephemeral"].includes(materialization)) {
+    findings.push(reviewFinding({
+      severity: "info",
+      category: "modeling",
+      code: "DBT_READINESS_STAGING_MATERIALIZATION_REVIEW",
+      path: `${base}/config/materialized`,
+      target: name,
+      message: `${name} is staging-like but materialized as ${materialization}.`,
+      rationale: "Many teams keep staging models lightweight. This is not always wrong, but it should be intentional.",
+      suggestedFix: "Confirm the materialization is intentional, or set staging conventions in project/team standards.",
+      weight: 2,
+    }));
+  }
+
+  for (const column of columns) {
+    const columnName = String(column?.name || "column");
+    const colPath = `${base}/columns/${columnName}`;
+    const dataType = column?.data_type || column?.type;
+    if (!reviewHasValue(column?.description)) {
+      findings.push(reviewFinding({
+        severity: "info",
+        category: "metadata",
+        code: "DBT_READINESS_MISSING_COLUMN_DESCRIPTION",
+        path: `${colPath}/description`,
+        target: `${name}.${columnName}`,
+        message: `${name}.${columnName} has no description.`,
+        rationale: "Column descriptions are needed for catalog trust, data dictionary reuse, and AI-assisted modeling.",
+        suggestedFix: "Add a business-facing column description that explains meaning, format, and key caveats.",
+        weight: 2,
+      }));
+    }
+    if (!reviewHasValue(dataType) || String(dataType).toLowerCase() === "unknown") {
+      findings.push(reviewFinding({
+        category: "import_health",
+        code: "DBT_READINESS_UNKNOWN_COLUMN_TYPE",
+        path: `${colPath}/data_type`,
+        target: `${name}.${columnName}`,
+        message: `${name}.${columnName} has an unknown or missing data type.`,
+        rationale: "Types are required for contracts, DDL generation, physical model review, and logical type mapping.",
+        suggestedFix: "Run dbt compile/docs with catalog metadata or add data_type/type to the column YAML.",
+        weight: 7,
+      }));
+    }
+    if (reviewIsPk(column) && !(reviewHasTest(column, "unique") && reviewHasTest(column, "not_null"))) {
+      findings.push(reviewFinding({
+        category: "dbt_quality",
+        code: "DBT_READINESS_PK_TESTS_MISSING",
+        path: `${colPath}/tests`,
+        target: `${name}.${columnName}`,
+        message: `${name}.${columnName} is marked as identity but does not have both unique and not_null tests.`,
+        rationale: "Primary key metadata without enforcement leaves duplicate and null identity failures undetected.",
+        suggestedFix: "Add unique and not_null tests to the primary key column.",
+        weight: 8,
+      }));
+    }
+    if (/_id$/.test(columnName) && !reviewIsPk(column) && !reviewHasRelationshipTest(column)) {
+      findings.push(reviewFinding({
+        severity: "info",
+        category: "dbt_quality",
+        code: "DBT_READINESS_RELATIONSHIP_TEST_MISSING",
+        path: `${colPath}/tests`,
+        target: `${name}.${columnName}`,
+        message: `${name}.${columnName} looks like a foreign key but has no relationships test.`,
+        rationale: "Relationship tests make lineage and join assumptions executable instead of tribal knowledge.",
+        suggestedFix: "Add a relationships test to the referenced dimension/source when the parent model is known.",
+        weight: 3,
+      }));
+    }
+    if (reviewIsSensitive(column) && !reviewHasValue(column?.sensitivity) && !reviewHasValue(column?.classification) && !reviewHasValue(column?.meta?.classification)) {
+      findings.push(reviewFinding({
+        category: "governance",
+        code: "DBT_READINESS_SENSITIVE_COLUMN_UNCLASSIFIED",
+        path: `${colPath}/classification`,
+        target: `${name}.${columnName}`,
+        message: `${name}.${columnName} appears sensitive but has no classification metadata.`,
+        rationale: "Sensitive columns need explicit classification before enterprise publication or AI-assisted reuse.",
+        suggestedFix: "Add sensitivity/classification metadata using the project governance convention.",
+        weight: 9,
+      }));
+    }
+  }
+
+  if (!reviewHasValue(entity?.contract?.enforced) && !reviewHasValue(entity?.config?.contract?.enforced) && (hasPk || hasUnique || /(^fct_|^dim_|mart|interface)/.test(nameLower))) {
+    findings.push(reviewFinding({
+      severity: "info",
+      category: "dbt_quality",
+      code: "DBT_READINESS_CONTRACT_REVIEW",
+      path: `${base}/contract`,
+      target: name,
+      message: `${name} may be a publishable model but does not enforce a dbt contract.`,
+      rationale: "Contracts are an enterprise promotion signal for shared models, marts, and mesh interfaces.",
+      suggestedFix: "Consider enabling contract.enforced after data types, required columns, and tests are reviewed.",
+      weight: 2,
+    }));
+  }
+}
+
+function reviewAddDocumentFindings(findings, file, doc, content, dbtArtifacts = {}) {
+  const filePath = file.path;
+  const kind = reviewFileKind(filePath, doc);
+  if (kind === "yaml") {
+    findings.push(reviewFinding({
+      severity: "info",
+      category: "enterprise_modeling",
+      code: "DBT_READINESS_UNCLASSIFIED_YAML",
+      path: "/",
+      target: filePath,
+      message: `${filePath} is YAML but was not recognized as dbt or DataLex modeling metadata.`,
+      rationale: "Unclassified YAML may be valid project configuration, but it is not part of the model readiness score.",
+      suggestedFix: "No action needed unless this file should define models, sources, diagrams, or DataLex entities.",
+      weight: 1,
+    }));
+  }
+  const entities = reviewCollectEntities(doc);
+  for (const item of entities) reviewAddEntityFindings(findings, filePath, item, doc);
+
+  if ((Array.isArray(doc?.models) || doc?.kind === "model") && !dbtArtifacts.catalog) {
+    findings.push(reviewFinding({
+      severity: "info",
+      category: "import_health",
+      code: "DBT_READINESS_CATALOG_NOT_FOUND",
+      path: "/",
+      target: filePath,
+      message: "No dbt catalog artifact was found for this project.",
+      rationale: "Without catalog metadata, DataLex may not be able to verify warehouse column types after import.",
+      suggestedFix: "Run dbt docs generate or provide target/catalog.json before import/review.",
+      weight: 2,
+    }));
+  }
+  if ((Array.isArray(doc?.models) || Array.isArray(doc?.sources) || doc?.kind === "model" || doc?.kind === "source") && !dbtArtifacts.manifest) {
+    findings.push(reviewFinding({
+      severity: "info",
+      category: "import_health",
+      code: "DBT_READINESS_MANIFEST_NOT_FOUND",
+      path: "/",
+      target: filePath,
+      message: "No dbt manifest artifact was found for this project.",
+      rationale: "Without manifest metadata, lineage, config, refs, and test context are limited.",
+      suggestedFix: "Run dbt parse or dbt compile so target/manifest.json is available.",
+      weight: 2,
+    }));
+  }
+  if (/semantic_models\s*:|metrics\s*:|exposures\s*:/i.test(content) === false && entities.length > 0) {
+    findings.push(reviewFinding({
+      severity: "info",
+      category: "enterprise_modeling",
+      code: "DBT_READINESS_SEMANTIC_LAYER_OPPORTUNITY",
+      path: "/semantic",
+      target: filePath,
+      message: `${filePath} has model metadata that can seed conceptual, logical, or semantic model review.`,
+      rationale: "DataLex can use physical dbt models to bootstrap business concepts, logical entities, metrics, and glossary links.",
+      suggestedFix: "Use Ask AI to generate or update conceptual and logical models from this reviewed dbt file.",
+      weight: 1,
+    }));
+  }
+}
+
+function summarizeReviewFile(file, findings) {
+  const errors = findings.filter((finding) => finding.severity === "error").length;
+  const warnings = findings.filter((finding) => finding.severity === "warn").length;
+  const infos = findings.filter((finding) => finding.severity === "info").length;
+  const penalty = findings.reduce((sum, finding) => sum + Number(finding.weight || 0), 0);
+  const score = Math.max(0, Math.min(100, 100 - penalty));
+  const status = errors > 0 || score < 60 ? "red" : warnings > 0 || score < 85 ? "yellow" : "green";
+  const categoryCounts = {};
+  for (const finding of findings) categoryCounts[finding.category] = (categoryCounts[finding.category] || 0) + 1;
+  return {
+    path: file.path,
+    fullPath: file.fullPath,
+    name: file.name,
+    score,
+    status,
+    counts: { errors, warnings, infos, total: findings.length },
+    category_counts: categoryCounts,
+    findings,
+    remediation_candidates: findings
+      .filter((finding) => finding.severity !== "info")
+      .slice(0, 12)
+      .map((finding) => ({
+        finding_code: finding.code,
+        path: file.path,
+        mode: "ask_ai",
+        prompt: finding.remediation?.prompt || finding.message,
+      })),
+  };
+}
+
+async function loadDbtArtifactPresence(projectPath) {
+  return {
+    manifest: Boolean(await readJsonArtifact(join(projectPath, "target", "manifest.json"))),
+    catalog: Boolean(await readJsonArtifact(join(projectPath, "target", "catalog.json"))),
+    semanticManifest: Boolean(await readJsonArtifact(join(projectPath, "target", "semantic_manifest.json"))),
+    runResults: Boolean(await readJsonArtifact(join(projectPath, "target", "run_results.json"))),
+  };
+}
+
+async function buildDbtReadinessReview(project, { paths = [], scope = "all" } = {}) {
+  const structure = await loadProjectStructure(project.path);
+  const requestedPaths = new Set(reviewArray(paths).map((value) => toPosixPath(String(value || "")).replace(/^\/+/, "")));
+  const files = await walkYamlFiles(structure.modelPath);
+  const dbtArtifacts = await loadDbtArtifactPresence(project.path);
+  const selected = files.filter((file) => {
+    if (!requestedPaths.size || scope === "all" || scope === "changed") return true;
+    const rel = toPosixPath(file.path);
+    return requestedPaths.has(rel) || requestedPaths.has(file.name);
+  });
+  const fileReviews = [];
+  for (const file of selected) {
+    let content = "";
+    try {
+      content = await readFile(file.fullPath, "utf-8");
+    } catch (err) {
+      const findings = [reviewFinding({
+        severity: "error",
+        category: "import_health",
+        code: "DBT_READINESS_FILE_UNREADABLE",
+        path: "/",
+        target: file.path,
+        message: `${file.path} could not be read.`,
+        rationale: "Unreadable files cannot be validated or remediated safely.",
+        suggestedFix: `Check file permissions and retry the review. ${String(err?.message || "")}`.trim(),
+        weight: 25,
+      })];
+      fileReviews.push(summarizeReviewFile(file, findings));
+      continue;
+    }
+    const { doc, error } = safeYamlLoad(content);
+    if (error || !doc || typeof doc !== "object" || Array.isArray(doc)) {
+      const location = error?.line ? ` at line ${error.line}${error.column ? `, column ${error.column}` : ""}` : "";
+      const findings = [reviewFinding({
+        severity: "error",
+        category: "import_health",
+        code: "DBT_READINESS_YAML_PARSE_ERROR",
+        path: "/",
+        target: file.path,
+        message: `${file.path} has a YAML parse error${location}.`,
+        rationale: "Parsing must succeed before DataLex can assess dbt metadata, model quality, or remediation patches.",
+        suggestedFix: error?.message || "Fix the YAML syntax and rerun readiness review.",
+        weight: 35,
+      })];
+      fileReviews.push(summarizeReviewFile(file, findings));
+      continue;
+    }
+    const findings = [];
+    reviewAddDocumentFindings(findings, file, doc, content, dbtArtifacts);
+    fileReviews.push(summarizeReviewFile(file, findings));
+  }
+  const summary = {
+    total_files: fileReviews.length,
+    red: fileReviews.filter((file) => file.status === "red").length,
+    yellow: fileReviews.filter((file) => file.status === "yellow").length,
+    green: fileReviews.filter((file) => file.status === "green").length,
+    findings: fileReviews.reduce((sum, file) => sum + file.counts.total, 0),
+    errors: fileReviews.reduce((sum, file) => sum + file.counts.errors, 0),
+    warnings: fileReviews.reduce((sum, file) => sum + file.counts.warnings, 0),
+    infos: fileReviews.reduce((sum, file) => sum + file.counts.infos, 0),
+    score: fileReviews.length
+      ? Math.round(fileReviews.reduce((sum, file) => sum + file.score, 0) / fileReviews.length)
+      : 100,
+  };
+  const review = {
+    ok: true,
+    runId: `dbt_review_${Date.now()}_${randomBytes(3).toString("hex")}`,
+    projectId: project.id,
+    projectPath: project.path,
+    modelPath: structure.modelPath,
+    scope,
+    generatedAt: new Date().toISOString(),
+    dbtArtifacts,
+    summary,
+    files: fileReviews,
+    byPath: Object.fromEntries(fileReviews.map((file) => [file.path, {
+      status: file.status,
+      score: file.score,
+      counts: file.counts,
+    }])),
+  };
+  DBT_REVIEW_CACHE.set(project.id, review);
+  return review;
+}
+
 const AI_STOP_TOKENS = new Set([
   "a", "an", "and", "are", "as", "at", "be", "by", "for", "from", "how", "in", "into", "is", "it", "of", "on", "or", "the", "this", "to", "we", "what", "with",
 ]);
@@ -3758,6 +4271,70 @@ async function applyAiProposalChange(project, structure, change) {
 
   throw new ApiError(400, "VALIDATION", `Unsupported AI proposal change type: ${change.type || type}`);
 }
+
+app.post("/api/dbt/review", requireAdmin, async (req, res, next) => {
+  try {
+    const { project } = await resolveProjectAndStructure(req.body?.projectId);
+    const scope = String(req.body?.scope || "all").toLowerCase();
+    if (!["all", "changed", "file"].includes(scope)) {
+      throw new ApiError(400, "VALIDATION", "scope must be one of: all, changed, file");
+    }
+    const paths = Array.isArray(req.body?.paths) ? req.body.paths : [];
+    const prior = DBT_REVIEW_CACHE.get(project.id);
+    let review = await buildDbtReadinessReview(project, { scope, paths });
+    if (scope !== "all" && prior?.files?.length) {
+      const replacement = new Map((review.files || []).map((file) => [file.path, file]));
+      const mergedFiles = (prior.files || []).map((file) => replacement.get(file.path) || file);
+      for (const file of review.files || []) {
+        if (!mergedFiles.some((item) => item.path === file.path)) mergedFiles.push(file);
+      }
+      const summary = {
+        total_files: mergedFiles.length,
+        red: mergedFiles.filter((file) => file.status === "red").length,
+        yellow: mergedFiles.filter((file) => file.status === "yellow").length,
+        green: mergedFiles.filter((file) => file.status === "green").length,
+        findings: mergedFiles.reduce((sum, file) => sum + file.counts.total, 0),
+        errors: mergedFiles.reduce((sum, file) => sum + file.counts.errors, 0),
+        warnings: mergedFiles.reduce((sum, file) => sum + file.counts.warnings, 0),
+        infos: mergedFiles.reduce((sum, file) => sum + file.counts.infos, 0),
+        score: mergedFiles.length
+          ? Math.round(mergedFiles.reduce((sum, file) => sum + file.score, 0) / mergedFiles.length)
+          : 100,
+      };
+      review = {
+        ...prior,
+        ...review,
+        scope: prior.scope || "all",
+        summary,
+        files: mergedFiles,
+        byPath: Object.fromEntries(mergedFiles.map((file) => [file.path, { status: file.status, score: file.score, counts: file.counts }])),
+      };
+      DBT_REVIEW_CACHE.set(project.id, review);
+    }
+    res.json(review);
+  } catch (err) {
+    next(err);
+  }
+});
+
+app.get("/api/dbt/review", requireAdmin, async (req, res, next) => {
+  try {
+    const { project } = await resolveProjectAndStructure(req.query?.projectId);
+    const cached = DBT_REVIEW_CACHE.get(project.id);
+    if (cached) return res.json(cached);
+    res.json({
+      ok: true,
+      projectId: project.id,
+      runId: null,
+      generatedAt: null,
+      summary: { total_files: 0, red: 0, yellow: 0, green: 0, findings: 0, errors: 0, warnings: 0, infos: 0, score: 100 },
+      files: [],
+      byPath: {},
+    });
+  } catch (err) {
+    next(err);
+  }
+});
 
 app.post("/api/ai/settings/test", requireAdmin, async (req, res, next) => {
   try {
@@ -5594,6 +6171,17 @@ app.post("/api/dbt/import", requireAdmin, express.json({ limit: "2mb" }), async 
       }
     }
 
+    let readinessReview = null;
+    let readinessReviewError = null;
+    if (projectRecord) {
+      try {
+        const review = await buildDbtReadinessReview(projectRecord, { scope: "all" });
+        readinessReview = review;
+      } catch (err) {
+        readinessReviewError = String(err?.message || err).slice(0, 500);
+      }
+    }
+
     const hasFailures = writeFailures.length > 0 || registerError != null;
     res.status(hasFailures ? 207 : 200).json({
       success: !hasFailures,
@@ -5605,6 +6193,8 @@ app.post("/api/dbt/import", requireAdmin, express.json({ limit: "2mb" }), async 
       registerError,
       aiIndex,
       aiIndexError,
+      readinessReview,
+      readinessReviewError,
     });
   } catch (err) {
     if (err instanceof ApiError) return next(err);

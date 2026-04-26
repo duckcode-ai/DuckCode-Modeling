@@ -311,6 +311,17 @@ export async function rebuildAiIndex(projectId) {
   });
 }
 
+export async function runDbtReadinessReview(body = {}) {
+  return request("/dbt/review", {
+    method: "POST",
+    body: JSON.stringify(body || {}),
+  });
+}
+
+export async function fetchDbtReadinessReview(projectId) {
+  return request(`/dbt/review?projectId=${encodeURIComponent(projectId)}`);
+}
+
 export async function importSchemaContent({ format, content, filename, modelName }) {
   return request("/import", {
     method: "POST",

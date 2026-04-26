@@ -7,6 +7,31 @@ from `v0.1.0` onward.
 
 ## [Unreleased]
 
+## [1.3.5] - 2026-04-26
+
+Patch release - adds dbt readiness review and clearer onboarding for
+AI-ready analytics modeling.
+
+### Added
+
+- **dbt readiness review for imported projects.** DataLex now scores
+  imported dbt/DataLex YAML files red, yellow, or green across metadata,
+  dbt quality, modeling, governance, import health, and enterprise
+  modeling opportunities. Reviews run after edit-in-place dbt import and
+  can be rerun from Explorer or Validation.
+- **File-level readiness guidance.** Explorer shows readiness badges on
+  YAML files, the import report summarizes readiness counts, and the
+  Validation panel shows the active file's findings with rationale,
+  suggested YAML fixes, and Ask AI handoff.
+
+### Changed
+
+- **First-run onboarding now explains the product problem first.** The
+  welcome flow now frames DataLex around scattered business meaning,
+  weak dbt metadata, governance gaps, and AI/semantic answer quality
+  before walking users through import, modeling layers, validation, AI
+  proposals, and Git review.
+
 ## [1.3.4] - 2026-04-25
 
 Patch release - fixes the PyPI `datalex serve` bundle and clarifies the
@@ -1153,7 +1178,8 @@ Labs** (company).
   root; a `pip install`ed package run outside the repo needs
   `--schemas-root` or the repo on disk.
 
-[Unreleased]: https://github.com/duckcode-ai/DataLex/compare/v1.3.4...HEAD
+[Unreleased]: https://github.com/duckcode-ai/DataLex/compare/v1.3.5...HEAD
+[1.3.5]: https://github.com/duckcode-ai/DataLex/compare/v1.3.4...v1.3.5
 [1.3.4]: https://github.com/duckcode-ai/DataLex/compare/v1.3.0...v1.3.4
 [1.3.0]: https://github.com/duckcode-ai/DataLex/compare/v1.2.0...v1.3.0
 [1.2.0]: https://github.com/duckcode-ai/DataLex/compare/v1.1.1...v1.2.0

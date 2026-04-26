@@ -19,17 +19,20 @@ import {
   Scissors,
   LayoutDashboard,
   Wand2,
+  ClipboardCheck,
 } from "lucide-react";
 
 const ITEMS_BY_TARGET = {
   file: [
     { id: "ask-ai", label: "Ask AI about file…", icon: Wand2 },
+    { id: "dbt-readiness", label: "Rerun readiness review", icon: ClipboardCheck },
     { id: "rename", label: "Rename…", icon: Edit3 },
     { id: "move", label: "Move to folder…", icon: Scissors },
     { id: "delete", label: "Delete file", icon: Trash2, danger: true },
   ],
   folder: [
     { id: "ask-ai", label: "Ask AI about folder…", icon: Wand2 },
+    { id: "dbt-readiness", label: "Rerun readiness review", icon: ClipboardCheck },
     { id: "new-file", label: "New modeling asset…", icon: FilePlus },
     { id: "new-folder", label: "New folder…", icon: FolderPlus },
     { id: "new-diagram", label: "New diagram here…", icon: LayoutDashboard },
@@ -39,6 +42,7 @@ const ITEMS_BY_TARGET = {
   ],
   root: [
     { id: "ask-ai", label: "Ask AI about workspace…", icon: Wand2 },
+    { id: "dbt-readiness", label: "Rerun readiness review", icon: ClipboardCheck },
     { id: "new-file", label: "New modeling asset…", icon: FilePlus },
     { id: "new-folder", label: "New folder…", icon: FolderPlus },
     { id: "new-diagram", label: "New diagram…", icon: LayoutDashboard },
