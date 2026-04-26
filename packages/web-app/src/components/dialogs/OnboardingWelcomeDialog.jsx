@@ -7,6 +7,7 @@
 import React from "react";
 import {
   BookOpen,
+  Bot,
   CheckCircle2,
   Database,
   FileCode2,
@@ -16,6 +17,7 @@ import {
   Layers3,
   Network,
   Route,
+  ShieldCheck,
   Sparkles,
   X,
 } from "lucide-react";
@@ -24,37 +26,58 @@ import {
   markTourSeen,
 } from "../../lib/onboardingTour";
 
+const VALUE_POINTS = [
+  {
+    icon: Network,
+    tone: "#22c55e",
+    title: "Make meaning explicit",
+    text: "Connect business concepts, logical rules, and dbt implementation so analytics work has traceable context.",
+  },
+  {
+    icon: ShieldCheck,
+    tone: "#f59e0b",
+    title: "Catch gaps early",
+    text: "Review descriptions, ownership, grain, keys, tests, contracts, sensitivity, and import health before models spread.",
+  },
+  {
+    icon: Bot,
+    tone: "#818cf8",
+    title: "Prepare for AI analytics",
+    text: "Give agents and semantic models governed metadata so generated answers are grounded, explainable, and safer to reuse.",
+  },
+];
+
 const WORKFLOW_STEPS = [
   {
     icon: Layers3,
     tone: "#22c55e",
-    title: "Conceptual",
-    kicker: "Business language",
-    text: "Create concept boxes by domain, add definitions, owners, glossary terms, and verb-based business relationships.",
+    title: "Start with intent",
+    kicker: "Conceptual model",
+    text: "Define business concepts, domains, owners, glossary terms, and relationship verbs in stakeholder language.",
   },
   {
     icon: KeyRound,
     tone: "#06b6d4",
-    title: "Logical",
-    kicker: "Rules and keys",
-    text: "Model attributes, candidate and business keys, role names, cardinality, optionality, subtypes, and associative entities.",
+    title: "Shape the rules",
+    kicker: "Logical model",
+    text: "Capture attributes, candidate keys, optionality, role names, cardinality, lineage, and reusable entity structure.",
   },
   {
     icon: Database,
     tone: "#818cf8",
-    title: "Physical",
-    kicker: "dbt-first implementation",
-    text: "Drag dbt YAML into physical diagrams, refine constraints, relationship tests, physical names, and generated SQL readiness.",
+    title: "Ground it in dbt",
+    kicker: "Physical model",
+    text: "Import dbt, review YAML readiness, fix metadata/tests/contracts, and keep changes as reviewable Git diffs.",
   },
 ];
 
 const FEATURE_ITEMS = [
-  { icon: FolderTree, text: "One DataLex root with a domain-first layout: <domain>/<conceptual|logical|physical>/..., plus generated-sql/ for exported SQL." },
-  { icon: Route, text: "The + button starts with the right layer so each diagram opens in the correct workbench mode." },
-  { icon: Network, text: "Relationship handles on cards create business, logical, or physical relationships for the active layer." },
-  { icon: FileCode2, text: "Logical models can generate staged dbt SQL and YAML before you promote them into the connected repo." },
-  { icon: CheckCircle2, text: "Layer-aware validation catches missing definitions, weak keys, unresolved types, and dbt readiness gaps." },
-  { icon: GitBranch, text: "Every change is YAML on disk, so Save All produces clean Git diffs for review." },
+  { icon: FolderTree, text: "Import a dbt repo and keep the same files visible instead of creating a separate review workspace." },
+  { icon: CheckCircle2, text: "See red/yellow/green readiness on YAML files, then open the file to understand the gap." },
+  { icon: Sparkles, text: "Use DataLex AI to explain findings and create reviewable YAML proposals, not silent auto-edits." },
+  { icon: Route, text: "Move from physical dbt metadata into conceptual, logical, semantic, and governance models." },
+  { icon: FileCode2, text: "Generate or refine dbt SQL/YAML from approved modeling decisions when the model is ready." },
+  { icon: GitBranch, text: "Save everything as local YAML so teams review changes through normal Git workflows." },
 ];
 
 function IconBadge({ icon: Icon, color }) {
@@ -160,7 +183,7 @@ export default function OnboardingWelcomeDialog({ onClose }) {
             <Sparkles size={12} /> Modeling Workbench
           </div>
 
-          <div style={{ display: "grid", gap: 10, maxWidth: 690 }}>
+          <div style={{ display: "grid", gap: 10, maxWidth: 720 }}>
             <h2
               id="onboarding-title"
               style={{
@@ -172,7 +195,7 @@ export default function OnboardingWelcomeDialog({ onClose }) {
                 letterSpacing: 0,
               }}
             >
-              Build enterprise data models as YAML, from concept to dbt.
+              DataLex turns dbt projects into governed, AI-ready data models.
             </h2>
             <p
               style={{
@@ -182,9 +205,10 @@ export default function OnboardingWelcomeDialog({ onClose }) {
                 color: "var(--text-secondary)",
               }}
             >
-              DataLex now guides you through conceptual, logical, and physical modeling in one workbench.
-              Each layer has its own language, actions, validation, and files, while everything stays local
-              and Git-versioned.
+              Modern analytics teams move fast in SQL and dbt, but the business meaning, modeling rules,
+              ownership, tests, and semantic context often stay scattered. That makes reuse harder and makes
+              AI agents less reliable. DataLex adds a lightweight modeling and review layer around your existing
+              YAML so teams can detect gaps early, fix them with context, and build better semantic foundations.
             </p>
           </div>
         </div>
@@ -192,9 +216,46 @@ export default function OnboardingWelcomeDialog({ onClose }) {
         <div
           style={{
             display: "grid",
-            gridTemplateColumns: "repeat(auto-fit, minmax(190px, 1fr))",
+            gridTemplateColumns: "repeat(auto-fit, minmax(210px, 1fr))",
             gap: 10,
             padding: "6px 32px 18px",
+          }}
+        >
+          {VALUE_POINTS.map((item) => {
+            const Icon = item.icon;
+            return (
+              <div
+                key={item.title}
+                style={{
+                  border: "1px solid var(--border-default)",
+                  background: "var(--bg-1)",
+                  borderRadius: 10,
+                  padding: 13,
+                  display: "flex",
+                  gap: 10,
+                  alignItems: "flex-start",
+                }}
+              >
+                <IconBadge icon={Icon} color={item.tone} />
+                <div>
+                  <div style={{ fontSize: 13, fontWeight: 700, color: "var(--text-primary)", marginBottom: 4 }}>
+                    {item.title}
+                  </div>
+                  <div style={{ fontSize: 12, lineHeight: 1.5, color: "var(--text-secondary)" }}>
+                    {item.text}
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: "repeat(auto-fit, minmax(190px, 1fr))",
+            gap: 10,
+            padding: "0 32px 18px",
           }}
         >
           {WORKFLOW_STEPS.map((step, index) => {
@@ -247,7 +308,7 @@ export default function OnboardingWelcomeDialog({ onClose }) {
             <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10 }}>
               <BookOpen size={15} style={{ color: "var(--accent, #3b82f6)" }} />
               <div style={{ fontSize: 12, fontWeight: 700, color: "var(--text-primary)" }}>
-                What this tour covers
+                What the guided tour shows
               </div>
             </div>
             <div

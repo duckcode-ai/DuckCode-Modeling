@@ -66,8 +66,8 @@ export default function ImportDbtRepoDialog() {
   // Show the Import Results panel instead of closing. The actual load of
   // the tree into the workspace is deferred to the panel's "Open project"
   // button via `openProject`.
-  const showResults = ({ tree, report, sourceLabel, openProject }) => {
-    setResults({ tree: tree || [], report: report || null, sourceLabel, openProject });
+  const showResults = ({ tree, report, sourceLabel, openProject, readinessReview, readinessReviewError }) => {
+    setResults({ tree: tree || [], report: report || null, sourceLabel, openProject, readinessReview, readinessReviewError });
   };
 
   const handleFolder = async () => {
@@ -82,7 +82,10 @@ export default function ImportDbtRepoDialog() {
 
     const openProject = async () => {
       if (editInPlace && res.project && res.project.id) {
-        await loadDbtImportTreeAsProject(tree, res.project);
+        await loadDbtImportTreeAsProject(tree, res.project, {
+          readinessReview: res.readinessReview || null,
+          readinessReviewError: res.readinessReviewError || null,
+        });
         addToast({
           type: "success",
           message: `Opened ${dir} in place — ${tree.length} file${tree.length === 1 ? "" : "s"}. AI indexed ${res.aiIndex?.recordCount || 0} dbt/DataLex facts.`,
@@ -91,6 +94,12 @@ export default function ImportDbtRepoDialog() {
           addToast({
             type: "warning",
             message: `dbt import succeeded, but AI index rebuild failed: ${res.aiIndexError}`,
+          });
+        }
+        if (res.readinessReviewError) {
+          addToast({
+            type: "warning",
+            message: `dbt import succeeded, but readiness review failed: ${res.readinessReviewError}`,
           });
         }
         const collisions = useWorkspaceStore.getState().dbtImportCollisions || [];
@@ -109,7 +118,14 @@ export default function ImportDbtRepoDialog() {
       }
     };
 
-    showResults({ tree, report: res.report || null, sourceLabel: dir, openProject });
+    showResults({
+      tree,
+      report: res.report || null,
+      sourceLabel: dir,
+      openProject,
+      readinessReview: res.readinessReview || null,
+      readinessReviewError: res.readinessReviewError || null,
+    });
   };
 
   const handleGit = async () => {
@@ -177,6 +193,8 @@ export default function ImportDbtRepoDialog() {
           report={results.report}
           tree={results.tree}
           sourceLabel={results.sourceLabel}
+          readinessReview={results.readinessReview}
+          readinessReviewError={results.readinessReviewError}
           onClose={handleOpen}
         />
       </Modal>

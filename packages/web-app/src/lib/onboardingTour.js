@@ -16,7 +16,7 @@
 import { driver } from "driver.js";
 import "driver.js/dist/driver.css";
 
-export const TOUR_VERSION = 2;
+export const TOUR_VERSION = 3;
 const STORAGE_KEY = "datalex.onboarding.seen";
 
 /** The steps, in order. Each step is a driver.js PopoverStep. */
@@ -25,7 +25,7 @@ const TOUR_STEPS = [
     popover: {
       title: "Welcome to DataLex",
       description:
-        "DataLex is a git-native modeling workbench for conceptual, logical, and physical dbt-centered models. This tour walks through the icons and panels used to create, relate, validate, and save YAML assets.",
+        "DataLex helps analytics teams turn dbt projects into governed, AI-ready models. The goal is not extra ceremony: it is clearer meaning, better metadata, earlier gap detection, and safer semantic/agentic analytics.",
       side: "over",
       align: "center",
     },
@@ -33,9 +33,9 @@ const TOUR_STEPS = [
   {
     element: '[data-tour="import-dbt"]',
     popover: {
-      title: "1 · Import dbt when you need physical models",
+      title: "1 · Start from the dbt repo",
       description:
-        "Start from a local dbt folder or a public git URL. DataLex keeps the original dbt YAML visible and creates a physical diagram you can use for table relationships, constraints, and SQL readiness.",
+        "Import a local dbt folder or public Git repo. DataLex keeps the YAML visible, indexes dbt context, and runs readiness review so missing descriptions, types, tests, ownership, and relationships are visible early.",
       side: "bottom",
       align: "start",
     },
@@ -43,9 +43,9 @@ const TOUR_STEPS = [
   {
     element: '[data-tour="new-modeling-asset"]',
     popover: {
-      title: "2 · Create by modeling layer",
+      title: "2 · Model by intent, not just files",
       description:
-        "The + button now asks for <strong>Conceptual</strong>, <strong>Logical</strong>, or <strong>Physical</strong>. New assets live under a domain-first layout: <code>&lt;domain&gt;/&lt;layer&gt;/...</code> inside the DataLex workspace.",
+        "Create conceptual, logical, or physical assets when the repo needs more than raw dbt YAML. Conceptual captures business meaning, logical captures reusable rules, and physical stays grounded in dbt.",
       side: "bottom",
       align: "start",
     },
@@ -53,9 +53,9 @@ const TOUR_STEPS = [
   {
     element: '[data-tour="explorer-files"]',
     popover: {
-      title: "3 · Explorer shows the real YAML tree",
+      title: "3 · Review the same YAML files",
       description:
-        "Every file here is on disk. DataLex keeps modeling files grouped by domain first, then layer, so teams can stay inside one business area without jumping between separate diagram and model roots.",
+        "Explorer is the working tree. Imported dbt/DataLex YAML files show readiness badges, so red/yellow/green status stays attached to the file users already need to fix.",
       side: "right",
       align: "start",
     },
@@ -63,9 +63,9 @@ const TOUR_STEPS = [
   {
     element: '[data-tour="workbench-studio"]',
     popover: {
-      title: "4 · Work in the right layer mode",
+      title: "4 · Work in the right modeling mode",
       description:
-        "The canvas toolbar changes by layer: conceptual adds business concepts, logical adds entities and keys, and physical opens dbt-backed table, constraint, and SQL workflows.",
+        "The canvas changes by layer. Use conceptual mode for business language, logical mode for rules and keys, and physical mode for dbt-backed tables, constraints, tests, and SQL readiness.",
       side: "bottom",
       align: "center",
     },
@@ -73,9 +73,9 @@ const TOUR_STEPS = [
   {
     element: '[data-tour="add-entities"]',
     popover: {
-      title: "5 · Compose diagrams from YAML",
+      title: "5 · Connect models to meaning",
       description:
-        "In physical mode, drag dbt YAML from Explorer onto the diagram. In conceptual and logical modes, create diagram-first boxes and keep the business or logical design in the diagram YAML.",
+        "Drag dbt YAML into physical diagrams, or create conceptual/logical boxes directly. The useful part is traceability: business concept to logical structure to physical dbt asset.",
       side: "bottom",
       align: "center",
     },
@@ -83,9 +83,9 @@ const TOUR_STEPS = [
   {
     element: '[data-tour="add-relationship"]',
     popover: {
-      title: "6 · Add relationships by layer",
+      title: "6 · Make relationships explicit",
       description:
-        "Click <strong>Add Relationship</strong> or drag from a relationship handle. Conceptual relationships use business verbs, logical relationships capture roles and cardinality, and physical relationships capture dbt/database intent.",
+        "Relationships are where AI and semantic layers often fail. Add business verbs, logical cardinality, and physical relationship tests so joins and answers are easier to explain.",
       side: "bottom",
       align: "center",
     },
@@ -93,9 +93,9 @@ const TOUR_STEPS = [
   {
     element: '[data-tour="panel-tab-validation"]',
     popover: {
-      title: "7 · Validate what matters for the layer",
+      title: "7 · Detect gaps before they spread",
       description:
-        "Validation is layer-aware: conceptual checks definitions and domains, logical checks keys and unresolved types, and physical checks dbt YAML, SQL output, names, and relationship readiness.",
+        "Validation and dbt readiness review explain what is missing and why it matters: definitions, domains, keys, types, tests, contracts, governance, and import health.",
       side: "top",
       align: "start",
     },
@@ -103,9 +103,9 @@ const TOUR_STEPS = [
   {
     element: '[data-tour="save-all"]',
     popover: {
-      title: "8 · Save All, then review in Git",
+      title: "8 · Apply only reviewed changes",
       description:
-        "Every edit is YAML on disk. Save All flushes the workbench, generated dbt assets, and diagram files so your next step is a normal Git diff and commit.",
+        "AI can explain gaps and propose YAML fixes, but changes stay reviewable. Save All writes local YAML so the next step is a normal Git diff and commit.",
       side: "bottom",
       align: "end",
     },
