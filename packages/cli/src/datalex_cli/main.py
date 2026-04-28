@@ -1953,6 +1953,40 @@ def cmd_emit_catalog(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_docs_export(args: argparse.Namespace) -> int:
+    """Walk a DataLex project and write per-model + per-domain Markdown docs.
+
+    Output layout under `--out`:
+
+        <out>/<domain>/<model>.md     — per-model data dictionary
+        <out>/<domain>/README.md      — per-domain summary + mermaid ERD
+        <out>/README.md               — top-level index over all domains
+
+    Doc-block references (`description_ref: { doc: <name> }`) resolve to
+    rendered prose via the existing DocBlockIndex.
+    """
+    from datalex_core.docs_export import export_docs
+
+    project_root = Path(args.project)
+    out_dir = Path(args.out)
+    if not project_root.is_dir():
+        print(f"ERROR: project directory not found: {project_root}", file=sys.stderr)
+        return 1
+
+    summary = export_docs(project_root, out_dir)
+    if getattr(args, "json", False):
+        import json as _json
+        print(_json.dumps(summary.to_json(), indent=2))
+    else:
+        print(f"[docs export] project = {summary.project_root}")
+        print(f"[docs export] out     = {summary.out_dir}")
+        print(f"[docs export] domains: {len(summary.domains)} ({sum(summary.domains.values())} models)")
+        for domain, count in sorted(summary.domains.items()):
+            print(f"  - {domain}: {count} model(s)")
+        print(f"[docs export] files written: {len(summary.files_written)}")
+    return 0
+
+
 def cmd_dbt_docs_reindex(args: argparse.Namespace) -> int:
     """Rebuild the dbt `{% docs %}` index for a project and print a summary.
 
@@ -3560,6 +3594,18 @@ def build_parser() -> argparse.ArgumentParser:
     )
     dbt_docs_reindex.add_argument("--json", action="store_true", help="Emit JSON instead of a summary")
     dbt_docs_reindex.set_defaults(func=cmd_dbt_docs_reindex)
+
+    # ─── Project-wide docs export ─────────────────────────────────────────
+    docs_parser = sub.add_parser("docs", help="Project-wide documentation tools")
+    docs_sub = docs_parser.add_subparsers(dest="docs_command", required=True)
+    docs_export = docs_sub.add_parser(
+        "export",
+        help="Walk a project and write per-model + per-domain Markdown docs (with mermaid ERDs)",
+    )
+    docs_export.add_argument("--project", required=True, help="Path to the DataLex project root")
+    docs_export.add_argument("--out", required=True, help="Output directory for the generated MD tree")
+    docs_export.add_argument("--json", action="store_true", help="Emit JSON summary on stdout")
+    docs_export.set_defaults(func=cmd_docs_export)
 
     pull_parser = sub.add_parser("pull", help="Pull schema from a live database into a DataLex model")
     pull_parser.add_argument("connector", help="Connector type (postgres, mysql, snowflake, bigquery, databricks, sqlserver, azure_sql, azure_fabric, redshift)")

@@ -5425,6 +5425,45 @@ app.post("/api/export/catalog", requireAdmin, express.json({ limit: "2mb" }), as
   }
 });
 
+// Project-wide markdown docs export. Walks the DataLex project, writes
+// per-model + per-domain Markdown (with mermaid ERDs) under `out_dir`,
+// and resolves doc-block references through the existing index.
+//
+// Body: { project_dir, out_dir? }
+// `out_dir` defaults to `<project_dir>/docs/_generated/`.
+app.post("/api/docs/export", requireAdmin, express.json(), async (req, res, next) => {
+  try {
+    const projectDir = String(req.body?.project_dir || "").trim();
+    if (!projectDir || !existsSync(projectDir)) {
+      return apiFail(res, 400, "VALIDATION", "project_dir is required and must exist");
+    }
+    const outDir = String(req.body?.out_dir || "").trim()
+      || join(projectDir, "docs", "_generated");
+    mkdirSync(outDir, { recursive: true });
+
+    const { cmd, argv } = dmExec(
+      "docs", "export",
+      "--project", projectDir,
+      "--out", outDir,
+      "--json",
+    );
+    const output = execFileSync(cmd, argv, {
+      encoding: "utf-8",
+      timeout: 120_000,
+      cwd: REPO_ROOT,
+    });
+    let summary;
+    try {
+      summary = JSON.parse(output);
+    } catch (_err) {
+      return apiFail(res, 500, "INTERNAL", "docs export did not return JSON", output.slice(-400));
+    }
+    res.json({ ok: true, summary });
+  } catch (err) {
+    next(err);
+  }
+});
+
 // Forward engineering: generate SQL from model YAML
 app.post("/api/forward/generate-sql", requireAdmin, express.json(), async (req, res) => {
   try {
