@@ -264,6 +264,34 @@ docker run --rm -p 3030:3001 \
 
 In the UI, use `/workspace` as the dbt repository path.
 
+### Update to the latest
+
+When you want to pick up the newest fixes (or a fix that's already on
+`main` but not yet on PyPI), run:
+
+```bash
+bash scripts/update.sh
+```
+
+The script auto-detects how `datalex-cli` is installed in your active
+Python environment and runs the right upgrade — `git pull` + `pip
+install -e .` for source checkouts, `pip install -U` from PyPI for
+PyPI installs, and a re-install from `main` for git-based installs.
+
+To force-pull the very latest from GitHub (skipping PyPI), pass:
+
+```bash
+bash scripts/update.sh --from-source
+```
+
+That's the workaround when a recent fix has merged to `main` but the
+next PyPI release hasn't shipped yet. Equivalent one-liner without the
+script:
+
+```bash
+pip install -U "git+https://github.com/duckcode-ai/DataLex.git#subdirectory=packages/cli"
+```
+
 ### Install Troubleshooting
 
 If `datalex serve` fails with:
