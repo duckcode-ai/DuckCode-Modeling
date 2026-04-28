@@ -42,6 +42,25 @@ terminal. The `[serve]` extra pulls a portable Node runtime. If you
 already have Node 20+ on PATH, plain `pip install datalex-cli` works
 too.
 
+### When the app opens — the Onboarding Journey (1.4.1)
+
+A **480px right-rail panel** slides in on first launch and walks you
+through six concrete actions. Each step has a primary button that opens
+the right dialog and **auto-advances** when the underlying event fires.
+Progress is saved — close the panel anytime and resume where you left off.
+
+| # | Step | What it does |
+|---|---|---|
+| 1 | **Welcome to DataLex** | Two-line value prop — click **Let's go** |
+| 2 | **Connect your project** | Opens the Import dialog. Paste a Git URL (try `https://github.com/duckcode-ai/jaffle-shop-DataLex`) or pick a local dbt folder. **Edit in place** writes back to your real YAML. |
+| 3 | **See what's missing** | Activates the Validation drawer; click any red file to view readiness gaps |
+| 4 | **Design your first business domain** | `+` opens the New Logical Entity dialog (Customer, Order, …) |
+| 5 | **Add your AI provider** | Opens Settings → AI; paste an OpenAI / Anthropic / local-LLM key |
+| 6 | **Ask AI to draw a diagram** | One-click **Conceptualizer** proposes entities + relationships from your staging models |
+
+Replay anytime via **Settings → Replay onboarding**. The deeper 13-step
+spotlight tour is still there under **Settings → Deep feature tour**.
+
 **Point it at your dbt repo:**
 
 ```bash
@@ -52,28 +71,6 @@ datalex serve --project-dir .
 The folder auto-registers as your active project; the browser opens
 straight into your real file tree. Every UI edit writes back to the
 original `.yml` files — `git status` shows real diffs.
-
-**Build your first ER diagram:**
-
-1. Click **Import dbt repo → Local folder** → pick your project root
-2. Click **New modeling asset** and choose Conceptual, Logical, or
-   Physical. New assets use the domain-first structure
-   `DataLex/<domain>/<conceptual|logical|physical>/...`.
-3. Open the new `.diagram.yaml`. Conceptual and logical diagrams can
-   create boxes directly; physical diagrams are dbt-first, so drag any
-   `schema.yml` / `.model.yaml` from the Explorer onto the canvas.
-   Relationship handles on each card create business, logical, or
-   physical relationships for the active layer.
-4. Open **Ask AI** from the right panel, canvas, Explorer, validation
-   row, or selected object when you want the agent to explain the model,
-   reverse-engineer business concepts, or propose YAML changes. AI
-   proposals are approval-gated; use **Review plan** to inspect the full
-   context and proposed YAML before applying.
-5. Drag to reposition → **Save All** → positions persist in the
-   diagram file; `git commit` picks them up. Save All is merge-safe:
-   multiple in-memory docs targeting the same `schema.yml` are merged
-   through the core-engine `merge_models_preserving_docs` helper
-   instead of clobbering siblings.
 
 See **[docs/getting-started.md](docs/getting-started.md)** for the full
 path matrix (demo → local dbt → git URL → live warehouse).

@@ -33,12 +33,35 @@ pip install 'datalex-cli[serve,all]'             # every driver + Node
 Verify the installed package before opening a real repo:
 
 ```bash
-datalex --version
+datalex --version    # 1.4.1+
 ```
 
 If startup fails with
 `ERR_MODULE_NOT_FOUND ... datalex_core/_server/ai/providerMeta.js`,
 upgrade to `datalex-cli` 1.4.0 or newer.
+
+### What you'll see when the app opens (1.4.1)
+
+A six-step **Onboarding Journey** panel slides in from the right:
+
+1. **Welcome to DataLex** — two-line value prop · click *Let's go*
+2. **Connect your project** — opens the Import dialog. Use a Git URL
+   (e.g. `https://github.com/duckcode-ai/jaffle-shop-DataLex` for the
+   demo) or paste an absolute path to a dbt folder.
+3. **See what's missing** — opens the Validation drawer; click any red
+   file to view readiness gaps (these mirror what CI scores).
+4. **Design your first business domain** — `+` opens the New Logical
+   Entity dialog. Start with one concept like `Customer` or `Order`.
+5. **Add your AI provider** — opens Settings → AI; paste an
+   OpenAI / Anthropic key (or pick the local provider — no key needed).
+6. **Ask AI to draw a diagram** — one click runs the **Conceptualizer**
+   against your staging models and proposes entities + relationships.
+
+Each step auto-completes when its underlying action succeeds. Close the
+panel anytime — the floating "Onboarding · n/6" pill resumes you where
+you left off. Replay from **Settings → Replay onboarding**; the full
+13-step spotlight tour is still available under **Settings → Deep
+feature tour**.
 
 ---
 
