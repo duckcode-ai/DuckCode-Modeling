@@ -245,13 +245,26 @@ pointed at a real dbt repo to switch layouts.
 
 ## What to do next
 
-- **Round-trip to dbt** — `datalex datalex dbt emit models/
+- **Round-trip to dbt** — `datalex dbt emit models/
   --out-dir ~/your-dbt-repo/` regenerates `schema.yml` files with
-  the DataLex column metadata merged in.
+  the DataLex column metadata merged in. Doc-block references
+  (`{{ doc("...") }}`) are preserved across the round-trip in 1.4.
+- **Score the imported tree (1.4)** —
+  `datalex readiness-gate --project ~/your-dbt-repo --min-score 70`
+  surfaces gaps before you push. Wire it into CI with
+  [Tutorial: CI readiness gate](ci-readiness-gate.md).
+- **Author org-specific rules (1.4)** —
+  [Tutorial: Custom policy packs](policy-packs.md) walks through
+  `regex_per_layer`, `required_meta_keys`, contract enforcement,
+  and selectors.
 - **Gate PRs on breaking changes** — `datalex gate old.yaml
-  new.yaml` (see `docs/cli.md`).
+  new.yaml` (see [docs/cli.md](../cli.md)).
 - **Combine with a dbt import** — if you already have a dbt
   project, [import it first](import-existing-dbt.md), then pull
   the warehouse to fill in column types for models dbt hasn't
   built yet.
-- **Full CLI reference** — `docs/cli.md`.
+- **Try the AI agents (1.4)** — the entity inspector empty state
+  surfaces the **Conceptualize from staging** and **Canonicalize
+  from staging** buttons. See
+  [Agentic AI modeling](../ai-agentic-modeling.md).
+- **Full CLI reference** — [docs/cli.md](../cli.md).

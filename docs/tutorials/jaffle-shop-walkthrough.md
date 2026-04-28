@@ -1,11 +1,20 @@
 # Jaffle-shop end-to-end walkthrough
 
 The fastest way to see every DataLex feature is the dedicated
-`duckcode-ai/jaffle-shop-DataLex` repository. It keeps the familiar
-jaffle-shop domain, but adds the pieces needed to exercise DataLex end
-to end: DuckDB seeds, dbt staging and marts, semantic models,
-conceptual/logical/physical diagrams, generated SQL/YAML, Interface
-metadata, and project-local modeling skills.
+[`duckcode-ai/jaffle-shop-DataLex`](https://github.com/duckcode-ai/jaffle-shop-DataLex)
+repository. It keeps the familiar jaffle-shop domain, but adds the
+pieces needed to exercise DataLex end-to-end:
+
+- DuckDB seeds + dbt staging and marts
+- Semantic models + a metricflow time spine
+- Conceptual / logical / physical diagrams under
+  `DataLex/commerce/`
+- **`{% docs %}` block round-trip** — `models/docs/_canonical.md`
+  shared across `stg_customers.yml` and `fct_orders.yml`
+- **A custom policy pack** at `.datalex/policies/jaffle.policy.yaml`
+- **Snapshots / exposures / unit tests** wired into the new drawer panels
+- **Glossary bindings** ready for `datalex emit catalog`
+- A GitHub Actions workflow that runs `actions/datalex-gate` on every PR
 
 You'll end with:
 
@@ -13,140 +22,238 @@ You'll end with:
   project skills in one tree
 - Conceptual, logical, and physical diagrams that demonstrate the three
   modeling layers
-- Interface readiness checks on shared dbt models such as
-  `dim_customers` and `fct_orders`
-- A real `.git` history of your edits — DataLex writes back into the
-  cloned repo, so `git log` / `git diff` show normal dbt changes
+- Red / yellow / green readiness badges on every YAML file
+- Interface readiness checks on shared dbt models
+  (`dim_customers`, `fct_orders`)
+- A real `.git` history of your edits
 
-**Time:** 5 minutes. **Prerequisites:** Python 3.11 or 3.12 for dbt,
+**Time:** 8 minutes. **Prerequisites:** Python 3.11 or 3.12 for dbt,
 Git, and network access to `github.com`.
 
 ---
 
-## Step 1 — Install and start the server
+## Step 1 — Install and clone
 
-```bash
-pip install 'datalex-cli[serve]'     # CLI + bundled Node, one command
-datalex serve                        # opens http://localhost:3030
-```
-
-The `[serve]` extra bundles a portable Node runtime. If you already
-have Node 20+ on your PATH, plain `pip install datalex-cli` works too.
-
-The first `datalex serve` call prints something like:
-
-```
-[datalex] Starting DataLex server on http://localhost:3030
-[datalex]   server:   /…/datalex_core/_server/index.js
-[datalex]   web dist: /…/datalex_core/_webapp
-[datalex]   project:  /Users/you/current-dir
-```
-
-A browser tab opens on `http://localhost:3030`. If it doesn't, open
-that URL manually or re-run with `--no-browser` and copy the link.
-
-## Step 2 — Clone and build the DataLex jaffle-shop repo
-
-Use the example repo as the project root. It is designed for DataLex,
-so you do not need to start from the generic starter repo.
+The example repo's `make setup` target installs everything in one go.
+That includes `datalex-cli >= 1.4.0` plus dbt-core / dbt-duckdb.
 
 ```bash
 git clone https://github.com/duckcode-ai/jaffle-shop-DataLex ~/src/jaffle-shop-DataLex
 cd ~/src/jaffle-shop-DataLex
-python3.12 -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
-dbt seed --profiles-dir .
-dbt build --profiles-dir .
+make setup        # creates .venv with dbt + datalex-cli
+make doctor       # prints Python / dbt / datalex versions
 ```
 
-This creates `jaffle_shop.duckdb` locally. The database file is ignored
-by git.
+Use Python 3.11 or 3.12 for this dbt example. Python 3.13+ currently
+breaks in dbt's serializer stack; if you can't manage Python versions
+locally, use **Step 1 (alt)** below instead.
 
-Use Python 3.11 or 3.12 for this dbt example. Python 3.14 currently
-breaks in dbt's serializer stack; use Docker if you do not want to
-manage Python versions locally.
-
-Now start DataLex against the clone:
+### Step 1 (alt) — Docker
 
 ```bash
-datalex serve --project-dir ~/src/jaffle-shop-DataLex
+git clone https://github.com/duckcode-ai/jaffle-shop-DataLex ~/src/jaffle-shop-DataLex
+cd ~/src/jaffle-shop-DataLex
+make docker-up    # builds the image, runs dbt + datalex serve in a container
 ```
 
-The Explorer should show this project shape:
+Open `http://localhost:3030`. Skip to step 3.
 
-```
-DataLex/
-  commerce/
-    Conceptual/commerce_concepts.diagram.yaml
-    Logical/commerce_logical.diagram.yaml
-    Physical/duckdb/commerce_physical.diagram.yaml
-    Generated/dbt/customer_order_summary.sql
-models/
-  staging/
-    jaffle_shop/
-  marts/
-    core/
-  semantic/
+## Step 2 — Build the warehouse and start the server
+
+```bash
+make seed         # dbt seed --profiles-dir .
+make build        # dbt build --profiles-dir .  → jaffle_shop.duckdb
+make serve        # datalex serve --project-dir .
 ```
 
-## Step 3 — Review the three DataLex layers
+A browser tab opens on `http://localhost:3030`. The Explorer should
+show this project shape:
 
-The example repo already includes diagrams that demonstrate the three
-DataLex layers.
+```
+.
+├── .datalex/
+│   └── policies/jaffle.policy.yaml          ◀ custom rule pack (1.4)
+├── DataLex/
+│   └── commerce/
+│       ├── _glossary.model.yaml             ◀ glossary + bindings (1.4)
+│       ├── Conceptual/commerce_concepts.diagram.yaml
+│       ├── Logical/commerce_logical.diagram.yaml
+│       └── Physical/duckdb/commerce_physical.diagram.yaml
+├── models/
+│   ├── docs/_canonical.md                   ◀ {% docs %} blocks (1.4)
+│   ├── exposures.yml                        ◀ exposures (1.4)
+│   ├── staging/jaffle_shop/
+│   ├── marts/core/
+│   │   └── _unit_tests.yml                  ◀ dbt 1.8+ unit tests (1.4)
+│   └── semantic/
+└── snapshots/                               ◀ SCD-2 snapshot (1.4)
+    ├── customers_snapshot.sql
+    └── snapshots.yml
+```
 
-1. Open `DataLex/commerce/Conceptual/commerce_concepts.diagram.yaml`.
-   It uses business concepts and verbs: Customer places Order, Order
-   contains Order Item, Product describes Order Item, and Supply
-   supports Product.
-2. Open `DataLex/commerce/Logical/commerce_logical.diagram.yaml`. It
-   adds attributes, keys, candidate keys, business keys, and the Order
-   Line associative entity.
-3. Open `DataLex/commerce/Physical/duckdb/commerce_physical.diagram.yaml`.
-   It references dbt YAML files under `models/`, shows physical columns,
-   and maps relationships to dbt/database intent.
+## Step 3 — Run a readiness review
 
-## Step 4 — Open a model in the inspector
+The readiness review scores every YAML file red / yellow / green and
+surfaces fixable findings. It's the first thing to do on a new project.
 
-Click `models/marts/core/dim_customers.yml` in the Explorer.
+1. Top bar → **Run readiness review**.
+2. Wait ~2-3 seconds. The Explorer now shows a colored badge next to
+   every file.
+3. The status bar shows the rollup: e.g. `4 red · 11 yellow · 14 green`
+   on a fresh clone.
 
-- **Centre canvas** renders the entity as an ER node with columns
-  listed inline. Other entities it references (via FKs) are positioned
-  around it.
-- **Right panel** shows the Inspector: tabs for Columns, Relationships,
-  Indexes, Enums, Tests.
-- **Columns tab** lists each column. Any column missing a
-  `description` or `data_type` shows a warning pill — that's the lint
-  rule (`packages/web-app/src/lib/dbtLint.js`) running client-side
-  with no save-cost.
+Click any file with a yellow or red badge to open the **Validation**
+drawer. Each finding has:
 
-Try renaming a column description: click the description cell, type
-something, blur. The YAML updates in-memory and **autosave** flushes
-the change to disk ~800ms later — you'll see the **Diff** panel at
-the bottom transition from pending to clean.
+- A category (`metadata`, `dbt_quality`, `governance`, `import_health`,
+  `enterprise_modeling`)
+- The rationale and a suggested fix
+- An **Ask AI** button that hands the finding to a focused AI fix flow
 
-## Step 5 — Check Interface readiness
+Run the same gate from the CLI:
+
+```bash
+make readiness-gate
+# or
+.venv/bin/datalex readiness-gate --project . --min-score 70 \
+  --sarif datalex-readiness.sarif \
+  --pr-comment datalex-readiness.md
+```
+
+## Step 4 — Walk the three modeling layers
+
+The example repo includes diagrams for all three layers.
+
+1. **Conceptual** —
+   `DataLex/commerce/Conceptual/commerce_concepts.diagram.yaml`. Uses
+   business concepts and verbs: Customer places Order, Order contains
+   Order Item, Product describes Order Item, Supply supports Product.
+2. **Logical** —
+   `DataLex/commerce/Logical/commerce_logical.diagram.yaml`. Adds
+   attributes, candidate keys, business keys, and the Order Line
+   associative entity. Three columns now carry
+   `binding: { glossary_term, status }` references.
+3. **Physical** —
+   `DataLex/commerce/Physical/duckdb/commerce_physical.diagram.yaml`.
+   References dbt YAML files under `models/`, shows real DuckDB column
+   types, and maps relationships to dbt/database intent.
+
+## Step 5 — Inspect a model with doc-block round-trip
+
+Click `models/marts/core/fct_orders.yml` in the Explorer.
+
+- **Centre canvas** renders `fct_orders` as an ER node with columns
+  inline and FK edges to `stg_customers` / `stg_orders`.
+- **Right panel** shows the Inspector — Columns, Relationships,
+  Indexes, Tests.
+- The **Contract** card (1.4) is on. The toggle is green and lists no
+  blockers because every column has a concrete `data_type`. Toggle it
+  off and back on to see the live blocker list.
+- The `customer_id`, `order_id`, `order_total`, and `ordered_at`
+  columns are bound to the `{% docs %}` blocks in
+  `models/docs/_canonical.md`. The inspector shows the rendered
+  description **and** a small `📝 doc("customer_id")` indicator.
+- Open the `.md` file, edit the body of `{% docs customer_id %}` —
+  every column bound to it (in `stg_customers.yml`, `fct_orders.yml`,
+  and `snapshots.yml`) refreshes its rendered description on next save.
+
+Round-trip the project to confirm the references are preserved:
+
+```bash
+make docs-reindex    # rebuilds the {% docs %} index
+```
+
+## Step 6 — Open the new drawer panels
+
+The bottom drawer in the physical layer ships four 1.4-specific tabs.
+
+- **Snapshots** — opens `snapshots/snapshots.yml`. Shows the SCD-2
+  strategy + unique_key + check_cols card for `customers_snapshot`.
+- **Exposures** — opens `models/exposures.yml`. Shows two cards (exec
+  dashboard, marketing notebook) with owner.email + maturity pills.
+- **Unit Tests** — opens `models/marts/core/_unit_tests.yml`. Shows
+  `test_fct_orders_subtotal_rollup` with given/expect counts.
+- **Policy Packs** — lists `.datalex/policies/jaffle.policy.yaml`.
+  Click it to inspect or edit the rule pack inline.
+
+## Step 7 — Run the custom policy pack
+
+```bash
+make policy-check
+# or
+.venv/bin/datalex policy-check models/marts/core/fct_orders.yml \
+  --policy .datalex/policies/jaffle.policy.yaml \
+  --inherit
+```
+
+The pack inherits `datalex/standards/base.yaml` and adds:
+
+- Layer naming (`stg_*`, `fct_*`, `dim_*`)
+- Required meta keys for marts (`owner`, `grain`)
+- A PII classification rule (`error` severity)
+- Contract enforcement on `fct_*` models
+- Concrete `data_type` when contract is enforced
+
+Try editing the pack from the **Policy Packs** drawer panel — change
+the severity of `marts_require_contract` from `warn` to `error` and
+re-run the gate to see `fct_orders` go red if you remove its contract.
+
+## Step 8 — Try the Conceptualizer + Canonicalizer agents
+
+Open the entity inspector (right panel, Box icon) with **no entity
+selected**. Two new buttons appear:
+
+- **Conceptualize from staging** — clusters the four staging models
+  (`stg_customers`, `stg_orders`, `stg_order_items`, `stg_products`)
+  into business entities + relationships. On the demo: 5 entities
+  (Customer→crm, Order→sales, OrderItem→sales, Product→catalog,
+  Supply).
+- **Canonicalize from staging** — detects columns that recur across
+  staging models and lifts them into a logical canonical layer with
+  shared `{% docs %}` blocks. On the demo it (intentionally) returns
+  zero entities because each staging model maps to a different noun;
+  drop a duplicate staging model in (e.g. `stg_shopify_orders`) to see
+  it kick in.
+
+Both agents are deterministic — no API key required. Output flows
+through the existing **Review plan → Validate → Apply** flow, so
+nothing is written until you accept the proposal.
+
+## Step 9 — Export the glossary to a catalog (1.4)
+
+```bash
+make emit-catalog
+```
+
+Produces three JSON files under `out/catalog/`:
+
+- `atlan-commerce.json` — bulk import for Atlan
+- `datahub-commerce.json` — list of DataHub MCPs
+- `openmetadata-commerce.json` — OpenMetadata glossary import
+
+Each file carries the four glossary terms (`customer_id`,
+`customer_email`, `order_total`, `ordered_at`) with their bound
+columns from the logical diagram.
+
+## Step 10 — Mesh Interface readiness
 
 Open `models/marts/core/dim_customers.yml` and
 `models/marts/core/fct_orders.yml`. Both are marked as shared DataLex
 Interfaces under `meta.datalex.interface`.
 
-From a DataLex source checkout, run:
-
 ```bash
-cd /Users/Kranthi_1/DataLex
-.venv/bin/python ./datalex datalex mesh check /Users/Kranthi_1/DuckCode-DQL/jaffle-shop-DataLex --strict
+.venv/bin/datalex datalex mesh check . --strict
 ```
 
-Expected result:
+Expected:
 
 ```text
-DataLex mesh Interface check: /Users/Kranthi_1/DuckCode-DQL/jaffle-shop-DataLex
+DataLex mesh Interface check: /Users/.../jaffle-shop-DataLex
   strict: yes
   interfaces: ready
 ```
 
-## Step 6 — Turn on auto-commit (optional)
+## Step 11 — Turn on auto-commit (optional)
 
 1. Open the Commit dialog (`⌘⇧G` or the branch icon in the Chrome
    header).
@@ -155,51 +262,27 @@ DataLex mesh Interface check: /Users/Kranthi_1/DuckCode-DQL/jaffle-shop-DataLex
    succession. Auto-commit debounces bursty saves: within ~3s you'll
    see **exactly one** new commit in `git log`.
 
-Failure mode: if the commit fails (e.g. missing `user.email`), the
-save itself still succeeds — the auto-commit error surfaces as a
-toast so you can fix the config and retry manually.
+## Step 12 — See the readiness gate run on a PR
 
-## Step 7 — Review generated dbt assets
+The repo ships `.github/workflows/datalex.yml` that runs
+`actions/datalex-gate` on every PR. To exercise it:
 
-Open `DataLex/commerce/Generated/dbt/customer_order_summary.sql` and
-`DataLex/commerce/Generated/dbt/customer_order_summary.yml`. These show
-how DataLex-generated dbt work can stay staged and reviewable before it
-is promoted into `models/marts/core/`.
+1. `git checkout -b touch-readiness`
+2. Add a sloppy line to a YAML file (e.g. delete a `description`).
+3. Push and open a PR.
+4. The Action posts a sticky readiness comment, uploads SARIF to the
+   Security tab, and fails when the score drops below 70.
 
-After promoting generated dbt assets, run:
-
-```bash
-dbt build --profiles-dir .
-```
-
-## Step 8 — Apply DDL to a warehouse (optional)
-
-1. In an open `.model.yaml`, press `⌘K` → **Apply to warehouse…**
-2. Pick a dialect (DuckDB for a throwaway local run, Snowflake / BQ /
-   Databricks if you have a connector profile saved).
-3. Click **Generate DDL** — the preview shows the forward-engineered
-   SQL.
-4. Pick a connector profile. Leave **Dry run** checked for the first
-   pass; hit **Dry run**. The server compiles and validates against
-   the target without executing.
-5. Uncheck **Dry run** → **Apply** when you're ready.
-
-The endpoint is gated by `DM_ENABLE_DIRECT_APPLY` on the server. When
-disabled (the GitOps default), the dialog instead instructs you to
-commit the generated SQL and deploy via CI/CD.
-
-## Step 9 — Export a PNG of the diagram
-
-With any diagram open, press `⌘⇧E`. A PNG of the current canvas
-downloads. That same action lives in the diagram toolbar overflow
-menu for discoverability.
+📖 See [Tutorial: CI readiness gate](ci-readiness-gate.md) for the full
+rollout — including how to ratchet `min-score` up over time.
 
 ## What to do next
 
+- **Wire CI on your own repo →** [CI readiness gate](ci-readiness-gate.md)
+- **Author your own rules →** [Custom policy packs](policy-packs.md)
 - **Try the live warehouse flow →** [Pull a warehouse schema](warehouse-pull.md)
 - **Use your own dbt repo →** [Import an existing dbt project](import-existing-dbt.md)
-- **Hook it into CI →** `datalex gate old.yaml new.yaml` fails PRs on
-  breaking schema changes; see `docs/cli.md`.
+- **Ask AI deeper →** [Agentic AI modeling](../ai-agentic-modeling.md)
 
 ## Troubleshooting
 
@@ -207,7 +290,9 @@ menu for discoverability.
 |---------------------------------------------|--------------------------------------------------------------------|
 | Clone fails with a network error            | Check GitHub access, firewalls, proxies, or clone the repo through your normal Git credentials. |
 | `dbt build` cannot find a profile           | Run dbt commands from the repo root and include `--profiles-dir .`; the example ships a DuckDB `profiles.yml`. |
-| Rename cascade complains about a file       | The atomic endpoint rolls the whole rename back on any write failure. Fix the reported file (permissions, locks) and retry. |
+| Readiness review shows `red` everywhere     | The repo ships at ~78/100. If yours is much worse, run `make doctor` to confirm dbt has built — `target/manifest.json` and `target/catalog.json` both feed into the score. |
+| `DOC_BLOCK_OVERWRITE` when applying an AI proposal on `customer_id` | Doc-block-bound descriptions live in `models/docs/_canonical.md`. Edit the `{% docs %}` body, not the YAML description. |
+| `CONTRACT_PREFLIGHT` on `make` push to dbt-sync | A column in `fct_orders` is showing `type: unknown`. Run `make build` to repopulate types from the warehouse. |
 | Diff panel keeps showing changes after save | Stale editor state — hit `⌘R`. The in-flight Zustand store and the on-disk bytes should match. |
 | Auto-commit produces no commit              | Check `git config user.email` inside the cloned repo. The Chrome status bar shows the last auto-commit error as a toast. |
-| `ERR_MODULE_NOT_FOUND ... providerMeta.js` during `datalex serve` | Upgrade to `datalex-cli` 1.3.4 or newer. The older wheel is missing API server runtime files. |
+| `ERR_MODULE_NOT_FOUND ... providerMeta.js` during `datalex serve` | Upgrade to `datalex-cli` 1.4.0 or newer. |

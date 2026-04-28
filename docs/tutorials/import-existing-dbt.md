@@ -1,13 +1,15 @@
 # Import an existing dbt project
 
-This is the "bring your own dbt repo" path. You'll end with the same
-DataLex tree you saw in the [jaffle-shop walkthrough](jaffle-shop-walkthrough.md),
-but built from *your* models — with every `models/staging/`,
-`models/marts/…` folder preserved exactly as it was on disk.
+This is the "bring your own dbt repo" path. You'll end with a DataLex
+tree built from *your* models — every `models/staging/`,
+`models/marts/…` folder preserved exactly as it was on disk — plus
+red/yellow/green readiness scoring, a custom policy pack, and (if
+you're on dbt 1.8+) snapshots/exposures/unit-tests rendered in
+dedicated drawer panels.
 
-**Time:** 5 minutes. **Prerequisites:**
+**Time:** 8 minutes. **Prerequisites:**
 
-- Python 3.9+ with pip
+- Python 3.9+ with pip (3.11 or 3.12 recommended for dbt)
 - A dbt project you can read locally (either a folder path or a git URL)
 - `dbt` itself installed if your project hasn't been compiled yet
 - Node 20+ only if you install `datalex-cli` without the `[serve]` extra
@@ -18,44 +20,32 @@ but built from *your* models — with every `models/staging/`,
 
 The importer has two output modes:
 
-| Mode         | Writes to                                       | When to use                                            |
-|--------------|-------------------------------------------------|--------------------------------------------------------|
-| **In-memory**    | The browser's Zustand store only             | Exploratory — poke at the tree, discard it, try again  |
-| **On-disk**      | A real folder you pick                       | You want git diffs, PRs, CI — i.e., the real workflow  |
+| Mode             | Writes to                               | When to use                                            |
+|------------------|-----------------------------------------|--------------------------------------------------------|
+| **In-memory**    | The browser's Zustand store only        | Exploratory — poke at the tree, discard it, try again  |
+| **Edit in place**| Your real dbt folder                    | The real workflow — every save round-trips to disk     |
 
-The GUI defaults to in-memory for safety. After you've reviewed the
-tree, use **Save All** (top-bar button) to write it to a chosen folder.
+Pick **Edit in place** for the real workflow.
 
 ## Option A — From a local folder
 
-Install and verify DataLex first:
+### 1. Install and verify
 
 ```bash
 pip install -U 'datalex-cli[serve]'
-datalex --version
+datalex --version             # 1.4.0+
 ```
 
 If `datalex serve` fails with
 `ERR_MODULE_NOT_FOUND ... datalex_core/_server/ai/providerMeta.js`,
-upgrade to `datalex-cli` 1.3.4 or newer. That is an install bundle
-problem, not a dbt project problem.
-
-### 1. Start the server pointed at your project
-
-```bash
-datalex serve --project-dir ~/path/to/your-dbt-project
-```
-
-`--project-dir` sets the working directory for the api-server — this
-is where `.dm-projects.json`, connection metadata, and the auto-generated
-`dm` CLI shim live. It does **not** modify your dbt project files; it
-only reads them.
+upgrade to `datalex-cli` 1.4.0 or newer.
 
 ### 2. Compile manifest.json (if you haven't)
 
 The importer prefers `target/manifest.json` because it carries the
-full dbt graph, column types, and `original_file_path` for each model
-(which lets the Explorer preserve your folder structure).
+full dbt graph, column types, `original_file_path` for each model
+(preserves your folder structure), AND **doc-block bodies** for the
+1.4 round-trip:
 
 ```bash
 cd ~/path/to/your-dbt-project
@@ -64,43 +54,88 @@ dbt compile    # or `dbt parse` for a lighter run
 
 If `target/manifest.json` is missing, the importer falls back to
 plain YAML parsing — you lose column types but folder layout still
-works.
+works. Doc-block round-trip needs `dbt compile` so dbt has resolved
+the `{{ doc("…") }}` references against the right `.md` files.
 
-### 3. Run the import
+### 3. Start the server pointed at your project
+
+```bash
+datalex serve --project-dir ~/path/to/your-dbt-project
+```
+
+`--project-dir` sets the working directory for the api-server. It
+does **not** modify your dbt project files; it only reads them.
+
+### 4. Run the import
 
 1. Top bar → **Import dbt repo** (folder-arrow icon).
-2. In the dialog, pick **Local folder**.
-3. Click **Choose folder** and select your project root (the folder
-   that contains `dbt_project.yml`). Safari/Firefox get a multi-file
-   upload fallback; Chrome-based browsers get a native directory
-   picker.
-4. Click **Import**. The dialog shows a progress log while the
-   api-server shells out to `dm dbt sync`. For big projects (200+
-   models) expect a few seconds; the log streams each file.
-5. The Explorer populates. Every YAML file lives at exactly the path
-   it occupied in your dbt repo — `models/staging/customers/…`,
-   `models/marts/finance/…`, etc.
-6. The AI index rebuilds automatically. DataLex indexes dbt YAML, SQL,
-   `target/manifest.json`, `target/catalog.json`, semantic manifest,
-   validation findings, DataLex diagrams/models, glossary facts, and
-   `DataLex/Skills/*.md` so repo-wide Ask AI prompts can retrieve the
-   whole project context.
+2. Pick **Local folder**.
+3. **Choose folder** → your project root (folder containing
+   `dbt_project.yml`).
+4. Leave **☑ Edit in place** checked.
+5. Click **Import**.
 
-### 4. Walk the tree
+The api-server shells out to `dm dbt sync` in the background. For
+projects with 200+ models, expect a few seconds; the dialog streams
+each file. When it finishes, the Explorer shows every YAML file at
+its real dbt path.
 
-Open any model. The right-panel inspector now has:
+DataLex also rebuilds the local AI modeling index using your dbt YAML,
+SQL, `target/manifest.json`, `target/catalog.json`, semantic manifest,
+validation findings, **doc blocks**, and any DataLex artifacts. This
+is what lets repo-wide *Ask AI* prompts work after import.
+
+### 5. Run a readiness review
+
+New in 1.4: the readiness review scores every YAML file red / yellow /
+green and surfaces fixable findings.
+
+1. Top bar → **Run readiness review** (or right-click any folder →
+   *Run dbt readiness review*).
+2. Each file gets a colored badge in the Explorer.
+3. Click any badge → the **Validation** drawer shows the findings,
+   rationale, suggested fix, and an *Ask AI* handoff.
+
+Run the same gate from the CLI:
+
+```bash
+datalex readiness-gate --project ~/path/to/your-dbt-project \
+  --min-score 80 \
+  --sarif datalex-readiness.sarif \
+  --pr-comment datalex-readiness.md
+```
+
+→ Wire it into CI: [Tutorial: CI readiness gate](ci-readiness-gate.md).
+
+### 6. Walk the tree
+
+Open any model. The right-panel Inspector now shows:
 
 - **Column-level lint** — missing `description`, `data_type`, or
-  missing tests on primary-key columns each render a warning pill
-  (`packages/web-app/src/lib/dbtLint.js`).
+  missing tests on PK columns each render a warning pill.
 - **Column data types** — pulled from `manifest.json`'s compiled
-  schema. Columns that dbt couldn't resolve (e.g. new models that
-  haven't been built) show `—`.
-- **dbt metadata** — the raw dbt fields (`meta`, `tests`, `contract`)
-  are preserved under `meta.datalex.dbt.*` in the DataLex YAML. You
-  can round-trip this back to dbt with `datalex datalex dbt emit`.
+  schema. Columns dbt couldn't resolve show `—`.
+- **dbt metadata** — raw dbt fields (`meta`, `tests`, `contract`)
+  preserved under `meta.datalex.dbt.*`.
+- **Contract toggle** (1.4) — turn on `contract.enforced: true` per
+  model. The card shows a live blocker list of columns that still
+  need a `data_type`.
+- **Doc-block bindings** (1.4) — columns whose description came from
+  a `{% docs %}` block show a small `📝 doc("name")` indicator.
 
-### 5. Build your first diagram
+### 7. Try the new drawer panels (1.4)
+
+If your project has them, the bottom drawer surfaces dedicated tabs:
+
+- **Snapshots** — SCD strategy + unique_key + check_cols
+- **Exposures** — owner.email + maturity + dependencies
+- **Unit Tests** — given/expect rows + model under test
+- **Policy Packs** — list / edit `<project>/.datalex/policies/*.yaml`
+
+If your project doesn't have these resources yet, the panels show an
+empty state with a one-line nudge.
+
+### 8. Build your first diagram
 
 The import gave you the raw file tree. To see the ER diagram — and to
 compose several models onto one canvas — create a `.diagram.yaml`:
@@ -109,25 +144,16 @@ compose several models onto one canvas — create a `.diagram.yaml`:
    - **Explorer toolbar → New Diagram** (Layers icon). Lands in
      `datalex/diagrams/untitled.diagram.yaml`.
    - **Right-click any folder in the Explorer → New diagram here…**
-     to seed the file alongside the models it describes (for example
-     inside `models/marts/finance/`). Rename it to something
-     meaningful like `customer_360.diagram.yaml`.
+     to seed the file alongside the models it describes.
 2. Populate the canvas. Two interchangeable paths:
-   - **Canvas toolbar → Add Entities** (or pane right-click → Add
-     entities to diagram…). The picker lists every entity resolved
-     from the imported tree, with search, domain filter, and
-     multi-select. Entities already on the diagram are disabled.
-     Confirm → entities are appended and auto-lay-out via ELK (when
-     `layoutMode: elk` is active).
-   - **Drag `models/staging/schema.yml`** (or any individual
-     `.model.yaml`) from the Explorer onto the canvas. Each dbt model
-     in the dropped file appears as an entity; drops are deduped by
-     `(file, entity)`, so dropping the same file twice is idempotent.
+   - **Canvas toolbar → Add Entities** with search, domain filter,
+     multi-select.
+   - **Drag** `models/staging/schema.yml` (or any `.model.yaml`)
+     from the Explorer onto the canvas.
 3. Foreign keys from `tests: - relationships:` render as dashed edges
-   automatically — no manual wiring.
+   automatically.
 4. Drag entities to reposition. **Save All** persists positions into
-   the diagram YAML (not into your model files), so the same model
-   can live at different coordinates in different diagrams.
+   the diagram YAML.
 
 The diagram file looks like this on disk:
 
@@ -149,13 +175,25 @@ entities:
 Entity definitions stay in their original `.yml` files — the diagram
 only stores references and positions.
 
-### Use Ask AI after import
+### 9. Ask AI to model for you
 
-Ask AI is designed for the common dbt reality: teams often have physical
-models first and need help explaining, governing, or reverse-engineering
-them.
+Two new 1.4 buttons in the entity inspector empty state:
 
-Useful prompts after import:
+- **Conceptualize from staging** — clusters every staging-layer model
+  into business entities + relationships. Domains are inferred from
+  common nouns (customer→crm, order→sales, payment→finance, …). Output
+  is a `kind: diagram` proposal applied through the Review plan flow.
+- **Canonicalize from staging** — detects columns that recur across
+  staging models (same name, similar description) and lifts them into
+  a logical canonical entity with **shared `{% docs %}` blocks**
+  emitted alongside the YAML. The doc-blocks land at
+  `DataLex/docs/_canonical.md` so the round-trip preserves them.
+
+Both agents are deterministic. They produce proposals through the
+existing **Review plan → Validate → Apply** flow, so nothing is
+written until you accept it.
+
+For free-form Ask AI:
 
 ```text
 Reverse engineer this dbt repo into a business conceptual model.
@@ -164,41 +202,51 @@ Find weak relationships and missing tests for customer/order models.
 Propose focused YAML changes to improve descriptions and relationships.
 ```
 
-Where to ask:
+→ More: [Agentic AI modeling](../ai-agentic-modeling.md).
 
-- Right-panel **AI** tab for the active selection or file.
-- Canvas floating **Ask AI** button for diagram-level questions.
-- Right-click an entity, relationship, Explorer file/folder, or
-  validation issue and choose **Ask AI**.
-- Select text in a YAML/editor panel and use the small Ask AI affordance.
+### 10. Author a custom policy pack
 
-How proposals work:
+Custom rules live under `<project>/.datalex/policies/*.yaml` and
+inherit the bundled `datalex/standards/base.yaml`. Open the **Policy
+Packs** drawer tab and click **New pack**:
 
-1. The agent retrieves exact structured dbt/DataLex facts, BM25 lexical
-   matches, graph/lineage context, validation output, relevant skills, and
-   local memory.
-2. The chat shows the answer and any proposed YAML changes.
-3. Click **Review plan** to open the center review editor with the full
-   request, answer, sources, agents, skills, validation impact, and change
-   JSON.
-4. Click **Validate** before applying. Invalid YAML, path escapes, wrong
-   layer operations, and duplicate relationships are blocked.
-5. Click **Apply** only after review. DataLex writes through the same
-   guarded create/save/delete APIs as manual UI edits, refreshes Explorer,
-   rebuilds the graph, reruns validation, updates SQL previews, and
-   rebuilds the AI index.
+```yaml
+pack:
+  name: my-org-standards
+  version: 0.1.0
+  extends: datalex/standards/base.yaml
 
-Skills are project-local Markdown files under `DataLex/Skills/*.md`.
-Commit them when they represent team standards such as naming rules,
-governance requirements, dbt testing policy, or domain conventions.
+policies:
+  - id: stg_naming
+    type: regex_per_layer
+    severity: warn
+    params:
+      patterns:
+        stg: "^stg_[a-z][a-z0-9_]*$"
 
-### 6. Make an edit; see the diff
+  - id: marts_meta
+    type: required_meta_keys
+    severity: warn
+    params:
+      keys: [owner, grain]
+      selectors:
+        layer: fct
+```
+
+→ Full reference: [Custom policy packs](policy-packs.md).
+
+### 11. Make an edit; see the diff
 
 Rename a column description in the inspector. The **Diff** panel
 (bottom) shows the patch. This is exactly the diff that'll land in
 your git commit if you save.
 
-### 7. Save to disk
+> **Doc-block guardrail.** If you try to overwrite a description that
+> resolves through `description_ref: { doc: <name> }`, DataLex blocks
+> the save with a `DOC_BLOCK_OVERWRITE` toast and points you at the
+> `.md` file. This keeps the round-trip lossless.
+
+### 12. Save to disk
 
 Two options:
 
@@ -207,14 +255,11 @@ Two options:
   workspace root. Use **Save All** to flush every dirty file back to
   the original paths. Writes are merge-safe — when multiple in-memory
   docs target the same shared `schema.yml`, the api-server routes
-  through the core-engine `merge_models_preserving_docs` helper
-  instead of overwriting siblings. If a subset of files fails, Save
-  All returns a 207 Multi-Status response and the UI lists the exact
-  paths that didn't land. Your `git status` will show real diffs.
+  through the core-engine `merge_models_preserving_docs` helper. If a
+  subset of files fails, Save All returns a 207 Multi-Status response.
 
 - **Save to a fresh folder:** File menu → New Project → pick a
-  different folder → save. Useful for a side-by-side migration
-  without touching your real repo.
+  different folder → save. Useful for a side-by-side migration.
 
 ## Option B — From a git URL
 
@@ -227,25 +272,23 @@ datalex serve
 ### 2. Trigger the git import
 
 1. Top bar → **Import dbt repo**.
-2. Switch to the **Git URL** tab.
-3. Enter a public URL like `https://github.com/duckcode-ai/jaffle-shop-DataLex.git`
+2. **Git URL** tab.
+3. Paste a public URL like `https://github.com/duckcode-ai/jaffle-shop-DataLex.git`
    or a private one.
 4. Optional ref: branch, tag, or commit SHA (default: `main`).
-5. Click **Import**. The api-server clones the repo into
-   `$TMPDIR/datalex-dbt-<uuid>/`, runs `dm dbt sync` against it,
-   streams progress to the dialog, and hands the resulting tree to
-   the workspace store.
+5. **Import**. The api-server clones into
+   `$TMPDIR/datalex-dbt-<uuid>/`, runs the importer, and hands the
+   tree to the workspace store.
 
 ### 3. Save the imported tree
 
-In-memory by default, just like Option A step 7. If you want a
-permanent location, File menu → New Project → pick a folder →
-**Save All**.
+In-memory by default, just like Option A. For a permanent location,
+File menu → New Project → pick a folder → **Save All**.
 
 Private repos: the clone runs with whatever credentials are on the
-api-server host. For a cloud-hosted `dm serve`, set up SSH or a
+api-server host. For a cloud-hosted `datalex serve`, set up SSH or a
 credential helper on that machine; we don't prompt for tokens in the
-UI yet (tracked for a future PR).
+UI yet.
 
 ## What stays in sync, what doesn't
 
@@ -254,25 +297,25 @@ automatically. To emit DataLex → dbt:
 
 ```bash
 # Re-emit schema.yml with DataLex column metadata merged non-destructively
-datalex datalex dbt emit models/ --out-dir ~/your-dbt-repo/
+datalex dbt emit models/ --out-dir ~/your-dbt-repo/
 
 # Or re-sync (reads manifest.json + introspects the warehouse, merges
 # results back into DataLex YAML without clobbering hand edits)
-datalex datalex dbt sync ~/your-dbt-repo --out-root models/
+datalex dbt sync ~/your-dbt-repo --out-root models/
 ```
 
-The `sync` form is non-destructive — anything you hand-authored
-(custom tests, macros, meta fields) stays intact. Only DataLex-owned
-fields (`description`, `data_type`, `tests` you added via the
-inspector) are reconciled.
+The `sync` form is non-destructive — anything you hand-author (custom
+tests, macros, meta fields, **doc-block references**) stays intact.
+Only DataLex-owned fields are reconciled.
 
 ## Round-tripping: DataLex ↔ dbt
 
 ```
-  dbt repo  ─── import ──▶  DataLex tree  ─── generate ──▶  dbt repo
-   (models/…)               (models/…)                      (models/…)
-     \__________________________________________________________/
-                         same folder layout
+  dbt repo  ─── import ──▶  DataLex tree  ─── emit ──▶  dbt repo
+   (models/…)               (models/…)                  (models/…)
+     \________________________________________________________/
+                       same folder layout
+                       same `{{ doc(...) }}` references
 ```
 
 The `models/staging/stg_*.model.yaml` files in the DataLex tree write
@@ -286,21 +329,20 @@ relative paths. There's no translation layer to get lost in.
 | "manifest.json not found"                       | Run `dbt compile` in your project first.                               |
 | Explorer renders models as a flat list          | Your dbt version is old enough that `manifest.json` lacks `original_file_path`. Upgrade dbt or accept the flat layout. |
 | Column `data_type` shows `—` everywhere         | dbt hasn't compiled the model's source columns. Run `dbt run` once.   |
-| Git clone fails with auth error                 | The api-server host needs credentials. Configure SSH/PAT there, not in the UI. |
+| Doc-block descriptions render as `{{ doc("...") }}` literally | The doc-block index hasn't built yet. Run `datalex dbt docs reindex --project-dir <path>` or open the **Snapshots** drawer to trigger an index rebuild. |
+| `DOC_BLOCK_OVERWRITE` blocking a save           | A bound description can only be edited via the `.md` file. Open `models/docs/_canonical.md` (or wherever your `{% docs %}` blocks live) and edit there. |
+| Contract toggle stays red after typing data_types | Save the file — the blocker list refreshes from on-disk YAML, not the in-memory buffer. |
+| Git clone fails with auth error                 | The api-server host needs credentials. Configure SSH/PAT there.        |
 | "Import dbt repo" dialog hangs                  | Check the api-server logs (printed by `datalex serve`) — most often a Python dependency missing (`pip install dbt-core`). |
-| Folders appear but files inside are empty       | The dbt schema YAML was unparseable. The importer returns a structured `PARSE_FAILED` error with file path + line/column; open the dev-tools console or run `dbt parse` to see which file. |
-| Relationships panel flags "N dangling"          | Open the Validation tab — the red **Dangling relationships** banner lists every `relationships:` entry whose endpoints reference a missing entity or column. Click **Remove dangling** to prune only the offending entries from the active file. |
-| Renaming/deleting a folder feels risky          | Both actions show an impact preview first (how many diagrams, `imports:` blocks, and relationships will be rewritten or removed) and require explicit confirmation — nothing cascades silently. |
-| Ask AI only sees one diagram                     | Rebuild the AI index from Settings → AI or re-run the dbt import. Repo-wide prompts such as "reverse engineer this repo" intentionally expand beyond the active file once the index exists. |
-| Old chat history lacks sources/proposals         | Chats created before AI result persistence only contain messages. New chats store sources, skills, memory, proposals, and Review plan context. |
+| Folders appear but files inside are empty       | The dbt schema YAML was unparseable. The importer returns a structured `PARSE_FAILED` error with file path + line/column. |
+| Relationships panel flags "N dangling"          | Open the Validation tab — the red **Dangling relationships** banner lists every `relationships:` entry whose endpoints reference a missing entity or column. Click **Remove dangling** to prune them. |
+| Renaming/deleting a folder feels risky          | Both actions show an impact preview first. Nothing cascades silently. |
+| Ask AI only sees one diagram                     | Rebuild the AI index from Settings → AI or re-run the dbt import. |
 
 ## What to do next
 
-- **Review diffs on every PR** — once you save to a folder, every
-  DataLex edit lands as a YAML diff. No opaque tool state.
-- **Add a CI gate** — `datalex gate old.yaml new.yaml` fails PRs on
-  breaking schema changes. Wire it into your `.github/workflows/`.
-- **Connect a warehouse too** — see
-  [Pull a warehouse schema](warehouse-pull.md) for live column-type
-  confirmation.
-- **Full CLI reference** — `docs/cli.md`.
+- **Wire CI →** [Tutorial: CI readiness gate](ci-readiness-gate.md)
+- **Author rules →** [Custom policy packs](policy-packs.md)
+- **Connect a warehouse →** [Pull a warehouse schema](warehouse-pull.md)
+- **Catalog export →** [Mesh interfaces + catalog export](../mesh-interfaces.md)
+- **Full CLI reference →** [docs/cli.md](../cli.md)
