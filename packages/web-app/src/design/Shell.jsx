@@ -1888,6 +1888,7 @@ export default function Shell() {
           <OnboardingJourney
             onClose={() => setShowOnboarding(false)}
             hasActiveProject={!!activeProjectId}
+            modalOpen={Boolean(activeModal)}
             onImportProject={() => openModal("importDbtRepo")}
             onOpenValidation={() => setBottomPanelTab("validation")}
             onCreateEntity={() => openModal("newLogicalEntity")}

@@ -3548,7 +3548,10 @@ def build_parser() -> argparse.ArgumentParser:
     dbt_docs_sub = dbt_docs_parser.add_subparsers(dest="dbt_docs_command", required=True)
     dbt_docs_reindex = dbt_docs_sub.add_parser(
         "reindex",
-        help="Rebuild the {% docs %} block index and print resolved names",
+        # `%` must be escaped as `%%` in argparse help strings — Python 3.14's
+        # stricter argparse validator reads `% d` as a `%d` conversion and
+        # rejects the parser at build time.
+        help="Rebuild the {%% docs %%} block index and print resolved names",
     )
     dbt_docs_reindex.add_argument(
         "--project-dir",

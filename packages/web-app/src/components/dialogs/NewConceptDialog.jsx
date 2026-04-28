@@ -110,7 +110,7 @@ export default function NewConceptDialog() {
         type: "success",
         message: `Created concept "${cleanName}".`,
       });
-      emitJourneyEvent("entity:created", { kind: "concept", name: cleanName });
+      emitJourneyEvent("entity:created", { kind: "concept", entityName: cleanName });
       closeModal();
       return;
     }
@@ -141,7 +141,7 @@ export default function NewConceptDialog() {
       updateContent(nextDiagram);
       requestLayoutRefresh?.();
       addToast({ type: "success", message: `Created concept box "${cleanName}" in the diagram.` });
-      emitJourneyEvent("entity:created", { kind: "concept", name: cleanName });
+      emitJourneyEvent("entity:created", { kind: "concept", entityName: cleanName });
       closeModal();
       return;
     }
@@ -170,7 +170,7 @@ export default function NewConceptDialog() {
       }
       requestLayoutRefresh?.();
       addToast({ type: "success", message: `Created conceptual entity "${slug}".` });
-      emitJourneyEvent("entity:created", { kind: "concept", name: slug });
+      emitJourneyEvent("entity:created", { kind: "concept", entityName: slug });
       closeModal();
     } catch (err) {
       setError(err?.message || "Could not create conceptual entity file.");
