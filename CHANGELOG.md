@@ -7,6 +7,73 @@ from `v0.1.0` onward.
 
 ## [Unreleased]
 
+## [1.4.0] - 2026-04-27
+
+Minor release — sharpens the dbt modeling moat. Closes the four
+highest-leverage gaps competitors win on today (CI/CD enforcement,
+non-model resource coverage, contracts, catalog export) and amplifies
+the unique conceptual/logical AI surface.
+
+### Added — Sharpen the dbt modeling moat (P0 + P1 + P2)
+
+- **Shared `readiness_engine` package.** The dbt-readiness review (red /
+  yellow / green) is extracted into a Python package
+  (`packages/readiness_engine`) and shipped as `python -m
+  datalex_readiness review`. The api-server now shells out instead of
+  duplicating logic in JS, so CI / GitHub Action and `/api/dbt/review`
+  share one source of truth.
+- **`datalex readiness-gate` CLI + GitHub Action.** New CLI subcommand
+  with `--min-score`, `--max-yellow`, `--max-red`, `--allow-errors`,
+  `--changed-only`, `--base-ref`, `--sarif`, and `--pr-comment` flags.
+  The composite Action under `actions/datalex-gate/` posts a sticky PR
+  comment and uploads SARIF to the GitHub Security tab.
+- **Doc-block round-trip preservation.** `dbt import → emit` now
+  preserves `{{ doc("name") }}` references via a new
+  `description_ref: { doc: <name> }` field. The doc-block index lives in
+  `core_engine/dbt/doc_blocks.py`, is invalidated on YAML/`.md` writes,
+  and is exposed via `GET /api/dbt/doc-blocks` and
+  `datalex dbt docs reindex`.
+- **Custom policy rules.** Three new rule types — `regex_per_layer`,
+  `required_meta_keys`, and `layer_constraint` — plus selector support
+  (`{ layer, tag, path_glob }`). Custom packs live under
+  `<project>/.datalex/policies/` and inherit a built-in
+  `datalex/standards/base.yaml`. Editable from the new **Policy Packs**
+  drawer panel and `GET/PUT /api/policy/packs`.
+- **Coverage of non-model dbt resources.** Snapshots, seeds, exposures,
+  unit tests, and semantic models now round-trip through the importer
+  and emit pipeline, and are scored by the readiness engine. New
+  read-only **Snapshots**, **Exposures**, and **Unit Tests** drawer
+  panels surface them inline. Source freshness without `loaded_at_field`
+  is now flagged.
+- **Doc-block-aware AI proposals.** `apply` rejects `patch_yaml` changes
+  that would clobber a description bound via `description_ref` with a
+  422 / `DOC_BLOCK_OVERWRITE` envelope. The AI retrieval index resolves
+  doc-block bodies on the fly so BM25 ranks columns by their full prose,
+  not the literal jinja string.
+- **Contracts & constraints.** New policies `require_contract` and
+  `require_data_type_when_contracted`, a pre-flight check on
+  `/api/forward/dbt-sync` (returns 409 / `CONTRACT_PREFLIGHT` when
+  contract-enforced models have unknown column types), and a bulk-toggle
+  endpoint `POST /api/model/contracts/enforce`. The entity inspector now
+  shows a contract toggle with a live blocker list of columns missing
+  `data_type`.
+- **Glossary ↔ column binding + catalog export.** Columns can now declare
+  `binding: { glossary_term, status }` (legacy `terms: [...]` and
+  `meta.glossary_term` are still accepted). New exporters for Atlan,
+  DataHub, and OpenMetadata under
+  `packages/core_engine/src/datalex_core/exporters/`, surfaced through
+  `datalex emit catalog --target ...` and `POST /api/export/catalog`.
+- **AI agents that operate above the SQL line.** Two new deterministic
+  agents:
+  - **Conceptualizer** (`POST /api/ai/conceptualize`) — clusters staging
+    columns into business entities + relationships, with smart domain
+    inference and FK extraction from dbt `relationships` tests.
+  - **Canonicalizer** (`POST /api/ai/canonicalize`) — promotes columns
+    that recur across staging models into a logical canonical entity
+    with shared `{% docs %}` blocks emitted alongside the YAML.
+  Both are surfaced from the entity inspector empty state and ship as
+  proposal changes through the existing `/api/ai/proposals/apply` flow.
+
 ## [1.3.7] - 2026-04-26
 
 Patch release - fixes the Docker and local install onboarding path.

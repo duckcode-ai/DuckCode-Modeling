@@ -463,6 +463,56 @@ export async function importDbtProject(body) {
   });
 }
 
+// P0.2 — doc-block index
+export async function fetchDocBlocks(projectId, { refresh = false } = {}) {
+  const qs = new URLSearchParams({ projectId });
+  if (refresh) qs.set("refresh", "true");
+  return request(`/dbt/doc-blocks?${qs.toString()}`);
+}
+
+// P0.3 — custom policy packs (one per <project>/.datalex/policies/)
+export async function fetchPolicyPacks(projectId) {
+  const qs = new URLSearchParams({ projectId });
+  return request(`/policy/packs?${qs.toString()}`);
+}
+export async function savePolicyPack(projectId, { name, content }) {
+  const qs = new URLSearchParams({ projectId });
+  return request(`/policy/packs?${qs.toString()}`, {
+    method: "PUT",
+    body: JSON.stringify({ name, content }),
+  });
+}
+
+// P1.D — bulk contract toggle
+export async function toggleModelContracts(projectId, { paths = [], selectors = {}, enforce = true } = {}) {
+  return request("/model/contracts/enforce", {
+    method: "POST",
+    body: JSON.stringify({ projectId, paths, selectors, enforce }),
+  });
+}
+
+// P1.E — catalog export
+export async function exportCatalog({ target, model_path }) {
+  return request("/export/catalog", {
+    method: "POST",
+    body: JSON.stringify({ target, model_path }),
+  });
+}
+
+// P2 — agentic conceptualizer / canonicalizer
+export async function aiConceptualize(projectId) {
+  return request("/ai/conceptualize", {
+    method: "POST",
+    body: JSON.stringify({ projectId }),
+  });
+}
+export async function aiCanonicalize(projectId, { minRecurrence = 2 } = {}) {
+  return request("/ai/canonicalize", {
+    method: "POST",
+    body: JSON.stringify({ projectId, minRecurrence }),
+  });
+}
+
 export async function createGitHubPr(projectId, { token, title, body = "", base = "main", head = "", draft = false, remote = "origin" } = {}) {
   return request("/git/github/pr", {
     method: "POST",

@@ -1,0 +1,146 @@
+name: "DataLex Readiness Gate"
+description: "Score a dbt project against DataLex modeling standards and post a sticky PR comment + SARIF."
+author: "DuckCode AI Labs"
+branding:
+  icon: "check-circle"
+  color: "blue"
+
+inputs:
+  project-path:
+    description: "Path to the dbt project root (folder containing dbt_project.yml). Defaults to repo root."
+    required: false
+    default: "."
+  python-version:
+    description: "Python version for the gate runtime."
+    required: false
+    default: "3.11"
+  min-score:
+    description: "Fail when the project score falls below this value."
+    required: false
+    default: ""
+  max-yellow:
+    description: "Fail when the yellow-file count exceeds this value."
+    required: false
+    default: ""
+  max-red:
+    description: "Fail when the red-file count exceeds this value (default: 0)."
+    required: false
+    default: "0"
+  allow-errors:
+    description: "Don't fail when error-severity findings exist."
+    required: false
+    default: "false"
+  changed-only:
+    description: "Only score files changed vs base-ref."
+    required: false
+    default: "false"
+  base-ref:
+    description: "Base ref for --changed-only."
+    required: false
+    default: "origin/main"
+  upload-sarif:
+    description: "Upload SARIF results to the GitHub Security tab."
+    required: false
+    default: "true"
+  pr-comment:
+    description: "Post a sticky PR comment with the readiness summary."
+    required: false
+    default: "true"
+  datalex-version:
+    description: "datalex-cli version to install (defaults to latest)."
+    required: false
+    default: ""
+
+outputs:
+  score:
+    description: "Project readiness score 0-100."
+    value: ${{ steps.gate.outputs.score }}
+  status:
+    description: "Aggregate status: green | yellow | red."
+    value: ${{ steps.gate.outputs.status }}
+  sarif-path:
+    description: "Path to the generated SARIF file."
+    value: ${{ steps.gate.outputs.sarif }}
+
+runs:
+  using: "composite"
+  steps:
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: ${{ inputs.python-version }}
+
+    - name: Install datalex-cli
+      shell: bash
+      run: |
+        if [ -n "${{ inputs.datalex-version }}" ]; then
+          python -m pip install --quiet "datalex-cli==${{ inputs.datalex-version }}"
+        else
+          python -m pip install --quiet datalex-cli
+        fi
+
+    - name: Run readiness gate
+      id: gate
+      shell: bash
+      run: |
+        set -e
+        ARGS=(--project "${{ inputs.project-path }}" --sarif datalex-readiness.sarif --pr-comment datalex-readiness.md)
+        if [ -n "${{ inputs.min-score }}" ]; then ARGS+=(--min-score "${{ inputs.min-score }}"); fi
+        if [ -n "${{ inputs.max-yellow }}" ]; then ARGS+=(--max-yellow "${{ inputs.max-yellow }}"); fi
+        if [ -n "${{ inputs.max-red }}" ]; then ARGS+=(--max-red "${{ inputs.max-red }}"); fi
+        if [ "${{ inputs.allow-errors }}" = "true" ]; then ARGS+=(--allow-errors); fi
+        if [ "${{ inputs.changed-only }}" = "true" ]; then
+          ARGS+=(--changed-only --base-ref "${{ inputs.base-ref }}")
+        fi
+        ARGS+=(--output-json)
+        # Capture exit + JSON in one go
+        set +e
+        datalex readiness-gate "${ARGS[@]}" > datalex-readiness.json
+        EXIT=$?
+        set -e
+        SCORE=$(python -c "import json,sys; d=json.load(open('datalex-readiness.json')); print(d['summary']['score'])")
+        RED=$(python -c "import json,sys; d=json.load(open('datalex-readiness.json')); print(d['summary']['red'])")
+        ERRORS=$(python -c "import json,sys; d=json.load(open('datalex-readiness.json')); print(d['summary']['errors'])")
+        if [ "$RED" -gt 0 ] || [ "$ERRORS" -gt 0 ]; then STATUS=red
+        elif [ "$SCORE" -lt 85 ]; then STATUS=yellow
+        else STATUS=green
+        fi
+        echo "score=$SCORE" >> "$GITHUB_OUTPUT"
+        echo "status=$STATUS" >> "$GITHUB_OUTPUT"
+        echo "sarif=datalex-readiness.sarif" >> "$GITHUB_OUTPUT"
+        echo "exit=$EXIT" >> "$GITHUB_OUTPUT"
+
+    - name: Upload SARIF
+      if: ${{ inputs.upload-sarif == 'true' && hashFiles('datalex-readiness.sarif') != '' }}
+      uses: github/codeql-action/upload-sarif@v3
+      with:
+        sarif_file: datalex-readiness.sarif
+        category: datalex-readiness
+
+    - name: Post sticky PR comment
+      if: ${{ inputs.pr-comment == 'true' && github.event_name == 'pull_request' }}
+      uses: actions/github-script@v7
+      with:
+        github-token: ${{ github.token }}
+        script: |
+          const fs = require('fs');
+          if (!fs.existsSync('datalex-readiness.md')) return;
+          const body = fs.readFileSync('datalex-readiness.md', 'utf-8');
+          const marker = '<!-- datalex-readiness-gate -->';
+          const stickyBody = `${marker}\n${body}`;
+          const { owner, repo } = context.repo;
+          const issue_number = context.issue.number;
+          const { data: comments } = await github.rest.issues.listComments({ owner, repo, issue_number });
+          const existing = comments.find((c) => c.body && c.body.startsWith(marker));
+          if (existing) {
+            await github.rest.issues.updateComment({ owner, repo, comment_id: existing.id, body: stickyBody });
+          } else {
+            await github.rest.issues.createComment({ owner, repo, issue_number, body: stickyBody });
+          }
+
+    - name: Fail if gate failed
+      if: ${{ steps.gate.outputs.exit != '0' }}
+      shell: bash
+      run: |
+        echo "::error::DataLex readiness gate failed (status=${{ steps.gate.outputs.status }}, score=${{ steps.gate.outputs.score }})"
+        exit 1

@@ -1,0 +1,47 @@
+# DataLex built-in standards pack — opinionated baseline custom-rule
+# starter for new dbt projects. Inherit via:
+#   pack:
+#     name: my-org-standards
+#     version: 0.1.0
+#     extends: datalex/standards/base.yaml
+#   policies:
+#     - ...your overrides / additions
+#
+# All rules in this pack are advisory by default (severity: warn) so they
+# can be turned on without immediately turning a fresh project red.
+pack:
+  name: datalex-standards-base
+  version: 1.0.0
+  description: >
+    Layered naming + meta + materialization conventions covering the dbt
+    project structure most teams converge on (staging/intermediate/marts).
+
+policies:
+  - id: layer_naming_conventions
+    type: regex_per_layer
+    severity: warn
+    params:
+      patterns:
+        stg: "^stg_[a-z][a-z0-9_]*$"
+        int: "^int_[a-z][a-z0-9_]*$"
+        fct: "^fct_[a-z][a-z0-9_]*$"
+        dim: "^dim_[a-z][a-z0-9_]*$"
+        mart: "^mart_[a-z][a-z0-9_]*$"
+
+  - id: marts_require_owner_and_grain
+    type: required_meta_keys
+    severity: warn
+    params:
+      keys: ["owner", "grain"]
+      selectors:
+        layer: fct
+
+  - id: staging_materialization
+    type: layer_constraint
+    severity: warn
+    params:
+      layers:
+        stg:
+          materialization: ["view", "ephemeral"]
+        fct:
+          requires: ["grain"]

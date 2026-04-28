@@ -887,6 +887,312 @@ def _modeling_convention(
     return issues
 
 
+# ---------------------------------------------------------------------------
+# Custom rule support — selector-based evaluators
+#
+# These three rules let orgs encode `stg_*`/`int_*`/`fct_*` conventions
+# and required `meta` keys (steward, review_date, …) without forking the
+# policy engine. Selectors filter which entities a rule applies to so a
+# single pack can hold layer-specific rules side-by-side.
+
+
+_LAYER_PREFIXES = {
+    "stg": ("stg_",),
+    "int": ("int_",),
+    "fct": ("fct_", "fact_"),
+    "dim": ("dim_",),
+    "mart": ("mart_", "marts_"),
+}
+
+
+def _entity_layer(entity: Dict[str, Any]) -> str:
+    """Infer entity layer from explicit field then name prefix."""
+    declared = str(entity.get("layer") or "").strip().lower()
+    if declared:
+        return declared
+    name = str(entity.get("name") or "").lower()
+    for layer, prefixes in _LAYER_PREFIXES.items():
+        if any(name.startswith(p) for p in prefixes):
+            return layer
+    return ""
+
+
+def _entity_matches_selector(entity: Dict[str, Any], selector: Dict[str, Any]) -> bool:
+    """Return True if the entity matches the optional selector block.
+
+    Supported keys:
+      * `layer`: stg|int|fct|dim|mart (matches `_entity_layer`)
+      * `tag`: entity carries this tag
+      * `path_glob`: matched against `entity.meta.source_path` if present
+    Missing selector keys are treated as wildcards.
+    """
+    if not isinstance(selector, dict) or not selector:
+        return True
+    layer = str(selector.get("layer") or "").strip().lower()
+    if layer and _entity_layer(entity) != layer:
+        return False
+    tag = str(selector.get("tag") or "").strip()
+    if tag and tag not in _normalize_list(entity.get("tags")):
+        return False
+    glob = str(selector.get("path_glob") or "").strip()
+    if glob:
+        meta = entity.get("meta") or {}
+        source_path = str(meta.get("source_path") or "")
+        if not source_path or not _glob_match(source_path, glob):
+            return False
+    return True
+
+
+def _glob_match(text: str, pattern: str) -> bool:
+    import fnmatch
+    return fnmatch.fnmatch(text, pattern)
+
+
+def _selected_entities(model: Dict[str, Any], selector: Dict[str, Any]):
+    for entity in model.get("entities", []) or []:
+        if _entity_matches_selector(entity, selector):
+            yield entity
+
+
+def _regex_per_layer(
+    model: Dict[str, Any],
+    severity: str,
+    policy_id: str,
+    params: Dict[str, Any],
+) -> List[Issue]:
+    """Enforce a regex per layer prefix.
+
+    Example params:
+      patterns:
+        stg: "^stg_[a-z][a-z0-9_]*$"
+        fct: "^fct_[a-z][a-z0-9_]*$"
+    """
+    patterns_raw = params.get("patterns") or {}
+    if not isinstance(patterns_raw, dict) or not patterns_raw:
+        return [
+            _policy_issue(
+                "error",
+                f"POLICY_{policy_id}_MISCONFIGURED",
+                f"Policy '{policy_id}' must define a non-empty 'patterns' map.",
+                "/policies",
+            )
+        ]
+
+    compiled: Dict[str, "re.Pattern[str]"] = {}
+    for layer, regex in patterns_raw.items():
+        try:
+            compiled[str(layer).lower()] = re.compile(str(regex))
+        except re.error as err:
+            return [
+                _policy_issue(
+                    "error",
+                    f"POLICY_{policy_id}_MISCONFIGURED",
+                    f"Policy '{policy_id}' has invalid regex for layer '{layer}': {err}",
+                    "/policies",
+                )
+            ]
+
+    selector = params.get("selectors") or {}
+    issues: List[Issue] = []
+    for entity in _selected_entities(model, selector):
+        layer = _entity_layer(entity)
+        if not layer or layer not in compiled:
+            continue
+        name = str(entity.get("name") or "")
+        if not compiled[layer].match(name):
+            issues.append(
+                _policy_issue(
+                    severity,
+                    f"POLICY_{policy_id}",
+                    f"Entity '{name}' (layer={layer}) does not match required pattern "
+                    f"'{compiled[layer].pattern}'.",
+                    f"/entities/{name}",
+                )
+            )
+    return issues
+
+
+def _required_meta_keys(
+    model: Dict[str, Any],
+    severity: str,
+    policy_id: str,
+    params: Dict[str, Any],
+) -> List[Issue]:
+    """Require entities to define specific keys in `meta`.
+
+    Example params:
+      keys: ["owner", "steward", "review_date"]
+      selectors: { layer: "fct" }   # optional
+    """
+    required = _normalize_list(params.get("keys"))
+    if not required:
+        return [
+            _policy_issue(
+                "error",
+                f"POLICY_{policy_id}_MISCONFIGURED",
+                f"Policy '{policy_id}' must list at least one required meta key.",
+                "/policies",
+            )
+        ]
+    selector = params.get("selectors") or {}
+    issues: List[Issue] = []
+    for entity in _selected_entities(model, selector):
+        meta = entity.get("meta") or {}
+        missing = [k for k in required if not (isinstance(meta, dict) and meta.get(k) not in (None, "", [], {}))]
+        if missing:
+            name = str(entity.get("name") or "")
+            issues.append(
+                _policy_issue(
+                    severity,
+                    f"POLICY_{policy_id}",
+                    f"Entity '{name}' is missing required meta keys: {sorted(missing)}.",
+                    f"/entities/{name}/meta",
+                )
+            )
+    return issues
+
+
+def _layer_constraint(
+    model: Dict[str, Any],
+    severity: str,
+    policy_id: str,
+    params: Dict[str, Any],
+) -> List[Issue]:
+    """Per-layer constraints on entity attributes.
+
+    Example params:
+      layers:
+        stg:
+          materialization: ["view", "ephemeral"]
+        fct:
+          requires: ["grain", "owner"]
+    """
+    layers_raw = params.get("layers") or {}
+    if not isinstance(layers_raw, dict) or not layers_raw:
+        return [
+            _policy_issue(
+                "error",
+                f"POLICY_{policy_id}_MISCONFIGURED",
+                f"Policy '{policy_id}' must define a non-empty 'layers' map.",
+                "/policies",
+            )
+        ]
+
+    issues: List[Issue] = []
+    for entity in model.get("entities", []) or []:
+        layer = _entity_layer(entity)
+        if not layer:
+            continue
+        rules = layers_raw.get(layer)
+        if not isinstance(rules, dict):
+            continue
+        name = str(entity.get("name") or "")
+        meta = entity.get("meta") or {}
+
+        allowed = _normalize_list(rules.get("materialization"))
+        if allowed:
+            actual = str(entity.get("materialization") or meta.get("materialized") or "").lower()
+            if actual and actual not in {a.lower() for a in allowed}:
+                issues.append(
+                    _policy_issue(
+                        severity,
+                        f"POLICY_{policy_id}",
+                        f"Entity '{name}' (layer={layer}) has materialization "
+                        f"'{actual}'; allowed: {sorted({a.lower() for a in allowed})}.",
+                        f"/entities/{name}/materialization",
+                    )
+                )
+
+        for key in _normalize_list(rules.get("requires")):
+            value = entity.get(key)
+            if value in (None, "", [], {}) and not (isinstance(meta, dict) and meta.get(key) not in (None, "", [], {})):
+                issues.append(
+                    _policy_issue(
+                        severity,
+                        f"POLICY_{policy_id}",
+                        f"Entity '{name}' (layer={layer}) is missing required attribute '{key}'.",
+                        f"/entities/{name}/{key}",
+                    )
+                )
+    return issues
+
+
+def _entity_contract_enforced(entity: Dict[str, Any]) -> bool:
+    if not isinstance(entity, dict):
+        return False
+    contract = entity.get("contract") or {}
+    if isinstance(contract, dict) and contract.get("enforced"):
+        return True
+    config = entity.get("config") or {}
+    if isinstance(config, dict):
+        config_contract = config.get("contract") or {}
+        if isinstance(config_contract, dict) and config_contract.get("enforced"):
+            return True
+    meta = entity.get("meta") or {}
+    if isinstance(meta, dict):
+        datalex = meta.get("datalex") if isinstance(meta.get("datalex"), dict) else {}
+        if str(datalex.get("contracts") or "").lower() == "enforced":
+            return True
+    return False
+
+
+def _require_contract(
+    model: Dict[str, Any],
+    severity: str,
+    policy_id: str,
+    params: Dict[str, Any],
+) -> List[Issue]:
+    """Require selected entities to enforce a dbt contract.
+
+    Example params:
+      selectors: { layer: "fct" }
+    """
+    selector = params.get("selectors") or {}
+    issues: List[Issue] = []
+    for entity in _selected_entities(model, selector):
+        if not _entity_contract_enforced(entity):
+            name = str(entity.get("name") or "")
+            issues.append(
+                _policy_issue(
+                    severity,
+                    f"POLICY_{policy_id}",
+                    f"Entity '{name}' does not enforce a dbt contract.",
+                    f"/entities/{name}/contract",
+                )
+            )
+    return issues
+
+
+def _require_data_type_when_contracted(
+    model: Dict[str, Any],
+    severity: str,
+    policy_id: str,
+    params: Dict[str, Any],
+) -> List[Issue]:
+    """When `contract.enforced` is true, every column must declare a real type."""
+    selector = params.get("selectors") or {}
+    issues: List[Issue] = []
+    for entity in _selected_entities(model, selector):
+        if not _entity_contract_enforced(entity):
+            continue
+        name = str(entity.get("name") or "")
+        for field in entity.get("fields", []) or entity.get("columns", []) or []:
+            if not isinstance(field, dict):
+                continue
+            field_name = str(field.get("name") or "")
+            data_type = field.get("data_type") or field.get("type") or ""
+            if not data_type or str(data_type).lower() == "unknown":
+                issues.append(
+                    _policy_issue(
+                        severity,
+                        f"POLICY_{policy_id}",
+                        f"Contracted entity '{name}' column '{field_name}' has no concrete data_type.",
+                        f"/entities/{name}/fields/{field_name}/data_type",
+                    )
+                )
+    return issues
+
+
 _POLICY_HANDLERS = {
     "require_entity_tags": _require_entity_tags,
     "require_field_descriptions": _require_field_descriptions,
@@ -899,6 +1205,11 @@ _POLICY_HANDLERS = {
     "deprecation_check": _deprecation_check,
     "custom_expression": _custom_expression,
     "modeling_convention": _modeling_convention,
+    "regex_per_layer": _regex_per_layer,
+    "required_meta_keys": _required_meta_keys,
+    "layer_constraint": _layer_constraint,
+    "require_contract": _require_contract,
+    "require_data_type_when_contracted": _require_data_type_when_contracted,
 }
 
 

@@ -25,6 +25,7 @@ from typing import Any, Dict, List, Optional, Tuple
 import yaml
 
 from datalex_core.datalex.project import DataLexProject
+from datalex_core.dbt.doc_blocks import render_description_from_ref
 
 
 # ------------------------ build payloads ------------------------
@@ -122,6 +123,7 @@ def _write_yaml(path: Path, doc: Dict[str, Any]) -> None:
 def _source_to_dict(src: Dict[str, Any]) -> Dict[str, Any]:
     doc: Dict[str, Any] = {"name": src["name"]}
     _copy_if_set(doc, src, ("description", "database", "schema", "loader", "loaded_at_field"))
+    _apply_description_ref(doc, src)
     if src.get("freshness"):
         doc["freshness"] = _translate_freshness(src["freshness"])
 
@@ -140,6 +142,7 @@ def _source_to_dict(src: Dict[str, Any]) -> Dict[str, Any]:
 def _source_table_to_dict(tbl: Dict[str, Any]) -> Dict[str, Any]:
     doc: Dict[str, Any] = {"name": tbl["name"]}
     _copy_if_set(doc, tbl, ("description", "identifier", "loaded_at_field"))
+    _apply_description_ref(doc, tbl)
     if tbl.get("freshness"):
         doc["freshness"] = _translate_freshness(tbl["freshness"])
     cols_out: List[Dict[str, Any]] = []
@@ -156,6 +159,7 @@ def _source_table_to_dict(tbl: Dict[str, Any]) -> Dict[str, Any]:
 def _source_column_to_dict(col: Dict[str, Any]) -> Dict[str, Any]:
     doc: Dict[str, Any] = {"name": col["name"]}
     _copy_if_set(doc, col, ("description",))
+    _apply_description_ref(doc, col)
     # sources pass `type` through dbt-side as data_type so contract works downstream
     if col.get("type"):
         doc["data_type"] = col["type"]
@@ -170,6 +174,7 @@ def _source_column_to_dict(col: Dict[str, Any]) -> Dict[str, Any]:
 def _model_to_dict(m: Dict[str, Any]) -> Dict[str, Any]:
     doc: Dict[str, Any] = {"name": m["name"]}
     _copy_if_set(doc, m, ("description",))
+    _apply_description_ref(doc, m)
 
     config = _model_config(m)
     if config:
@@ -225,6 +230,7 @@ def _model_config(m: Dict[str, Any]) -> Dict[str, Any]:
 def _model_column_to_dict(col: Dict[str, Any], contract_enforced: bool) -> Dict[str, Any]:
     doc: Dict[str, Any] = {"name": col["name"]}
     _copy_if_set(doc, col, ("description",))
+    _apply_description_ref(doc, col)
 
     # Contract enforcement requires data_type; always emit it if present.
     if col.get("type"):
@@ -335,6 +341,21 @@ def _copy_if_set(dst: Dict[str, Any], src: Dict[str, Any], keys: Tuple[str, ...]
         v = src.get(k)
         if v is not None and v != "":
             dst[k] = v
+
+
+def _apply_description_ref(dst: Dict[str, Any], src: Dict[str, Any]) -> None:
+    """If the DataLex doc carries a `description_ref`, emit `{{ doc("name") }}`.
+
+    Overrides any rendered description copied by `_copy_if_set` so the
+    on-disk YAML re-emits the dbt jinja reference, not the rendered text —
+    making `dbt import → emit` a no-op git diff for doc-block-bound fields.
+    """
+    ref = src.get("description_ref")
+    if not isinstance(ref, dict):
+        return
+    rendered = render_description_from_ref(ref)
+    if rendered:
+        dst["description"] = rendered
 
 
 def _ref_to_string(dep: Dict[str, Any]) -> str:

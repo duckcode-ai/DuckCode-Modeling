@@ -151,6 +151,11 @@ const DATALEX_WORKSPACE_ROOT = "DataLex";
 const DATALEX_SKILLS_DIR = "Skills";
 const AI_INDEX_CACHE = new Map();
 const DBT_REVIEW_CACHE = new Map();
+// Doc-block index cache, keyed by absolute project path. Invalidated on
+// `.md` and YAML writes (file create / update / save-all). The index
+// itself is computed by the Python readiness_engine via `python -m
+// datalex_readiness doc-blocks --project <path>`.
+const DOC_BLOCK_CACHE = new Map();
 const DATALEX_DEFAULT_STRUCTURE = {
   version: 1,
   // Default to snowflake so baseline DDL generation works for new projects without extra config.
@@ -201,6 +206,18 @@ const AI_AGENT_PROFILES = {
     layer: "",
     keywords: ["relationship", "relation", "cardinality", "crow", "foreign key", "fk", "one to many", "many to one", "many to many", "arrow"],
     contract: "Model relationship semantics, cardinality, optionality, and business verbs; conceptual relationships are entity-level, physical relationships require fields.",
+  },
+  conceptualizer: {
+    label: "Conceptualizer",
+    layer: "conceptual",
+    keywords: ["propose", "infer", "discover", "derive", "extract", "noun", "concept", "entity", "from staging", "from dbt"],
+    contract: "Read every staging-layer model, cluster columns into business entities, and propose conceptual entities + relationships. Output only entities, relationships, and domains — no columns, SQL, or warehouse details. Use existing `relationships` tests as ground truth for FK edges.",
+  },
+  canonicalizer: {
+    label: "Canonicalizer",
+    layer: "logical",
+    keywords: ["lift", "canonical", "consolidate", "dedupe", "normalize", "doc block", "shared description", "logical layer"],
+    contract: "Detect columns that recur across staging models (same name + similar description), dedupe them into logical canonical entities, and emit doc-block references (`{{ doc(...) }}`) so descriptions live in shared `.md` files. Never delete staging models.",
   },
   yaml_patch_engineer: {
     label: "YAML Patch Engineer",
@@ -2275,514 +2292,87 @@ function safeYamlLoad(content) {
   }
 }
 
-function reviewHasValue(value) {
-  if (value === null || value === undefined) return false;
-  if (typeof value === "string") return value.trim().length > 0;
-  if (Array.isArray(value)) return value.length > 0;
-  if (typeof value === "object") return Object.keys(value).length > 0;
-  return Boolean(value);
+
+
+// `readiness_engine` (packages/readiness_engine) is the single source of
+// truth for the dbt-readiness review. The api-server shells out via
+// `python -m datalex_readiness review` so the same logic powers both the
+// `/api/dbt/review` endpoint and the `datalex gate` CLI / GitHub Action.
+const READINESS_ENGINE_SRC = join(REPO_ROOT, "packages", "readiness_engine", "src");
+
+function readinessEnginePythonEnv() {
+  const existing = process.env.PYTHONPATH || "";
+  if (!existsSync(READINESS_ENGINE_SRC)) return process.env;
+  const sep = process.platform === "win32" ? ";" : ":";
+  const merged = existing
+    ? `${READINESS_ENGINE_SRC}${sep}${existing}`
+    : READINESS_ENGINE_SRC;
+  return { ...process.env, PYTHONPATH: merged };
 }
 
-function reviewArray(value) {
-  return Array.isArray(value) ? value : [];
-}
-
-function reviewColumns(entity) {
-  if (!entity || typeof entity !== "object") return [];
-  if (Array.isArray(entity.columns)) return entity.columns;
-  if (Array.isArray(entity.fields)) return entity.fields;
-  return [];
-}
-
-function reviewEntityName(entity, fallback = "model") {
-  return String(entity?.name || entity?.entity || entity?.table || fallback);
-}
-
-function reviewTests(column) {
-  return reviewArray(column?.tests || column?.data_tests);
-}
-
-function reviewTestName(test) {
-  if (typeof test === "string") return test;
-  if (test && typeof test === "object") return Object.keys(test)[0] || "";
-  return "";
-}
-
-function reviewHasTest(column, name) {
-  const expected = String(name || "").toLowerCase();
-  return reviewTests(column).some((test) => reviewTestName(test).toLowerCase() === expected);
-}
-
-function reviewHasRelationshipTest(column) {
-  return reviewTests(column).some((test) => reviewTestName(test).toLowerCase() === "relationships");
-}
-
-function reviewIsPk(column) {
-  return Boolean(
-    column?.primary_key
-    || column?.primaryKey
-    || column?.is_primary_key
-    || reviewArray(column?.constraints).some((constraint) => String(constraint?.type || constraint).toLowerCase() === "primary_key")
-    || reviewArray(column?.tags).some((tag) => String(tag).toLowerCase() === "primary_key")
-  );
-}
-
-function reviewIsSensitive(column) {
-  const text = [
-    column?.name,
-    column?.description,
-    column?.sensitivity,
-    column?.classification,
-    ...(reviewArray(column?.tags)),
-  ].join(" ").toLowerCase();
-  return /\b(pii|phi|pci|email|phone|ssn|passport|address|dob|birth|salary|confidential|restricted)\b/.test(text);
-}
-
-function reviewMaterialization(entity) {
-  return entity?.config?.materialized || entity?.materialized || entity?.materialization || entity?.meta?.materialized || "";
-}
-
-function reviewFileKind(path, doc) {
-  const p = String(path || "").toLowerCase();
-  if (Array.isArray(doc?.models) || Array.isArray(doc?.sources) || Array.isArray(doc?.exposures) || Array.isArray(doc?.metrics)) return "dbt";
-  if (doc?.kind === "model" || doc?.kind === "source") return "dbt-imported";
-  if (doc?.kind === "diagram" || /\.diagram\.ya?ml$/i.test(p)) return "diagram";
-  if (doc?.model || Array.isArray(doc?.entities)) return String(doc?.model?.kind || doc?.layer || "datalex").toLowerCase();
-  return "yaml";
-}
-
-function reviewCollectEntities(doc) {
-  const entities = [];
-  if (!doc || typeof doc !== "object") return entities;
-  if (Array.isArray(doc.models)) {
-    for (const model of doc.models) entities.push({ entity: model, resourceType: "model", container: null });
-  }
-  if (Array.isArray(doc.sources)) {
-    for (const source of doc.sources) {
-      for (const table of reviewArray(source?.tables)) {
-        entities.push({ entity: table, resourceType: "source", container: source });
+function spawnReadinessEngine(args) {
+  return new Promise((resolvePromise, rejectPromise) => {
+    const child = spawn(PYTHON, ["-m", "datalex_readiness", ...args], {
+      cwd: REPO_ROOT,
+      env: readinessEnginePythonEnv(),
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    let stdout = "";
+    let stderr = "";
+    child.stdout.on("data", (chunk) => { stdout += chunk; });
+    child.stderr.on("data", (chunk) => { stderr += chunk; });
+    child.on("error", rejectPromise);
+    child.on("close", (code) => {
+      if (code !== 0) {
+        const err = new Error(`readiness_engine exited with code ${code}: ${stderr.trim()}`);
+        err.code = "READINESS_ENGINE_FAILED";
+        err.stderr = stderr;
+        return rejectPromise(err);
       }
-    }
-  }
-  if (doc.kind === "model") entities.push({ entity: doc, resourceType: "model", container: null });
-  if (doc.kind === "source") {
-    if (Array.isArray(doc.tables)) {
-      for (const table of doc.tables) entities.push({ entity: table, resourceType: "source", container: doc });
-    } else {
-      entities.push({ entity: doc, resourceType: "source", container: null });
-    }
-  }
-  if (Array.isArray(doc.entities)) {
-    for (const entity of doc.entities) {
-      if (entity?.file) continue;
-      entities.push({ entity, resourceType: "entity", container: null });
-    }
-  }
-  return entities;
+      resolvePromise(stdout);
+    });
+  });
 }
 
-function reviewFinding({ severity = "warn", category, code, path, message, rationale, suggestedFix, target = "", weight = 5 }) {
-  return {
-    severity,
-    category,
-    code,
-    path: path || "/",
-    target,
-    message,
-    rationale,
-    suggested_fix: suggestedFix,
-    weight,
-    remediation: {
-      mode: "ai_proposal",
-      prompt: `${message}\n\nWhy it matters: ${rationale}\n\nSuggested YAML change: ${suggestedFix}`,
-    },
-  };
+function invalidateDocBlocksForFile(projectPath, filePath) {
+  if (!projectPath) return;
+  const lower = String(filePath || "").toLowerCase();
+  if (!lower.endsWith(".md") && !lower.endsWith(".yml") && !lower.endsWith(".yaml")) return;
+  DOC_BLOCK_CACHE.delete(resolve(projectPath));
 }
 
-function reviewAddEntityFindings(findings, filePath, item, doc) {
-  const entity = item.entity;
-  const container = item.container;
-  const name = reviewEntityName(entity);
-  const base = `/${item.resourceType}s/${name}`;
-  const columns = reviewColumns(entity);
-  const materialization = String(reviewMaterialization(entity)).toLowerCase();
-  const type = String(entity?.type || entity?.resource_type || item.resourceType || "").toLowerCase();
-  const owner = entity?.owner || entity?.meta?.owner || entity?.config?.meta?.owner || container?.owner || container?.meta?.owner;
-  const domain = entity?.domain || entity?.meta?.domain || entity?.config?.meta?.domain || doc?.model?.domain || doc?.domain || container?.domain || container?.meta?.domain;
-
-  if (!reviewHasValue(entity?.description)) {
-    findings.push(reviewFinding({
-      category: "metadata",
-      code: "DBT_READINESS_MISSING_MODEL_DESCRIPTION",
-      path: base,
-      target: name,
-      message: `${name} is missing a model-level description.`,
-      rationale: "Model descriptions are the first trust signal consumers see in dbt docs, catalogs, and DataLex reviews.",
-      suggestedFix: "Add a concise business-facing description that explains the model purpose, grain, and intended consumers.",
-      weight: 8,
-    }));
-  }
-  if (!reviewHasValue(owner)) {
-    findings.push(reviewFinding({
-      category: "metadata",
-      code: "DBT_READINESS_MISSING_OWNER",
-      path: `${base}/owner`,
-      target: name,
-      message: `${name} has no owner or steward metadata.`,
-      rationale: "Ownership is required for issue routing, access decisions, freshness accountability, and enterprise governance.",
-      suggestedFix: "Add owner metadata using the project convention, such as owner, meta.owner, or config.meta.owner.",
-      weight: 6,
-    }));
-  }
-  if (!reviewHasValue(domain)) {
-    findings.push(reviewFinding({
-      category: "metadata",
-      code: "DBT_READINESS_MISSING_DOMAIN",
-      path: `${base}/domain`,
-      target: name,
-      message: `${name} is not mapped to a domain or subject area.`,
-      rationale: "Enterprise model review needs domain context so conceptual and logical models can be generated with the right bounded context.",
-      suggestedFix: "Add domain or meta.domain metadata, or place the model under the appropriate DataLex domain folder.",
-      weight: 4,
-    }));
-  }
-  if (columns.length === 0) {
-    findings.push(reviewFinding({
-      severity: "error",
-      category: "import_health",
-      code: "DBT_READINESS_NO_COLUMNS",
-      path: `${base}/columns`,
-      target: name,
-      message: `${name} has no declared columns or fields.`,
-      rationale: "Column metadata is required to assess contracts, tests, data dictionary coverage, and physical-to-logical mapping.",
-      suggestedFix: "Run dbt parse/docs generation or add column metadata to the YAML file.",
-      weight: 18,
-    }));
-    return;
-  }
-
-  const described = columns.filter((column) => reviewHasValue(column?.description)).length;
-  const coverage = Math.round((described / columns.length) * 100);
-  if (coverage < 80) {
-    findings.push(reviewFinding({
-      category: "metadata",
-      code: "DBT_READINESS_LOW_COLUMN_DESCRIPTION_COVERAGE",
-      path: `${base}/columns`,
-      target: name,
-      message: `${name} has ${coverage}% column description coverage; enterprise readiness expects at least 80%.`,
-      rationale: "Sparse column descriptions slow reuse, weaken AI context, and make downstream semantic modeling harder.",
-      suggestedFix: "Fill descriptions for key, metric, date, status, and consumer-facing columns first, then complete the remaining columns.",
-      weight: coverage < 40 ? 12 : 7,
-    }));
-  }
-
-  const hasPk = columns.some(reviewIsPk);
-  const hasUnique = columns.some((column) => reviewHasTest(column, "unique"));
-  if (!hasPk && !hasUnique && !["view", "ephemeral"].includes(type) && materialization !== "ephemeral") {
-    findings.push(reviewFinding({
-      category: "dbt_quality",
-      code: "DBT_READINESS_NO_IDENTITY_TEST",
-      path: `${base}/columns`,
-      target: name,
-      message: `${name} has no primary key marker or unique test.`,
-      rationale: "Identity checks anchor joins, relationship tests, duplicate detection, and conceptual/logical entity mapping.",
-      suggestedFix: "Mark the primary key column and add unique plus not_null tests where the model grain is known.",
-      weight: 9,
-    }));
-  }
-
-  const grain = entity?.grain || entity?.meta?.grain || entity?.config?.meta?.grain;
-  const nameLower = name.toLowerCase();
-  if (!reviewHasValue(grain) && /(^fct_|fact|_fact$|mart|marts)/.test(nameLower)) {
-    findings.push(reviewFinding({
-      category: "modeling",
-      code: "DBT_READINESS_FACT_GRAIN_MISSING",
-      path: `${base}/grain`,
-      target: name,
-      message: `${name} looks like a fact or mart model but has no grain definition.`,
-      rationale: "Fact model grain is the most important modeling contract for reliable metrics and joins.",
-      suggestedFix: "Add grain metadata that states what one row represents, using the identifying column or business event.",
-      weight: 10,
-    }));
-  }
-
-  if (/^stg_|\/staging\//.test(nameLower) && materialization && !["view", "ephemeral"].includes(materialization)) {
-    findings.push(reviewFinding({
-      severity: "info",
-      category: "modeling",
-      code: "DBT_READINESS_STAGING_MATERIALIZATION_REVIEW",
-      path: `${base}/config/materialized`,
-      target: name,
-      message: `${name} is staging-like but materialized as ${materialization}.`,
-      rationale: "Many teams keep staging models lightweight. This is not always wrong, but it should be intentional.",
-      suggestedFix: "Confirm the materialization is intentional, or set staging conventions in project/team standards.",
-      weight: 2,
-    }));
-  }
-
-  for (const column of columns) {
-    const columnName = String(column?.name || "column");
-    const colPath = `${base}/columns/${columnName}`;
-    const dataType = column?.data_type || column?.type;
-    if (!reviewHasValue(column?.description)) {
-      findings.push(reviewFinding({
-        severity: "info",
-        category: "metadata",
-        code: "DBT_READINESS_MISSING_COLUMN_DESCRIPTION",
-        path: `${colPath}/description`,
-        target: `${name}.${columnName}`,
-        message: `${name}.${columnName} has no description.`,
-        rationale: "Column descriptions are needed for catalog trust, data dictionary reuse, and AI-assisted modeling.",
-        suggestedFix: "Add a business-facing column description that explains meaning, format, and key caveats.",
-        weight: 2,
-      }));
-    }
-    if (!reviewHasValue(dataType) || String(dataType).toLowerCase() === "unknown") {
-      findings.push(reviewFinding({
-        category: "import_health",
-        code: "DBT_READINESS_UNKNOWN_COLUMN_TYPE",
-        path: `${colPath}/data_type`,
-        target: `${name}.${columnName}`,
-        message: `${name}.${columnName} has an unknown or missing data type.`,
-        rationale: "Types are required for contracts, DDL generation, physical model review, and logical type mapping.",
-        suggestedFix: "Run dbt compile/docs with catalog metadata or add data_type/type to the column YAML.",
-        weight: 7,
-      }));
-    }
-    if (reviewIsPk(column) && !(reviewHasTest(column, "unique") && reviewHasTest(column, "not_null"))) {
-      findings.push(reviewFinding({
-        category: "dbt_quality",
-        code: "DBT_READINESS_PK_TESTS_MISSING",
-        path: `${colPath}/tests`,
-        target: `${name}.${columnName}`,
-        message: `${name}.${columnName} is marked as identity but does not have both unique and not_null tests.`,
-        rationale: "Primary key metadata without enforcement leaves duplicate and null identity failures undetected.",
-        suggestedFix: "Add unique and not_null tests to the primary key column.",
-        weight: 8,
-      }));
-    }
-    if (/_id$/.test(columnName) && !reviewIsPk(column) && !reviewHasRelationshipTest(column)) {
-      findings.push(reviewFinding({
-        severity: "info",
-        category: "dbt_quality",
-        code: "DBT_READINESS_RELATIONSHIP_TEST_MISSING",
-        path: `${colPath}/tests`,
-        target: `${name}.${columnName}`,
-        message: `${name}.${columnName} looks like a foreign key but has no relationships test.`,
-        rationale: "Relationship tests make lineage and join assumptions executable instead of tribal knowledge.",
-        suggestedFix: "Add a relationships test to the referenced dimension/source when the parent model is known.",
-        weight: 3,
-      }));
-    }
-    if (reviewIsSensitive(column) && !reviewHasValue(column?.sensitivity) && !reviewHasValue(column?.classification) && !reviewHasValue(column?.meta?.classification)) {
-      findings.push(reviewFinding({
-        category: "governance",
-        code: "DBT_READINESS_SENSITIVE_COLUMN_UNCLASSIFIED",
-        path: `${colPath}/classification`,
-        target: `${name}.${columnName}`,
-        message: `${name}.${columnName} appears sensitive but has no classification metadata.`,
-        rationale: "Sensitive columns need explicit classification before enterprise publication or AI-assisted reuse.",
-        suggestedFix: "Add sensitivity/classification metadata using the project governance convention.",
-        weight: 9,
-      }));
-    }
-  }
-
-  if (!reviewHasValue(entity?.contract?.enforced) && !reviewHasValue(entity?.config?.contract?.enforced) && (hasPk || hasUnique || /(^fct_|^dim_|mart|interface)/.test(nameLower))) {
-    findings.push(reviewFinding({
-      severity: "info",
-      category: "dbt_quality",
-      code: "DBT_READINESS_CONTRACT_REVIEW",
-      path: `${base}/contract`,
-      target: name,
-      message: `${name} may be a publishable model but does not enforce a dbt contract.`,
-      rationale: "Contracts are an enterprise promotion signal for shared models, marts, and mesh interfaces.",
-      suggestedFix: "Consider enabling contract.enforced after data types, required columns, and tests are reviewed.",
-      weight: 2,
-    }));
-  }
-}
-
-function reviewAddDocumentFindings(findings, file, doc, content, dbtArtifacts = {}) {
-  const filePath = file.path;
-  const kind = reviewFileKind(filePath, doc);
-  if (kind === "yaml") {
-    findings.push(reviewFinding({
-      severity: "info",
-      category: "enterprise_modeling",
-      code: "DBT_READINESS_UNCLASSIFIED_YAML",
-      path: "/",
-      target: filePath,
-      message: `${filePath} is YAML but was not recognized as dbt or DataLex modeling metadata.`,
-      rationale: "Unclassified YAML may be valid project configuration, but it is not part of the model readiness score.",
-      suggestedFix: "No action needed unless this file should define models, sources, diagrams, or DataLex entities.",
-      weight: 1,
-    }));
-  }
-  const entities = reviewCollectEntities(doc);
-  for (const item of entities) reviewAddEntityFindings(findings, filePath, item, doc);
-
-  if ((Array.isArray(doc?.models) || doc?.kind === "model") && !dbtArtifacts.catalog) {
-    findings.push(reviewFinding({
-      severity: "info",
-      category: "import_health",
-      code: "DBT_READINESS_CATALOG_NOT_FOUND",
-      path: "/",
-      target: filePath,
-      message: "No dbt catalog artifact was found for this project.",
-      rationale: "Without catalog metadata, DataLex may not be able to verify warehouse column types after import.",
-      suggestedFix: "Run dbt docs generate or provide target/catalog.json before import/review.",
-      weight: 2,
-    }));
-  }
-  if ((Array.isArray(doc?.models) || Array.isArray(doc?.sources) || doc?.kind === "model" || doc?.kind === "source") && !dbtArtifacts.manifest) {
-    findings.push(reviewFinding({
-      severity: "info",
-      category: "import_health",
-      code: "DBT_READINESS_MANIFEST_NOT_FOUND",
-      path: "/",
-      target: filePath,
-      message: "No dbt manifest artifact was found for this project.",
-      rationale: "Without manifest metadata, lineage, config, refs, and test context are limited.",
-      suggestedFix: "Run dbt parse or dbt compile so target/manifest.json is available.",
-      weight: 2,
-    }));
-  }
-  if (/semantic_models\s*:|metrics\s*:|exposures\s*:/i.test(content) === false && entities.length > 0) {
-    findings.push(reviewFinding({
-      severity: "info",
-      category: "enterprise_modeling",
-      code: "DBT_READINESS_SEMANTIC_LAYER_OPPORTUNITY",
-      path: "/semantic",
-      target: filePath,
-      message: `${filePath} has model metadata that can seed conceptual, logical, or semantic model review.`,
-      rationale: "DataLex can use physical dbt models to bootstrap business concepts, logical entities, metrics, and glossary links.",
-      suggestedFix: "Use Ask AI to generate or update conceptual and logical models from this reviewed dbt file.",
-      weight: 1,
-    }));
-  }
-}
-
-function summarizeReviewFile(file, findings) {
-  const errors = findings.filter((finding) => finding.severity === "error").length;
-  const warnings = findings.filter((finding) => finding.severity === "warn").length;
-  const infos = findings.filter((finding) => finding.severity === "info").length;
-  const penalty = findings.reduce((sum, finding) => sum + Number(finding.weight || 0), 0);
-  const score = Math.max(0, Math.min(100, 100 - penalty));
-  const status = errors > 0 || score < 60 ? "red" : warnings > 0 || score < 85 ? "yellow" : "green";
-  const categoryCounts = {};
-  for (const finding of findings) categoryCounts[finding.category] = (categoryCounts[finding.category] || 0) + 1;
-  return {
-    path: file.path,
-    fullPath: file.fullPath,
-    name: file.name,
-    score,
-    status,
-    counts: { errors, warnings, infos, total: findings.length },
-    category_counts: categoryCounts,
-    findings,
-    remediation_candidates: findings
-      .filter((finding) => finding.severity !== "info")
-      .slice(0, 12)
-      .map((finding) => ({
-        finding_code: finding.code,
-        path: file.path,
-        mode: "ask_ai",
-        prompt: finding.remediation?.prompt || finding.message,
-      })),
-  };
-}
-
-async function loadDbtArtifactPresence(projectPath) {
-  return {
-    manifest: Boolean(await readJsonArtifact(join(projectPath, "target", "manifest.json"))),
-    catalog: Boolean(await readJsonArtifact(join(projectPath, "target", "catalog.json"))),
-    semanticManifest: Boolean(await readJsonArtifact(join(projectPath, "target", "semantic_manifest.json"))),
-    runResults: Boolean(await readJsonArtifact(join(projectPath, "target", "run_results.json"))),
-  };
+async function loadDocBlockIndex(projectPath) {
+  const key = resolve(projectPath);
+  if (DOC_BLOCK_CACHE.has(key)) return DOC_BLOCK_CACHE.get(key);
+  const stdout = await spawnReadinessEngine(["doc-blocks", "--project", key]);
+  const parsed = JSON.parse(stdout);
+  DOC_BLOCK_CACHE.set(key, parsed);
+  return parsed;
 }
 
 async function buildDbtReadinessReview(project, { paths = [], scope = "all" } = {}) {
-  const structure = await loadProjectStructure(project.path);
-  const requestedPaths = new Set(reviewArray(paths).map((value) => toPosixPath(String(value || "")).replace(/^\/+/, "")));
-  const files = await walkYamlFiles(structure.modelPath);
-  const dbtArtifacts = await loadDbtArtifactPresence(project.path);
-  const selected = files.filter((file) => {
-    if (!requestedPaths.size || scope === "all" || scope === "changed") return true;
-    const rel = toPosixPath(file.path);
-    return requestedPaths.has(rel) || requestedPaths.has(file.name);
-  });
-  const fileReviews = [];
-  for (const file of selected) {
-    let content = "";
-    try {
-      content = await readFile(file.fullPath, "utf-8");
-    } catch (err) {
-      const findings = [reviewFinding({
-        severity: "error",
-        category: "import_health",
-        code: "DBT_READINESS_FILE_UNREADABLE",
-        path: "/",
-        target: file.path,
-        message: `${file.path} could not be read.`,
-        rationale: "Unreadable files cannot be validated or remediated safely.",
-        suggestedFix: `Check file permissions and retry the review. ${String(err?.message || "")}`.trim(),
-        weight: 25,
-      })];
-      fileReviews.push(summarizeReviewFile(file, findings));
-      continue;
-    }
-    const { doc, error } = safeYamlLoad(content);
-    if (error || !doc || typeof doc !== "object" || Array.isArray(doc)) {
-      const location = error?.line ? ` at line ${error.line}${error.column ? `, column ${error.column}` : ""}` : "";
-      const findings = [reviewFinding({
-        severity: "error",
-        category: "import_health",
-        code: "DBT_READINESS_YAML_PARSE_ERROR",
-        path: "/",
-        target: file.path,
-        message: `${file.path} has a YAML parse error${location}.`,
-        rationale: "Parsing must succeed before DataLex can assess dbt metadata, model quality, or remediation patches.",
-        suggestedFix: error?.message || "Fix the YAML syntax and rerun readiness review.",
-        weight: 35,
-      })];
-      fileReviews.push(summarizeReviewFile(file, findings));
-      continue;
-    }
-    const findings = [];
-    reviewAddDocumentFindings(findings, file, doc, content, dbtArtifacts);
-    fileReviews.push(summarizeReviewFile(file, findings));
+  const args = [
+    "review",
+    "--project", project.path,
+    "--project-id", String(project.id || ""),
+    "--scope", String(scope || "all"),
+  ];
+  const requestedPaths = (Array.isArray(paths) ? paths : [])
+    .map((value) => toPosixPath(String(value || "")).replace(/^\/+/, ""))
+    .filter(Boolean);
+  if (requestedPaths.length) {
+    args.push("--paths", requestedPaths.join(","));
   }
-  const summary = {
-    total_files: fileReviews.length,
-    red: fileReviews.filter((file) => file.status === "red").length,
-    yellow: fileReviews.filter((file) => file.status === "yellow").length,
-    green: fileReviews.filter((file) => file.status === "green").length,
-    findings: fileReviews.reduce((sum, file) => sum + file.counts.total, 0),
-    errors: fileReviews.reduce((sum, file) => sum + file.counts.errors, 0),
-    warnings: fileReviews.reduce((sum, file) => sum + file.counts.warnings, 0),
-    infos: fileReviews.reduce((sum, file) => sum + file.counts.infos, 0),
-    score: fileReviews.length
-      ? Math.round(fileReviews.reduce((sum, file) => sum + file.score, 0) / fileReviews.length)
-      : 100,
-  };
-  const review = {
-    ok: true,
-    runId: `dbt_review_${Date.now()}_${randomBytes(3).toString("hex")}`,
-    projectId: project.id,
-    projectPath: project.path,
-    modelPath: structure.modelPath,
-    scope,
-    generatedAt: new Date().toISOString(),
-    dbtArtifacts,
-    summary,
-    files: fileReviews,
-    byPath: Object.fromEntries(fileReviews.map((file) => [file.path, {
-      status: file.status,
-      score: file.score,
-      counts: file.counts,
-    }])),
-  };
+  const stdout = await spawnReadinessEngine(args);
+  let review;
+  try {
+    review = JSON.parse(stdout);
+  } catch (err) {
+    const parseErr = new Error(`readiness_engine output was not valid JSON: ${err.message}`);
+    parseErr.code = "READINESS_ENGINE_PARSE_FAILED";
+    parseErr.stdoutPreview = stdout.slice(0, 400);
+    throw parseErr;
+  }
   DBT_REVIEW_CACHE.set(project.id, review);
   return review;
 }
@@ -2932,7 +2522,21 @@ function classifyAiAgents(message, context = {}) {
     }));
 }
 
-function aiCollectYamlRecords(records, file, content, doc) {
+// P1.C side B — when a column / model declares `description_ref: { doc:
+// <name> }`, resolve the rendered text from the doc-block index so BM25
+// finds the column for queries that match the doc-block prose.
+function aiResolveDescription(node, docBlockMap) {
+  if (!node || typeof node !== "object") return "";
+  const direct = typeof node.description === "string" ? node.description : "";
+  const ref = node.description_ref;
+  if (ref && typeof ref === "object" && ref.doc && docBlockMap) {
+    const resolved = docBlockMap[ref.doc];
+    if (resolved) return resolved;
+  }
+  return direct;
+}
+
+function aiCollectYamlRecords(records, file, content, doc, docBlockMap = null) {
   const pathValue = file.path || "";
   const layer = String(doc?.model?.kind || doc?.layer || doc?.kind || aiLayerFromPath(pathValue) || "").toLowerCase();
   const domain = String(doc?.model?.domain || doc?.domain || aiDomainFromPath(pathValue) || "").trim();
@@ -2959,7 +2563,7 @@ function aiCollectYamlRecords(records, file, content, doc) {
       subject_area: entity.subject_area || entity.subject || "",
       owner: entity.owner || "",
       tags: Array.isArray(entity.tags) ? entity.tags.join(" ") : "",
-      description: entity.description || "",
+      description: aiResolveDescription(entity, docBlockMap),
       extra: JSON.stringify(entity).slice(0, 1600),
     });
     for (const field of Array.isArray(entity.fields) ? entity.fields : []) {
@@ -2971,7 +2575,7 @@ function aiCollectYamlRecords(records, file, content, doc) {
         name: `${entityName}.${fieldName}`,
         layer,
         domain: entity.domain || domain,
-        description: field.description || "",
+        description: aiResolveDescription(field, docBlockMap),
         tags: Array.isArray(field.tags) ? field.tags.join(" ") : "",
         extra: JSON.stringify(field).slice(0, 1000),
       });
@@ -3002,7 +2606,7 @@ function aiCollectYamlRecords(records, file, content, doc) {
       name: modelName,
       layer: "physical",
       domain,
-      description: model.description || "",
+      description: aiResolveDescription(model, docBlockMap),
       tags: Array.isArray(model.tags) ? model.tags.join(" ") : "",
       extra: JSON.stringify(model).slice(0, 1600),
     });
@@ -3015,7 +2619,7 @@ function aiCollectYamlRecords(records, file, content, doc) {
         name: `${modelName}.${colName}`,
         layer: "physical",
         domain,
-        description: col.description || "",
+        description: aiResolveDescription(col, docBlockMap),
         tags: Array.isArray(col.tags) ? col.tags.join(" ") : "",
         extra: JSON.stringify(col).slice(0, 1000),
       });
@@ -3327,6 +2931,17 @@ async function collectDbtArtifactRecords(records, projectRoot) {
 async function buildAiIndex(project) {
   const structure = await loadProjectStructure(project.path);
   const yamlFiles = await walkYamlFiles(structure.modelPath);
+  // Resolve `{{ doc("name") }}` references once per index build so BM25
+  // ranks columns/models against the rendered prose, not the literal
+  // jinja string. Failures are non-fatal — fall back to the literal
+  // descriptions so the AI still works without a doc-block index.
+  let docBlockMap = null;
+  try {
+    const idx = await loadDocBlockIndex(project.path);
+    docBlockMap = (idx && typeof idx.blocks === "object") ? idx.blocks : null;
+  } catch (_err) {
+    docBlockMap = null;
+  }
   const records = [];
   for (const file of yamlFiles) {
     let content = "";
@@ -3346,7 +2961,7 @@ async function buildAiIndex(project) {
       });
       continue;
     }
-    aiCollectYamlRecords(records, file, content, doc);
+    aiCollectYamlRecords(records, file, content, doc, docBlockMap);
   }
 
   const skipModelPath = resolve(structure.modelPath) === resolve(project.path) ? "" : structure.modelPath;
@@ -4196,6 +3811,77 @@ function applyJsonPatch(doc, patchOps) {
   return clone;
 }
 
+function collectDocRefBindings(node, path = "/", out = []) {
+  if (!node || typeof node !== "object") return out;
+  if (Array.isArray(node)) {
+    node.forEach((item, i) => collectDocRefBindings(item, `${path}/${i}`, out));
+    return out;
+  }
+  const ref = node.description_ref;
+  if (ref && typeof ref === "object" && ref.doc) {
+    out.push({
+      path,
+      name: String(ref.doc),
+      description: typeof node.description === "string" ? node.description : "",
+    });
+  }
+  for (const [key, value] of Object.entries(node)) {
+    if (key === "description_ref") continue;
+    collectDocRefBindings(value, `${path}/${key}`, out);
+  }
+  return out;
+}
+
+function getYamlByPath(doc, path) {
+  if (!doc || !path || path === "/") return doc;
+  const parts = path.split("/").filter(Boolean);
+  let cursor = doc;
+  for (const part of parts) {
+    if (cursor == null) return undefined;
+    if (Array.isArray(cursor)) {
+      const idx = Number(part);
+      cursor = Number.isInteger(idx) ? cursor[idx] : undefined;
+    } else if (typeof cursor === "object") {
+      cursor = cursor[part];
+    } else {
+      return undefined;
+    }
+  }
+  return cursor;
+}
+
+// Returns { path, name } when a YAML patch would overwrite a description
+// that's currently bound via `description_ref` and the proposed text isn't
+// the matching `{{ doc("name") }}` jinja reference. Used as a guardrail in
+// the AI proposal apply path (P1.C).
+function detectDocBlockOverwrite(currentYaml, proposedYaml) {
+  let beforeDoc;
+  let afterDoc;
+  try {
+    beforeDoc = yaml.load(currentYaml);
+    afterDoc = yaml.load(proposedYaml);
+  } catch (_err) {
+    return null; // parse errors are caught upstream
+  }
+  if (!beforeDoc || typeof beforeDoc !== "object") return null;
+  const bindings = collectDocRefBindings(beforeDoc);
+  for (const binding of bindings) {
+    const after = getYamlByPath(afterDoc, binding.path);
+    if (!after || typeof after !== "object") {
+      // The patch removed the node entirely — that's a different concern;
+      // do not block here.
+      continue;
+    }
+    const refStillPresent = after.description_ref && after.description_ref.doc === binding.name;
+    const newDescription = typeof after.description === "string" ? after.description : "";
+    const expectedJinja = `{{ doc("${binding.name}") }}`;
+    if (refStillPresent && newDescription && newDescription !== binding.description && newDescription !== expectedJinja) {
+      return { path: binding.path, name: binding.name, before: binding.description, after: newDescription };
+    }
+  }
+  return null;
+}
+
 async function applyAiProposalChange(project, structure, change) {
   change = normalizeAiProposalChange(change);
   const type = String(change?.type || change?.operation || "").trim();
@@ -4246,7 +3932,24 @@ async function applyAiProposalChange(project, structure, change) {
     if (typeof content !== "string") throw new ApiError(400, "VALIDATION", "patch_yaml requires content or patch operations");
     const validation = validateYamlOnSave(filePath, content);
     if (!validation.ok) throw new ApiError(422, validation.code, validation.message, validation.details || null);
+    // Doc-block round-trip guardrail (P1.C). If the YAML currently binds a
+    // description through `description_ref: { doc: name }`, the rendered
+    // `description` lives in a `.md` file. A patch that overwrites that
+    // description without removing the ref would silently break the
+    // `dbt import → emit` round-trip. Fail fast and tell the AI to edit
+    // the doc-block instead.
+    const docRefViolation = detectDocBlockOverwrite(current, content);
+    if (docRefViolation) {
+      throw new ApiError(
+        422,
+        "DOC_BLOCK_OVERWRITE",
+        `Patch would overwrite a description bound to {{ doc("${docRefViolation.name}") }} ` +
+        `at ${docRefViolation.path}. Edit the doc block in the .md file (or remove description_ref first).`,
+        docRefViolation,
+      );
+    }
     await writeFile(filePath, content, "utf-8");
+    invalidateDocBlocksForFile(project.path, filePath);
     const stats = await stat(filePath);
     return { type: "patch_yaml", path: relative(structure.modelPath, filePath), fullPath: filePath, name: basename(filePath), size: stats.size, modifiedAt: stats.mtime.toISOString() };
   }
@@ -4330,6 +4033,87 @@ app.get("/api/dbt/review", requireAdmin, async (req, res, next) => {
       summary: { total_files: 0, red: 0, yellow: 0, green: 0, findings: 0, errors: 0, warnings: 0, infos: 0, score: 100 },
       files: [],
       byPath: {},
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// Doc-block index for the project. Powers the AI-assist round-trip
+// preservation flow (P1.C) and the inspector's "this column comes from a
+// shared doc block" indicator. Cache is populated lazily and invalidated
+// on YAML/`.md` writes via `invalidateDocBlocksForFile`.
+app.get("/api/dbt/doc-blocks", requireAdmin, async (req, res, next) => {
+  try {
+    const { project } = await resolveProjectAndStructure(req.query?.projectId);
+    const force = String(req.query?.refresh || "").toLowerCase() === "true";
+    if (force) DOC_BLOCK_CACHE.delete(resolve(project.path));
+    const index = await loadDocBlockIndex(project.path);
+    res.json({ ok: true, projectId: project.id, ...index });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// Custom policy packs live at <project_root>/.datalex/policies/*.yaml so
+// they ship in git next to the dbt project they govern (P0.3 design
+// decision). These endpoints let the UI's Validation panel list and edit
+// them without leaving the SaaS surface.
+const POLICY_PACK_DIR = join(DATALEX_CONFIG_DIRNAME, "policies");
+
+function policyPackDirFor(projectPath) {
+  return join(projectPath, POLICY_PACK_DIR);
+}
+
+app.get("/api/policy/packs", requireAdmin, async (req, res, next) => {
+  try {
+    const { project } = await resolveProjectAndStructure(req.query?.projectId);
+    const dir = policyPackDirFor(project.path);
+    const out = [];
+    if (existsSync(dir)) {
+      const entries = await readdir(dir, { withFileTypes: true });
+      for (const entry of entries.sort((a, b) => a.name.localeCompare(b.name))) {
+        if (!entry.isFile()) continue;
+        if (!entry.name.toLowerCase().endsWith(".yaml") && !entry.name.toLowerCase().endsWith(".yml")) continue;
+        const fullPath = join(dir, entry.name);
+        const content = await readFile(fullPath, "utf-8");
+        out.push({
+          name: entry.name,
+          path: relative(project.path, fullPath),
+          fullPath,
+          content,
+        });
+      }
+    }
+    res.json({ ok: true, projectId: project.id, dir: POLICY_PACK_DIR, packs: out });
+  } catch (err) {
+    next(err);
+  }
+});
+
+app.put("/api/policy/packs", requireAdmin, async (req, res, next) => {
+  try {
+    const { project } = await resolveProjectAndStructure(req.query?.projectId);
+    const { name, content } = req.body || {};
+    if (!name || typeof content !== "string") {
+      return apiFail(res, 400, "VALIDATION", "name and content are required");
+    }
+    if (!/^[A-Za-z0-9._-]+\.(ya?ml)$/i.test(String(name))) {
+      return apiFail(res, 400, "VALIDATION", "name must be a *.yaml or *.yml filename without path segments");
+    }
+    const dir = policyPackDirFor(project.path);
+    if (!existsSync(dir)) await mkdir(dir, { recursive: true });
+    const fullPath = join(dir, name);
+    if (!isPathInside(dir, fullPath)) {
+      return apiFail(res, 400, "PATH_ESCAPE", "name must stay inside the policy pack folder");
+    }
+    await writeFile(fullPath, content, "utf-8");
+    res.json({
+      ok: true,
+      projectId: project.id,
+      name,
+      path: relative(project.path, fullPath),
+      fullPath,
     });
   } catch (err) {
     next(err);
@@ -4504,6 +4288,7 @@ app.post("/api/ai/ask", requireAdmin, async (req, res, next) => {
         `Selected specialist agents: ${contextPreview.agents.map((agent) => `${agent.id} (${agent.contract})`).join(" | ")}`,
         `Selected skills: ${contextPreview.selected_skills.map((skill) => `${skill.name} at ${skill.path}`).join(", ") || "none"}`,
         "Use change types exactly: create_file, update_file, patch_yaml, delete_file, rename_file, create_diagram, create_model.",
+        "Doc-block contract: when a column or model has `description_ref: { doc: <name> }`, the rendered description lives in a `.md` file (`{% docs <name> %}…{% enddocs %}`). To improve such a description, propose an `update_file` change against the `.md` file — do NOT overwrite the YAML description directly; the apply path will reject it.",
         "For create_diagram include domain, layer, name, entities, relationships, and relationship verbs when conceptual.",
         "If the user asks for a flow, lifecycle, journey, funnel, process, or adoption model, the proposal must include meaningful relationships that connect the main objects into a readable business flow.",
         "A visual diagram proposal with zero relationships is only acceptable when the user explicitly asks for isolated concepts or an inventory.",
@@ -4675,6 +4460,7 @@ app.put("/api/files", requireAdmin, async (req, res) => {
       await mkdir(dir, { recursive: true });
     }
     await writeFile(filePath, content, "utf-8");
+    invalidateDocBlocksForFile(dirname(filePath), filePath);
     const stats = await stat(filePath);
     res.json({
       path: filePath,
@@ -4713,6 +4499,7 @@ app.post("/api/projects/:id/files", requireAdmin, async (req, res, next) => {
 
     await mkdir(dirname(filePath), { recursive: true });
     await writeFile(filePath, content, "utf-8");
+    invalidateDocBlocksForFile(project.path, filePath);
     const stats = await stat(filePath);
     res.json({
       path: relative(project.path, filePath),
@@ -5543,6 +5330,101 @@ function cleanupTempDir(dir) {
   } catch (_) {}
 }
 
+// P2: agent endpoints. Both shell out to `python -m datalex_core.agents`
+// which produces deterministic proposals from the project's models. The
+// LLM hop is optional and additive — the deterministic baseline already
+// gives DataLex the unique "propose conceptual model from this dbt repo"
+// capability competitors lack.
+function spawnAgentEngine(args) {
+  return new Promise((resolvePromise, rejectPromise) => {
+    const env = { ...process.env };
+    const corePath = join(REPO_ROOT, "packages", "core_engine", "src");
+    const sep = process.platform === "win32" ? ";" : ":";
+    env.PYTHONPATH = env.PYTHONPATH ? `${corePath}${sep}${env.PYTHONPATH}` : corePath;
+    const child = spawn(PYTHON, ["-m", "datalex_core.agents", ...args], {
+      cwd: REPO_ROOT,
+      env,
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    let stdout = "";
+    let stderr = "";
+    child.stdout.on("data", (chunk) => { stdout += chunk; });
+    child.stderr.on("data", (chunk) => { stderr += chunk; });
+    child.on("error", rejectPromise);
+    child.on("close", (code) => {
+      if (code !== 0) {
+        const err = new Error(`agents engine exited with code ${code}: ${stderr.trim()}`);
+        err.code = "AGENT_ENGINE_FAILED";
+        return rejectPromise(err);
+      }
+      resolvePromise(stdout);
+    });
+  });
+}
+
+app.post("/api/ai/conceptualize", requireAdmin, express.json({ limit: "1mb" }), async (req, res, next) => {
+  try {
+    const { project } = await resolveProjectAndStructure(req.body?.projectId);
+    const stdout = await spawnAgentEngine(["conceptualize", "--project", project.path]);
+    const payload = JSON.parse(stdout);
+    res.json({ ok: true, projectId: project.id, ...payload });
+  } catch (err) {
+    next(err);
+  }
+});
+
+app.post("/api/ai/canonicalize", requireAdmin, express.json({ limit: "1mb" }), async (req, res, next) => {
+  try {
+    const { project } = await resolveProjectAndStructure(req.body?.projectId);
+    const minRecurrence = Number.isInteger(req.body?.minRecurrence) ? req.body.minRecurrence : 2;
+    const stdout = await spawnAgentEngine([
+      "canonicalize",
+      "--project", project.path,
+      "--min-recurrence", String(minRecurrence),
+    ]);
+    const payload = JSON.parse(stdout);
+    res.json({ ok: true, projectId: project.id, ...payload });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// P1.E: catalog export. Shells out to `datalex emit catalog` to produce
+// Atlan / DataHub / OpenMetadata glossary payloads from the active model.
+app.post("/api/export/catalog", requireAdmin, express.json({ limit: "2mb" }), async (req, res, next) => {
+  try {
+    const { target, model_path } = req.body || {};
+    if (!target || !["atlan", "datahub", "openmetadata"].includes(String(target).toLowerCase())) {
+      return apiFail(res, 400, "VALIDATION", "target must be one of: atlan, datahub, openmetadata");
+    }
+    if (!model_path || !existsSync(String(model_path))) {
+      return apiFail(res, 400, "VALIDATION", "model_path is required and must exist");
+    }
+    const tmpDir = join(tmpdir(), `datalex-catalog-${Date.now()}`);
+    mkdirSync(tmpDir, { recursive: true });
+    try {
+      const { cmd, argv } = dmExec(
+        "emit", "catalog",
+        "--target", String(target).toLowerCase(),
+        "--model", String(model_path),
+        "--out", tmpDir,
+      );
+      execFileSync(cmd, argv, { encoding: "utf-8", timeout: 30000, cwd: REPO_ROOT });
+      const files = await readdir(tmpDir);
+      const matched = files.filter((f) => f.startsWith(`${String(target).toLowerCase()}-`) && f.endsWith(".json"));
+      if (!matched.length) {
+        return apiFail(res, 500, "INTERNAL", "Catalog emit produced no output");
+      }
+      const payload = JSON.parse(await readFile(join(tmpDir, matched[0]), "utf-8"));
+      res.json({ ok: true, target, payload });
+    } finally {
+      try { rmSync(tmpDir, { recursive: true, force: true }); } catch (_) {}
+    }
+  } catch (err) {
+    next(err);
+  }
+});
+
 // Forward engineering: generate SQL from model YAML
 app.post("/api/forward/generate-sql", requireAdmin, express.json(), async (req, res) => {
   try {
@@ -5816,6 +5698,108 @@ app.post("/api/forward/migrate", requireAdmin, express.json(), async (req, res) 
 });
 
 // dbt round-trip sync: merge DataLex metadata into an existing dbt schema.yml
+// P1.D: detect contract-enforced models with unknown column types so the
+// dbt-sync forward path doesn't ship YAML that breaks `dbt parse`.
+function modelEnforcesContract(model) {
+  if (!model || typeof model !== "object") return false;
+  const contract = model.contract || {};
+  if (contract.enforced) return true;
+  const config = model.config || {};
+  if ((config.contract || {}).enforced) return true;
+  const meta = model.meta || {};
+  const datalex = meta.datalex || {};
+  if (String(datalex.contracts || "").toLowerCase() === "enforced") return true;
+  return false;
+}
+
+function findContractColumnIssues(modelYaml) {
+  const out = [];
+  const { doc } = safeYamlLoad(modelYaml);
+  if (!doc || typeof doc !== "object") return out;
+  const visit = (entity, path) => {
+    if (!entity || typeof entity !== "object") return;
+    if (!modelEnforcesContract(entity)) return;
+    const cols = Array.isArray(entity.columns) ? entity.columns : Array.isArray(entity.fields) ? entity.fields : [];
+    for (const col of cols) {
+      const colName = (col && col.name) || "?";
+      const dataType = (col && (col.data_type || col.type)) || "";
+      if (!dataType || String(dataType).toLowerCase() === "unknown") {
+        out.push({
+          entity: entity.name || path,
+          column: colName,
+          message: `Column ${entity.name || path}.${colName} has no concrete data_type but the model enforces a contract.`,
+          suggested_fix: "Run dbt compile/docs to populate types, or set data_type explicitly before enforcing the contract.",
+        });
+      }
+    }
+  };
+  if (Array.isArray(doc.models)) {
+    doc.models.forEach((m, i) => visit(m, `models/${i}`));
+  } else if (doc.kind === "model") {
+    visit(doc, "/");
+  } else if (Array.isArray(doc.entities)) {
+    doc.entities.forEach((e, i) => visit(e, `entities/${i}`));
+  }
+  return out;
+}
+
+// P1.D: bulk toggle `contract.enforced` (or `meta.datalex.contracts`)
+// across selected DataLex model files. Returns the updated YAML so the
+// UI can refresh without reloading individual files.
+app.post("/api/model/contracts/enforce", requireAdmin, express.json({ limit: "2mb" }), async (req, res, next) => {
+  try {
+    const { project } = await resolveProjectAndStructure(req.body?.projectId);
+    const enforce = req.body?.enforce !== false;
+    const selectorPaths = Array.isArray(req.body?.paths) ? req.body.paths : [];
+    const layerSelector = (req.body?.selectors || {}).layer ? String(req.body.selectors.layer).toLowerCase() : "";
+    if (!selectorPaths.length && !layerSelector) {
+      return apiFail(res, 400, "VALIDATION", "Provide either `paths` or `selectors.layer` to scope the toggle.");
+    }
+    const structure = await loadProjectStructure(project.path);
+    const allFiles = await walkYamlFiles(structure.modelPath);
+    const requested = new Set(selectorPaths.map((p) => toPosixPath(String(p || "")).replace(/^\/+/, "")));
+    const updates = [];
+    for (const file of allFiles) {
+      if (requested.size && !requested.has(toPosixPath(file.path))) continue;
+      const content = await readFile(file.fullPath, "utf-8");
+      const { doc } = safeYamlLoad(content);
+      if (!doc || typeof doc !== "object" || Array.isArray(doc)) continue;
+      const before = JSON.stringify(doc);
+      const apply = (entity) => {
+        if (!entity || typeof entity !== "object") return;
+        if (layerSelector) {
+          const name = String(entity.name || "").toLowerCase();
+          const declared = String(entity.layer || "").toLowerCase();
+          const inferred = declared || (name.startsWith("stg_") ? "stg" : name.startsWith("int_") ? "int" : name.startsWith("fct_") || name.startsWith("fact_") ? "fct" : name.startsWith("dim_") ? "dim" : "");
+          if (inferred !== layerSelector) return;
+        }
+        entity.contract = entity.contract || {};
+        entity.contract.enforced = enforce;
+        entity.meta = entity.meta || {};
+        entity.meta.datalex = entity.meta.datalex || {};
+        entity.meta.datalex.contracts = enforce ? "enforced" : "off";
+      };
+      if (Array.isArray(doc.models)) {
+        for (const m of doc.models) apply(m);
+      } else if (doc.kind === "model") {
+        apply(doc);
+      } else if (Array.isArray(doc.entities)) {
+        for (const e of doc.entities) apply(e);
+      } else {
+        continue;
+      }
+      const after = JSON.stringify(doc);
+      if (before === after) continue;
+      const yamlOut = yaml.dump(doc, { lineWidth: 120, noRefs: true });
+      await writeFile(file.fullPath, yamlOut, "utf-8");
+      updates.push({ path: file.path, fullPath: file.fullPath });
+    }
+    res.json({ ok: true, projectId: project.id, enforce, updated: updates });
+  } catch (err) {
+    next(err);
+  }
+});
+
 app.post("/api/forward/dbt-sync", requireAdmin, express.json({ limit: "5mb" }), async (req, res) => {
   try {
     const { model_content, dbt_schema_content, model_path, dbt_schema_path, write_back } = req.body || {};
@@ -5839,6 +5823,17 @@ app.post("/api/forward/dbt-sync", requireAdmin, express.json({ limit: "5mb" }), 
     if (!modelYaml || !dbtYaml) {
       return res.status(400).json({
         error: "Provide (model_content + dbt_schema_content) or (model_path + dbt_schema_path)",
+      });
+    }
+
+    const contractFindings = findContractColumnIssues(modelYaml);
+    if (contractFindings.length > 0) {
+      return res.status(409).json({
+        error: {
+          code: "CONTRACT_PREFLIGHT",
+          message: "One or more contract-enforced models have columns without a concrete data_type. Resolve before syncing.",
+          findings: contractFindings,
+        },
       });
     }
 

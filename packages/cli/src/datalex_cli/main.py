@@ -1134,19 +1134,187 @@ def cmd_gate(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_readiness_gate(args: argparse.Namespace) -> int:
+    """CI/CD gate: run the shared `datalex_readiness` engine and fail on red.
+
+    Designed for pre-commit hooks and PR jobs — same scoring as the
+    `/api/dbt/review` endpoint, no api-server required. Emits SARIF for
+    GitHub code-scanning and a sticky-comment markdown summary alongside
+    a non-zero exit when thresholds are breached.
+    """
+    # Lazy import — keeps `datalex --help` fast and avoids importing the
+    # readiness engine for users who only run validate/lint locally.
+    try:
+        from datalex_readiness.scoring import review_project
+        from datalex_readiness.finding import findings_to_sarif
+    except ModuleNotFoundError as exc:
+        print(
+            f"ERROR: datalex_readiness is not installed ({exc}). "
+            "Install with `pip install datalex-readiness` or run from a dev clone "
+            "with PYTHONPATH=packages/readiness_engine/src.",
+            file=sys.stderr,
+        )
+        return 1
+
+    project_path = Path(args.project).resolve()
+    if not project_path.exists():
+        print(f"ERROR: project path not found: {project_path}", file=sys.stderr)
+        return 1
+
+    paths: List[str] = []
+    if getattr(args, "changed_only", False):
+        paths = _gate_changed_paths(str(project_path), args.base_ref)
+        if not paths:
+            print("[gate] no YAML/.md changes vs base ref — skipping.", flush=True)
+            return 0
+
+    review = review_project(
+        project_id="cli",
+        project_path=str(project_path),
+        paths=paths,
+        scope="changed" if paths else "all",
+    )
+
+    summary = review["summary"]
+    label = (
+        f"score={summary['score']} "
+        f"red={summary['red']} yellow={summary['yellow']} green={summary['green']} "
+        f"errors={summary['errors']} warnings={summary['warnings']}"
+    )
+    print(f"[gate] {label}", flush=True)
+
+    if args.sarif:
+        sarif_path = Path(args.sarif)
+        sarif_path.parent.mkdir(parents=True, exist_ok=True)
+        with sarif_path.open("w", encoding="utf-8") as fh:
+            json.dump(findings_to_sarif(review.get("files", [])), fh, indent=2)
+        print(f"[gate] wrote SARIF → {sarif_path}", flush=True)
+
+    if args.pr_comment:
+        comment_path = Path(args.pr_comment)
+        comment_path.parent.mkdir(parents=True, exist_ok=True)
+        comment_path.write_text(_gate_render_pr_comment(review), encoding="utf-8")
+        print(f"[gate] wrote PR comment markdown → {comment_path}", flush=True)
+
+    if args.output_json:
+        print(json.dumps(review, indent=2))
+
+    fail = False
+    if args.min_score is not None and summary["score"] < args.min_score:
+        print(
+            f"[gate] FAIL: project score {summary['score']} below --min-score {args.min_score}",
+            file=sys.stderr,
+        )
+        fail = True
+    if args.max_yellow is not None and summary["yellow"] > args.max_yellow:
+        print(
+            f"[gate] FAIL: yellow files {summary['yellow']} exceed --max-yellow {args.max_yellow}",
+            file=sys.stderr,
+        )
+        fail = True
+    if args.max_red is not None and summary["red"] > args.max_red:
+        print(
+            f"[gate] FAIL: red files {summary['red']} exceed --max-red {args.max_red}",
+            file=sys.stderr,
+        )
+        fail = True
+    if summary["errors"] > 0 and not args.allow_errors:
+        print(
+            f"[gate] FAIL: {summary['errors']} error finding(s) — pass --allow-errors to bypass",
+            file=sys.stderr,
+        )
+        fail = True
+    return 1 if fail else 0
+
+
+def _gate_changed_paths(project_path: str, base_ref: str) -> List[str]:
+    """Return YAML/.md files changed vs base_ref, relative to project_path.
+
+    Falls back to scanning the full project when git isn't available.
+    """
+    import subprocess
+
+    try:
+        proc = subprocess.run(
+            ["git", "diff", "--name-only", f"{base_ref}...HEAD"],
+            cwd=project_path,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+    except FileNotFoundError:
+        return []
+    if proc.returncode != 0:
+        return []
+    out: List[str] = []
+    for line in proc.stdout.splitlines():
+        clean = line.strip()
+        if not clean:
+            continue
+        lower = clean.lower()
+        if lower.endswith((".yaml", ".yml", ".md")):
+            out.append(clean)
+    return out
+
+
+def _gate_render_pr_comment(review: Dict[str, Any]) -> str:
+    """Render a sticky PR-comment summary in markdown."""
+    summary = review["summary"]
+    badge = "🟢" if summary["red"] == 0 and summary["errors"] == 0 else (
+        "🟡" if summary["red"] == 0 else "🔴"
+    )
+    lines = [
+        f"## DataLex readiness {badge}",
+        "",
+        f"**Score:** {summary['score']} · "
+        f"red {summary['red']} · yellow {summary['yellow']} · green {summary['green']}",
+        f"**Findings:** {summary['errors']} error(s), {summary['warnings']} warning(s), "
+        f"{summary['infos']} info",
+        "",
+    ]
+    worst = sorted(
+        review.get("files", []),
+        key=lambda f: (
+            0 if f["status"] == "red" else 1 if f["status"] == "yellow" else 2,
+            -f["counts"]["errors"],
+            -f["counts"]["warnings"],
+            f["score"],
+        ),
+    )[:8]
+    if worst:
+        lines.append("| Status | File | Score | Errors | Warnings |")
+        lines.append("|---|---|---|---|---|")
+        for f in worst:
+            icon = {"red": "🔴", "yellow": "🟡", "green": "🟢"}.get(f["status"], "·")
+            lines.append(
+                f"| {icon} | `{f['path']}` | {f['score']} | "
+                f"{f['counts']['errors']} | {f['counts']['warnings']} |"
+            )
+    else:
+        lines.append("_No YAML files were scored._")
+    lines.append("")
+    lines.append("<sub>Generated by `datalex readiness-gate`.</sub>")
+    return "\n".join(lines) + "\n"
+
+
 def cmd_policy_check(args: argparse.Namespace) -> int:
     schema = load_schema(args.schema)
     policy_schema = load_schema(args.policy_schema)
 
+    policy_paths: List[str] = list(getattr(args, "policy", None) or []) or [_default_policy_path()]
+
     model, model_issues = _validate_model_file(args.model, schema)
-    if getattr(args, "inherit", False):
-        policy_pack = load_policy_pack_with_inheritance(args.policy)
-    else:
-        policy_pack = load_policy_pack(args.policy)
+    inherit = bool(getattr(args, "inherit", False))
+    loaded_packs = [
+        load_policy_pack_with_inheritance(p) if inherit else load_policy_pack(p)
+        for p in policy_paths
+    ]
+    policy_pack = merge_policy_packs(*loaded_packs) if len(loaded_packs) > 1 else loaded_packs[0]
     policy_pack_issues = schema_issues(policy_pack, policy_schema)
 
+    label = ", ".join(policy_paths)
     _print_issue_block(f"Model checks ({args.model})", model_issues)
-    _print_issue_block(f"Policy pack checks ({args.policy})", policy_pack_issues)
+    _print_issue_block(f"Policy pack checks ({label})", policy_pack_issues)
 
     if has_errors(model_issues) or has_errors(policy_pack_issues):
         print("Policy check failed: validation errors detected before policy evaluation.")
@@ -1158,7 +1326,7 @@ def cmd_policy_check(args: argparse.Namespace) -> int:
     if args.output_json:
         payload = {
             "model": args.model,
-            "policy": args.policy,
+            "policy": policy_paths if len(policy_paths) > 1 else policy_paths[0],
             "summary": {
                 "error_count": len([item for item in evaluated_issues if item.severity == "error"]),
                 "warning_count": len([item for item in evaluated_issues if item.severity == "warn"]),
@@ -1748,6 +1916,69 @@ def cmd_dbt_import(args: argparse.Namespace) -> int:
         print(report_to_json(report))
     else:
         print(report.summary())
+    return 0
+
+
+def cmd_emit_catalog(args: argparse.Namespace) -> int:
+    """Emit glossary + column-binding payloads for an external catalog.
+
+    Targets: atlan | datahub | openmetadata. Output is one JSON file per
+    model under --out, named `<target>-<model_name>.json`.
+    """
+    from datalex_core.exporters import available_targets, export_catalog
+
+    target = (args.target or "").lower()
+    if target not in available_targets():
+        print(
+            f"ERROR: unknown target '{args.target}'. Available: {', '.join(available_targets())}",
+            file=sys.stderr,
+        )
+        return 1
+
+    schema = load_schema(args.schema)
+    model, issues = _validate_model_file(args.model, schema)
+    if has_errors(issues):
+        _print_issues(issues)
+        return 1
+    compiled = compile_model(model)
+
+    payload = export_catalog(target, compiled)
+    out_dir = Path(args.out)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    name = compiled.get("model", {}).get("name") or "datalex_model"
+    safe_name = re.sub(r"[^A-Za-z0-9_.-]+", "_", str(name))
+    out_path = out_dir / f"{target}-{safe_name}.json"
+    out_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+    print(f"[catalog] wrote {target} payload → {out_path}")
+    return 0
+
+
+def cmd_dbt_docs_reindex(args: argparse.Namespace) -> int:
+    """Rebuild the dbt `{% docs %}` index for a project and print a summary.
+
+    Uses the same `DocBlockIndex` the importer/emitter consume so output
+    matches what `dbt import → emit` will round-trip.
+    """
+    from datalex_core.dbt.doc_blocks import DocBlockIndex
+
+    project_dir = Path(args.project_dir)
+    if not project_dir.is_dir():
+        print(f"ERROR: project directory not found: {project_dir}", file=sys.stderr)
+        return 1
+    idx = DocBlockIndex.build(project_dir)
+    if getattr(args, "json", False):
+        import json as _json
+        print(_json.dumps({"blocks": idx.blocks, "sources": idx.sources, "names": idx.names()}))
+    else:
+        print(f"[doc-blocks] project={project_dir}")
+        print(f"[doc-blocks] sources scanned: {len(idx.sources)}")
+        print(f"[doc-blocks] blocks indexed: {len(idx.blocks)}")
+        for name in idx.names():
+            body = idx.blocks[name]
+            preview = body.replace("\n", " ").strip()
+            if len(preview) > 80:
+                preview = preview[:77] + "..."
+            print(f"  - {name}: {preview}")
     return 0
 
 
@@ -3080,10 +3311,59 @@ def build_parser() -> argparse.ArgumentParser:
     )
     gate_parser.set_defaults(func=cmd_gate)
 
+    readiness_gate_parser = sub.add_parser(
+        "readiness-gate",
+        help="CI/CD gate: run the dbt-readiness engine and fail on red/score thresholds",
+    )
+    readiness_gate_parser.add_argument(
+        "--project", required=True, help="Path to the dbt/DataLex project root",
+    )
+    readiness_gate_parser.add_argument(
+        "--min-score", type=int, default=None, help="Fail if project score < N",
+    )
+    readiness_gate_parser.add_argument(
+        "--max-yellow", type=int, default=None, help="Fail if yellow file count > N",
+    )
+    readiness_gate_parser.add_argument(
+        "--max-red", type=int, default=0, help="Fail if red file count > N (default: 0)",
+    )
+    readiness_gate_parser.add_argument(
+        "--allow-errors",
+        action="store_true",
+        help="Don't fail on error-severity findings (default: fail when errors > 0)",
+    )
+    readiness_gate_parser.add_argument(
+        "--changed-only",
+        action="store_true",
+        help="Only score files changed vs --base-ref (uses git diff)",
+    )
+    readiness_gate_parser.add_argument(
+        "--base-ref",
+        default="origin/main",
+        help="Base ref for --changed-only (default: origin/main)",
+    )
+    readiness_gate_parser.add_argument(
+        "--sarif", default="", help="Write SARIF 2.1.0 output to this path for code-scanning upload",
+    )
+    readiness_gate_parser.add_argument(
+        "--pr-comment", default="", help="Write a sticky PR comment markdown summary to this path",
+    )
+    readiness_gate_parser.add_argument(
+        "--output-json", action="store_true", help="Print full review JSON to stdout",
+    )
+    readiness_gate_parser.set_defaults(func=cmd_readiness_gate)
+
     policy_parser = sub.add_parser("policy-check", help="Evaluate a model against a policy pack")
     policy_parser.add_argument("model", help="Path to model YAML")
+    # `--policy` may be passed multiple times to merge several packs (e.g.
+    # the built-in `datalex/standards/base.yaml` plus an org-specific pack).
+    # When omitted, the default pack is used; when one or more are passed,
+    # the defaults are not implicitly added — pass them explicitly.
     policy_parser.add_argument(
-        "--policy", default=_default_policy_path(), help="Path to policy pack YAML"
+        "--policy",
+        action="append",
+        default=None,
+        help="Path to policy pack YAML; may be repeated to merge multiple packs",
     )
     policy_parser.add_argument(
         "--schema", default=_default_schema_path(), help="Path to model schema JSON"
@@ -3239,6 +3519,44 @@ def build_parser() -> argparse.ArgumentParser:
         help="Emit the SyncReport as JSON instead of a human summary",
     )
     dbt_import_parser.set_defaults(func=cmd_dbt_import)
+
+    emit_parser = sub.add_parser(
+        "emit",
+        help="Emit DataLex artifacts for external systems",
+    )
+    emit_sub = emit_parser.add_subparsers(dest="emit_command", required=True)
+    emit_catalog_parser = emit_sub.add_parser(
+        "catalog",
+        help="Emit glossary + column-binding payload for an external catalog",
+    )
+    emit_catalog_parser.add_argument(
+        "--target",
+        required=True,
+        help="Catalog target: atlan | datahub | openmetadata",
+    )
+    emit_catalog_parser.add_argument("--model", required=True, help="Path to the DataLex model YAML")
+    emit_catalog_parser.add_argument("--out", required=True, help="Output directory")
+    emit_catalog_parser.add_argument(
+        "--schema", default=_default_schema_path(), help="Path to model schema JSON",
+    )
+    emit_catalog_parser.set_defaults(func=cmd_emit_catalog)
+
+    dbt_docs_parser = dbt_sub.add_parser(
+        "docs",
+        help="Inspect and reindex the doc-block index for a dbt project",
+    )
+    dbt_docs_sub = dbt_docs_parser.add_subparsers(dest="dbt_docs_command", required=True)
+    dbt_docs_reindex = dbt_docs_sub.add_parser(
+        "reindex",
+        help="Rebuild the {% docs %} block index and print resolved names",
+    )
+    dbt_docs_reindex.add_argument(
+        "--project-dir",
+        required=True,
+        help="Path to the dbt project root",
+    )
+    dbt_docs_reindex.add_argument("--json", action="store_true", help="Emit JSON instead of a summary")
+    dbt_docs_reindex.set_defaults(func=cmd_dbt_docs_reindex)
 
     pull_parser = sub.add_parser("pull", help="Pull schema from a live database into a DataLex model")
     pull_parser.add_argument("connector", help="Connector type (postgres, mysql, snowflake, bigquery, databricks, sqlserver, azure_sql, azure_fabric, redshift)")

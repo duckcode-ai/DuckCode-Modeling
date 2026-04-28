@@ -45,11 +45,29 @@
               "require_sla",
               "deprecation_check",
               "custom_expression",
-              "modeling_convention"
+              "modeling_convention",
+              "regex_per_layer",
+              "required_meta_keys",
+              "layer_constraint",
+              "require_contract",
+              "require_data_type_when_contracted"
             ]
           },
           "severity": { "type": "string", "enum": ["info", "warn", "error"] },
-          "params": { "type": "object" }
+          "params": {
+            "type": "object",
+            "properties": {
+              "selectors": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "layer": { "type": "string" },
+                  "tag": { "type": "string" },
+                  "path_glob": { "type": "string" }
+                }
+              }
+            }
+          }
         }
       }
     }

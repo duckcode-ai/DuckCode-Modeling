@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "datalex-cli"
-version = "1.3.7"
+version = "1.4.0"
 description = "Git-native data modeling for dbt users"
 readme = "README.md"
 requires-python = ">=3.9"
@@ -62,7 +62,11 @@ datalex = "datalex_cli.main:main"
 dm = "datalex_cli.main:main"
 
 [tool.setuptools.packages.find]
-where = ["packages/core_engine/src", "packages/cli/src"]
+where = [
+  "packages/core_engine/src",
+  "packages/cli/src",
+  "packages/readiness_engine/src",
+]
 
 [tool.setuptools.package-data]
 # `_server` and `_webapp` ship the Node api-server entry point and the

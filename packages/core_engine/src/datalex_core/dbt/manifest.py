@@ -25,6 +25,7 @@ from typing import Any, Dict, List, Optional, Tuple
 import yaml
 
 from datalex_core.dbt.catalog import CatalogIndex, load_catalog
+from datalex_core.dbt.doc_blocks import DocBlockIndex, find_description_ref
 
 
 # ------------------------ public API ------------------------
@@ -34,6 +35,11 @@ from datalex_core.dbt.catalog import CatalogIndex, load_catalog
 class ImportResult:
     sources: Dict[str, Dict[str, Any]] = field(default_factory=dict)  # name -> doc
     models: Dict[str, Dict[str, Any]] = field(default_factory=dict)
+    snapshots: Dict[str, Dict[str, Any]] = field(default_factory=dict)
+    seeds: Dict[str, Dict[str, Any]] = field(default_factory=dict)
+    exposures: Dict[str, Dict[str, Any]] = field(default_factory=dict)
+    unit_tests: Dict[str, Dict[str, Any]] = field(default_factory=dict)
+    semantic_models: Dict[str, Dict[str, Any]] = field(default_factory=dict)
     warnings: List[str] = field(default_factory=list)
     # source_path: dbt's `original_file_path` per doc, so callers can mirror the
     # dbt project's folder layout when writing. Keyed like the parent dict —
@@ -41,7 +47,15 @@ class ImportResult:
     # populated for new imports; absent-or-empty means "no known source path,
     # fall back to flat layout."
     source_paths: Dict[str, Dict[str, str]] = field(
-        default_factory=lambda: {"sources": {}, "models": {}}
+        default_factory=lambda: {
+            "sources": {},
+            "models": {},
+            "snapshots": {},
+            "seeds": {},
+            "exposures": {},
+            "unit_tests": {},
+            "semantic_models": {},
+        }
     )
 
 
@@ -49,6 +63,7 @@ def import_manifest(
     manifest_path: str,
     existing_project_root: Optional[str] = None,
     catalog_path: Optional[str] = None,
+    dbt_project_root: Optional[str] = None,
 ) -> ImportResult:
     """Parse a dbt manifest.json and return merged DataLex source/model docs.
 
@@ -66,6 +81,14 @@ def import_manifest(
 
     existing = _load_existing_by_unique_id(existing_project_root) if existing_project_root else {}
     catalog = load_catalog(catalog_path) if catalog_path else CatalogIndex()
+    # Build the doc-block index from the dbt project root if explicitly known
+    # so that rendered descriptions resolved by dbt at parse time can be
+    # reversed back to `{{ doc("name") }}` references on the DataLex side.
+    # We do NOT auto-infer from the manifest path: a temp manifest with no
+    # surrounding project would scan the entire filesystem.
+    doc_blocks: Optional[DocBlockIndex] = None
+    if dbt_project_root:
+        doc_blocks = DocBlockIndex.build(dbt_project_root)
 
     result = ImportResult()
 
@@ -85,21 +108,49 @@ def import_manifest(
         sources_grouped.setdefault(source_name, []).append(node)
 
     for source_name, tables in sources_grouped.items():
-        doc = _build_source_doc(source_name, tables, existing, catalog, test_index)
+        doc = _build_source_doc(source_name, tables, existing, catalog, test_index, doc_blocks)
         result.sources[doc["name"]] = doc
         src_path = _common_source_path(tables)
         if src_path:
             result.source_paths["sources"][doc["name"]] = src_path
 
     for uid, node in nodes.items():
-        if node.get("resource_type") != "model":
-            continue
-        doc = _build_model_doc(node, existing, catalog, test_index)
-        result.models[doc["name"]] = doc
-        model_path = node.get("original_file_path") or ""
-        if model_path:
-            # Record the dbt source path so writers can mirror the tree.
-            result.source_paths["models"][doc["name"]] = model_path
+        rt = node.get("resource_type")
+        rel_path = node.get("original_file_path") or ""
+        if rt == "model":
+            doc = _build_model_doc(node, existing, catalog, test_index, doc_blocks)
+            result.models[doc["name"]] = doc
+            if rel_path:
+                result.source_paths["models"][doc["name"]] = rel_path
+        elif rt == "snapshot":
+            doc = _build_snapshot_doc(node, existing, catalog, doc_blocks)
+            result.snapshots[doc["name"]] = doc
+            if rel_path:
+                result.source_paths["snapshots"][doc["name"]] = rel_path
+        elif rt == "seed":
+            doc = _build_seed_doc(node, existing, catalog, doc_blocks)
+            result.seeds[doc["name"]] = doc
+            if rel_path:
+                result.source_paths["seeds"][doc["name"]] = rel_path
+        elif rt == "unit_test":
+            doc = _build_unit_test_doc(node)
+            result.unit_tests[doc["name"]] = doc
+            if rel_path:
+                result.source_paths["unit_tests"][doc["name"]] = rel_path
+
+    for uid, node in (manifest.get("exposures") or {}).items():
+        doc = _build_exposure_doc(node)
+        result.exposures[doc["name"]] = doc
+        rel_path = node.get("original_file_path") or ""
+        if rel_path:
+            result.source_paths["exposures"][doc["name"]] = rel_path
+
+    for uid, node in (manifest.get("semantic_models") or {}).items():
+        doc = _build_semantic_model_doc(node)
+        result.semantic_models[doc["name"]] = doc
+        rel_path = node.get("original_file_path") or ""
+        if rel_path:
+            result.source_paths["semantic_models"][doc["name"]] = rel_path
 
     # Count columns that landed as "unknown" — these come from manifest nodes
     # without a populated `data_type` (i.e. the user hasn't run `dbt compile`
@@ -229,6 +280,7 @@ def _build_source_doc(
     existing: Dict[str, Dict[str, Any]],
     catalog: CatalogIndex,
     test_index: Optional[Dict[Tuple[str, str], List[Any]]] = None,
+    doc_blocks: Optional[DocBlockIndex] = None,
 ) -> Dict[str, Any]:
     # Source-level attributes come from the first table (dbt stores them per-node; pick any).
     first = tables[0]
@@ -256,8 +308,10 @@ def _build_source_doc(
 
     table_docs: List[Dict[str, Any]] = []
     for t in tables:
-        table_docs.append(_build_source_table_doc(t, existing_doc, catalog, test_index))
+        table_docs.append(_build_source_table_doc(t, existing_doc, catalog, test_index, doc_blocks))
     doc["tables"] = table_docs
+
+    _attach_description_ref(doc, existing_doc, doc_blocks)
 
     # meta.datalex.dbt.unique_id list, so re-import can find this doc even if one table is renamed.
     doc.setdefault("meta", {}).setdefault("datalex", {})["dbt"] = {
@@ -271,6 +325,7 @@ def _build_source_table_doc(
     existing_source: Optional[Dict[str, Any]],
     catalog: CatalogIndex,
     test_index: Optional[Dict[Tuple[str, str], List[Any]]] = None,
+    doc_blocks: Optional[DocBlockIndex] = None,
 ) -> Dict[str, Any]:
     name = _safe_name(t.get("name", ""))
     table_doc: Dict[str, Any] = {"name": name}
@@ -301,10 +356,12 @@ def _build_source_table_doc(
     tbl_uid = t.get("unique_id") or ""
     for c in t.get("columns", {}).values() if isinstance(t.get("columns"), dict) else (t.get("columns") or []):
         cols_out.append(
-            _build_source_column_doc(c, prior_cols.get(c.get("name"), {}), catalog, tbl_uid, test_index)
+            _build_source_column_doc(c, prior_cols.get(c.get("name"), {}), catalog, tbl_uid, test_index, doc_blocks)
         )
     if cols_out:
         table_doc["columns"] = cols_out
+
+    _attach_description_ref(table_doc, prior_table, doc_blocks)
 
     # unique_id preserved at table level too
     if t.get("unique_id"):
@@ -321,6 +378,7 @@ def _build_source_column_doc(
     catalog: CatalogIndex,
     table_unique_id: str,
     test_index: Optional[Dict[Tuple[str, str], List[Any]]] = None,
+    doc_blocks: Optional[DocBlockIndex] = None,
 ) -> Dict[str, Any]:
     doc: Dict[str, Any] = {"name": c.get("name")}
     # Type precedence:
@@ -340,12 +398,14 @@ def _build_source_column_doc(
             doc["type"] = "unknown"
 
     # user-authored: preserve
-    for k in ("description", "sensitivity", "tags"):
+    for k in ("description", "description_ref", "sensitivity", "tags"):
         if prior.get(k):
             doc[k] = prior[k]
     # manifest description wins only if user has no override
     if c.get("description") and "description" not in doc:
         doc["description"] = c["description"]
+
+    _attach_description_ref(doc, prior, doc_blocks)
 
     _apply_column_tests(doc, prior, test_index, table_unique_id, c.get("name") or "")
 
@@ -357,6 +417,7 @@ def _build_model_doc(
     existing: Dict[str, Dict[str, Any]],
     catalog: CatalogIndex,
     test_index: Optional[Dict[Tuple[str, str], List[Any]]] = None,
+    doc_blocks: Optional[DocBlockIndex] = None,
 ) -> Dict[str, Any]:
     name = _safe_name(node.get("name", ""))
     uid = node.get("unique_id")
@@ -368,7 +429,7 @@ def _build_model_doc(
     }
     # user-owned fields preserved
     _merge_preserving_user_fields(
-        doc, prior, keys=("description", "owner", "domain", "tags", "materialization", "contract", "interface"),
+        doc, prior, keys=("description", "description_ref", "owner", "domain", "tags", "materialization", "contract", "interface"),
     )
 
     interface_meta = ((node.get("meta") or {}).get("datalex") or {}).get("interface")
@@ -405,10 +466,12 @@ def _build_model_doc(
     column_iter = columns_raw.values() if isinstance(columns_raw, dict) else columns_raw
     for c in column_iter:
         cols_out.append(
-            _build_model_column_doc(c, prior_cols.get(c.get("name"), {}), catalog, uid or "", test_index)
+            _build_model_column_doc(c, prior_cols.get(c.get("name"), {}), catalog, uid or "", test_index, doc_blocks)
         )
     if cols_out:
         doc["columns"] = cols_out
+
+    _attach_description_ref(doc, prior, doc_blocks)
 
     if uid:
         doc.setdefault("meta", {}).setdefault("datalex", {})["dbt"] = {"unique_id": uid}
@@ -422,6 +485,7 @@ def _build_model_column_doc(
     catalog: CatalogIndex,
     model_unique_id: str,
     test_index: Optional[Dict[Tuple[str, str], List[Any]]] = None,
+    doc_blocks: Optional[DocBlockIndex] = None,
 ) -> Dict[str, Any]:
     doc: Dict[str, Any] = {"name": c.get("name")}
     # Type precedence:
@@ -441,15 +505,220 @@ def _build_model_column_doc(
         else:
             doc["type"] = "unknown"
 
-    for k in ("description", "sensitivity", "tags", "terms", "tests", "constraints"):
+    for k in ("description", "description_ref", "sensitivity", "tags", "terms", "tests", "constraints"):
         if prior.get(k):
             doc[k] = prior[k]
     if c.get("description") and "description" not in doc:
         doc["description"] = c["description"]
 
+    _attach_description_ref(doc, prior, doc_blocks)
+
     _apply_column_tests(doc, prior, test_index, model_unique_id, c.get("name") or "")
 
     return doc
+
+
+def _build_snapshot_doc(
+    node: Dict[str, Any],
+    existing: Dict[str, Dict[str, Any]],
+    catalog: CatalogIndex,
+    doc_blocks: Optional[DocBlockIndex] = None,
+) -> Dict[str, Any]:
+    """Build a DataLex snapshot doc from a dbt manifest snapshot node.
+
+    dbt snapshots carry SCD strategy + unique_key as first-class config.
+    These are critical for round-trip — losing them breaks behaviour.
+    """
+    name = _safe_name(node.get("name", ""))
+    uid = node.get("unique_id")
+    prior = existing.get(uid, {}) if uid else {}
+
+    config = node.get("config") or {}
+    doc: Dict[str, Any] = {
+        "kind": "snapshot",
+        "name": name,
+    }
+    _merge_preserving_user_fields(
+        doc, prior, keys=("description", "description_ref", "owner", "tags", "meta"),
+    )
+    if node.get("database"):
+        doc["database"] = node["database"]
+    if node.get("schema"):
+        doc["schema"] = node["schema"]
+    if node.get("description") and "description" not in doc:
+        doc["description"] = node["description"]
+
+    # SCD config — strategy/unique_key/check_cols/updated_at
+    scd: Dict[str, Any] = {}
+    for key in ("strategy", "unique_key", "updated_at"):
+        if config.get(key) is not None:
+            scd[key] = config[key]
+    if isinstance(config.get("check_cols"), list):
+        scd["check_cols"] = list(config["check_cols"])
+    if isinstance(config.get("invalidate_hard_deletes"), bool):
+        scd["invalidate_hard_deletes"] = config["invalidate_hard_deletes"]
+    if scd:
+        doc["snapshot"] = scd
+
+    cols_out: List[Dict[str, Any]] = []
+    columns_raw = node.get("columns") or {}
+    column_iter = columns_raw.values() if isinstance(columns_raw, dict) else columns_raw
+    prior_cols = {c.get("name"): c for c in (prior.get("columns") or []) if c.get("name")}
+    for c in column_iter:
+        col_doc: Dict[str, Any] = {"name": c.get("name")}
+        if c.get("data_type"):
+            col_doc["type"] = c["data_type"]
+        else:
+            ct = catalog.column_type(uid or "", c.get("name") or "")
+            if ct:
+                col_doc["type"] = ct
+            elif (prior_cols.get(c.get("name")) or {}).get("type"):
+                col_doc["type"] = prior_cols[c.get("name")]["type"]
+            else:
+                col_doc["type"] = "unknown"
+        if c.get("description"):
+            col_doc["description"] = c["description"]
+        _attach_description_ref(col_doc, prior_cols.get(c.get("name"), {}), doc_blocks)
+        cols_out.append(col_doc)
+    if cols_out:
+        doc["columns"] = cols_out
+
+    _attach_description_ref(doc, prior, doc_blocks)
+    if uid:
+        doc.setdefault("meta", {}).setdefault("datalex", {})["dbt"] = {"unique_id": uid}
+    return doc
+
+
+def _build_seed_doc(
+    node: Dict[str, Any],
+    existing: Dict[str, Dict[str, Any]],
+    catalog: CatalogIndex,
+    doc_blocks: Optional[DocBlockIndex] = None,
+) -> Dict[str, Any]:
+    """Build a DataLex seed doc from a dbt manifest seed node."""
+    name = _safe_name(node.get("name", ""))
+    uid = node.get("unique_id")
+    prior = existing.get(uid, {}) if uid else {}
+
+    doc: Dict[str, Any] = {"kind": "seed", "name": name}
+    _merge_preserving_user_fields(
+        doc, prior, keys=("description", "description_ref", "owner", "tags", "meta"),
+    )
+    if node.get("description") and "description" not in doc:
+        doc["description"] = node["description"]
+
+    cols_out: List[Dict[str, Any]] = []
+    columns_raw = node.get("columns") or {}
+    column_iter = columns_raw.values() if isinstance(columns_raw, dict) else columns_raw
+    for c in column_iter:
+        col_doc: Dict[str, Any] = {"name": c.get("name")}
+        if c.get("data_type"):
+            col_doc["type"] = c["data_type"]
+        if c.get("description"):
+            col_doc["description"] = c["description"]
+        cols_out.append(col_doc)
+    if cols_out:
+        doc["columns"] = cols_out
+
+    _attach_description_ref(doc, prior, doc_blocks)
+    if uid:
+        doc.setdefault("meta", {}).setdefault("datalex", {})["dbt"] = {"unique_id": uid}
+    return doc
+
+
+def _build_exposure_doc(node: Dict[str, Any]) -> Dict[str, Any]:
+    """Build a DataLex exposure doc.
+
+    dbt exposures describe downstream consumers (dashboards, ML models,
+    notebooks). DataLex tracks them so the readiness gate can flag stale
+    owners and missing maturity.
+    """
+    name = _safe_name(node.get("name", ""))
+    doc: Dict[str, Any] = {"kind": "exposure", "name": name}
+    for k in ("description", "label", "type", "url", "maturity"):
+        if node.get(k):
+            doc[k] = node[k]
+    owner = node.get("owner") or {}
+    if isinstance(owner, dict):
+        owner_doc = {k: v for k, v in owner.items() if v}
+        if owner_doc:
+            doc["owner"] = owner_doc
+    depends = []
+    for parent_uid in (node.get("depends_on", {}) or {}).get("nodes", []) or []:
+        if parent_uid.startswith("model."):
+            depends.append({"ref": _safe_name(parent_uid.rsplit(".", 1)[-1])})
+        elif parent_uid.startswith("source."):
+            parts = parent_uid.split(".")
+            if len(parts) >= 4:
+                depends.append({"source": {"source": _safe_name(parts[-2]), "name": _safe_name(parts[-1])}})
+    if depends:
+        doc["depends_on"] = depends
+    if node.get("unique_id"):
+        doc.setdefault("meta", {}).setdefault("datalex", {})["dbt"] = {"unique_id": node["unique_id"]}
+    return doc
+
+
+def _build_unit_test_doc(node: Dict[str, Any]) -> Dict[str, Any]:
+    """Build a DataLex unit-test doc from a dbt 1.8+ unit test node."""
+    name = _safe_name(node.get("name", ""))
+    doc: Dict[str, Any] = {"kind": "unit_test", "name": name}
+    if node.get("description"):
+        doc["description"] = node["description"]
+    if node.get("model"):
+        doc["model"] = _safe_name(node["model"])
+    if isinstance(node.get("given"), list):
+        doc["given"] = list(node["given"])
+    if isinstance(node.get("expect"), dict):
+        doc["expect"] = dict(node["expect"])
+    if isinstance(node.get("overrides"), dict):
+        doc["overrides"] = dict(node["overrides"])
+    if node.get("unique_id"):
+        doc.setdefault("meta", {}).setdefault("datalex", {})["dbt"] = {"unique_id": node["unique_id"]}
+    return doc
+
+
+def _build_semantic_model_doc(node: Dict[str, Any]) -> Dict[str, Any]:
+    """Build a DataLex semantic-model doc from a dbt MetricFlow semantic_model."""
+    name = _safe_name(node.get("name", ""))
+    doc: Dict[str, Any] = {"kind": "semantic_model", "name": name}
+    for k in ("description", "label", "model"):
+        if node.get(k):
+            doc[k] = node[k] if k != "model" else _safe_name(str(node[k]))
+    for collection in ("entities", "dimensions", "measures"):
+        items = node.get(collection)
+        if isinstance(items, list) and items:
+            doc[collection] = list(items)
+    defaults = node.get("defaults")
+    if isinstance(defaults, dict) and defaults:
+        doc["defaults"] = dict(defaults)
+    if node.get("unique_id"):
+        doc.setdefault("meta", {}).setdefault("datalex", {})["dbt"] = {"unique_id": node["unique_id"]}
+    return doc
+
+
+def _attach_description_ref(
+    doc: Dict[str, Any],
+    prior: Optional[Dict[str, Any]],
+    doc_blocks: Optional[DocBlockIndex],
+) -> None:
+    """Attach `description_ref` so emit.py can re-emit `{{ doc("…") }}`.
+
+    Precedence: a prior user-authored ref always wins. If the prior YAML
+    didn't carry one but the manifest description matches a known doc-block
+    body, recover the reference from the index. This is what makes a fresh
+    `dbt import → emit` round-trip lossless on doc-block-bound columns.
+    """
+    if isinstance(prior, dict) and prior.get("description_ref"):
+        doc.setdefault("description_ref", prior["description_ref"])
+        return
+    if "description_ref" in doc:
+        return
+    description = doc.get("description")
+    if not description or not doc_blocks:
+        return
+    ref = find_description_ref(str(description), doc_blocks)
+    if ref:
+        doc["description_ref"] = ref
 
 
 # ------------------------ helpers ------------------------

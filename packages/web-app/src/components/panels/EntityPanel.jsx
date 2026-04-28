@@ -36,7 +36,7 @@ import {
   removeIndex,
 } from "../../lib/yamlRoundTrip";
 import { planBulkEntityRename, applyBulkEntityRename } from "../../lib/bulkRefactor";
-import { saveFileContent } from "../../lib/api";
+import { saveFileContent, aiConceptualize, aiCanonicalize } from "../../lib/api";
 
 function NameModal({ title, value, onChange, onClose, onSubmit, confirmLabel = "Save" }) {
   return (
@@ -118,6 +118,131 @@ function defaultIndexName(entityName, fieldsText) {
   return `${normalizedEntity || "entity"}_${firstField.toLowerCase()}_idx`;
 }
 
+// P1.D — `contract.enforced` toggle on the entity inspector. When
+// enforced, dbt requires every column to declare a `data_type`; surface
+// columns missing one as a red finding so the user can fix them before
+// shipping the contract.
+function ContractToggle({ entity, fieldsCount, canEdit, onSet }) {
+  const enforced = Boolean(
+    entity?.contract?.enforced
+    || entity?.config?.contract?.enforced
+    || (entity?.meta?.datalex && String(entity.meta.datalex.contracts || "").toLowerCase() === "enforced")
+  );
+  const fields = Array.isArray(entity?.fields) ? entity.fields : [];
+  const missing = fields.filter((f) => {
+    const dt = f?.data_type || f?.type;
+    return !dt || String(dt).toLowerCase() === "unknown";
+  });
+  const blockerCount = missing.length;
+  const tone = enforced && blockerCount > 0 ? "tone-error" : enforced ? "tone-success" : "tone-neutral";
+  const label = enforced
+    ? blockerCount > 0
+      ? `Contract enforced — ${blockerCount} of ${fieldsCount} columns missing data_type`
+      : "Contract enforced — all columns typed"
+    : "Contract not enforced";
+  return (
+    <div className={`panel-card ${tone}`} style={{ padding: "10px 12px", marginTop: 6 }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ fontSize: 11, fontWeight: 600, color: "var(--text-primary)" }}>
+            dbt Contract
+          </div>
+          <div style={{ fontSize: 10, color: "var(--text-tertiary)", marginTop: 2 }}>
+            {label}
+          </div>
+        </div>
+        <label style={{ display: "inline-flex", alignItems: "center", gap: 6, cursor: canEdit ? "pointer" : "default" }}>
+          <input
+            type="checkbox"
+            checked={enforced}
+            onChange={canEdit ? (e) => onSet(e.target.checked) : undefined}
+            disabled={!canEdit}
+          />
+          <span style={{ fontSize: 11, color: "var(--text-secondary)" }}>enforced</span>
+        </label>
+      </div>
+      {enforced && blockerCount > 0 && (
+        <ul style={{ marginTop: 8, paddingLeft: 16, fontSize: 11, color: "var(--text-secondary)" }}>
+          {missing.slice(0, 6).map((f) => (
+            <li key={f.name}>
+              <code style={{ fontFamily: "var(--font-mono)" }}>{f.name}</code>
+              {" — set a data_type"}
+            </li>
+          ))}
+          {missing.length > 6 && <li>…and {missing.length - 6} more.</li>}
+        </ul>
+      )}
+    </div>
+  );
+}
+
+// P2 — surface the conceptualizer + canonicalizer agents from the
+// inspector empty state. Both are project-scoped, deterministic agents
+// that produce proposals via the existing `/api/ai/proposals/apply`
+// pipeline; nothing is written until the user accepts the proposal.
+function AgentActionRow() {
+  const { activeProjectId } = useWorkspaceStore();
+  const { addToast } = useUiStore();
+  const [busy, setBusy] = useState("");
+  const run = async (kind) => {
+    if (!activeProjectId) {
+      addToast?.({ type: "error", message: "Open a DataLex project to run AI agents." });
+      return;
+    }
+    setBusy(kind);
+    try {
+      const fn = kind === "conceptualize" ? aiConceptualize : aiCanonicalize;
+      const result = await fn(activeProjectId);
+      const counts = kind === "conceptualize"
+        ? `${result.entities?.length || 0} entities · ${result.relationships?.length || 0} relationships`
+        : `${result.entities?.length || 0} entities · ${Object.keys(result.doc_blocks || {}).length} doc blocks`;
+      addToast?.({
+        type: "success",
+        message: `${kind === "conceptualize" ? "Conceptualizer" : "Canonicalizer"} returned ${counts}. Proposals are ready in the AI panel.`,
+      });
+      if (Array.isArray(result.notes) && result.notes.length) {
+        for (const note of result.notes.slice(0, 2)) addToast?.({ type: "info", message: note });
+      }
+    } catch (err) {
+      addToast?.({ type: "error", message: `${kind} failed: ${err?.message || err}` });
+    } finally {
+      setBusy("");
+    }
+  };
+  return (
+    <div style={{ marginTop: 16, display: "flex", flexDirection: "column", gap: 8 }}>
+      <PanelCard
+        title="Propose conceptual model"
+        subtitle="Cluster staging columns into business entities + relationships."
+        tone="info"
+      >
+        <button
+          type="button"
+          disabled={!!busy}
+          onClick={() => run("conceptualize")}
+          className="px-3 py-1.5 rounded-md text-xs font-medium bg-accent-blue text-white hover:bg-accent-blue/80 disabled:opacity-50 transition-colors"
+        >
+          {busy === "conceptualize" ? "Working…" : "Conceptualize from staging"}
+        </button>
+      </PanelCard>
+      <PanelCard
+        title="Lift canonical layer"
+        subtitle="Promote columns recurring across staging into a logical entity with shared doc blocks."
+        tone="info"
+      >
+        <button
+          type="button"
+          disabled={!!busy}
+          onClick={() => run("canonicalize")}
+          className="px-3 py-1.5 rounded-md text-xs font-medium bg-accent-blue text-white hover:bg-accent-blue/80 disabled:opacity-50 transition-colors"
+        >
+          {busy === "canonicalize" ? "Working…" : "Canonicalize from staging"}
+        </button>
+      </PanelCard>
+    </div>
+  );
+}
+
 export default function EntityPanel() {
   const { selectedEntity, selectedEntityId, clearSelection, model, modelingViewMode } = useDiagramStore();
   const { activeFileContent, updateContent } = useWorkspaceStore();
@@ -139,8 +264,9 @@ export default function EntityPanel() {
         <PanelEmpty
           icon={Box}
           title="No entity selected"
-          description="Select an entity in the diagram to view and edit its properties."
+          description="Select an entity in the diagram to view and edit its properties — or ask the AI to propose entities from your dbt project."
         />
+        <AgentActionRow />
       </PanelFrame>
     );
   }
@@ -762,6 +888,12 @@ export default function EntityPanel() {
                   placeholder="storage"
                 />
               </div>
+              <ContractToggle
+                entity={selectedEntity}
+                fieldsCount={(selectedEntity.fields || []).length}
+                canEdit={canEdit}
+                onSet={(value) => setScalar("contract", value ? { enforced: true } : { enforced: false })}
+              />
               {selectedEntity.sla && (
                 <div className="flex items-center gap-2 px-2 py-1 bg-bg-primary border border-border-primary rounded-md">
                   <Clock size={10} className="text-text-muted shrink-0" />

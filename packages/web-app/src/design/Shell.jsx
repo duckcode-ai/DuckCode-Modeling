@@ -9,6 +9,7 @@ import React, { useEffect, useState } from "react";
 import {
   Columns3, ShieldCheck, GitCompare, Clock, X,
   BookOpen, ChevronUp, Wand2, KeyRound, GitBranch, Database, FileCode2, Braces, Copy,
+  Camera, Eye, FlaskConical, Shield,
 } from "lucide-react";
 
 import yaml from "js-yaml";
@@ -41,6 +42,12 @@ const ValidationPanel     = React.lazy(() => import("../components/panels/Valida
 const DiffPanel           = React.lazy(() => import("../components/panels/DiffPanel"));
 const HistoryPanel        = React.lazy(() => import("../components/panels/HistoryPanel"));
 const DictionaryPanel     = React.lazy(() => import("../components/panels/DictionaryPanel"));
+// P1.B — read-only panels for non-model dbt resources surfaced from the active YAML.
+const SnapshotsPanel      = React.lazy(() => import("../components/panels/SnapshotsPanel"));
+const ExposuresPanel      = React.lazy(() => import("../components/panels/ExposuresPanel"));
+const UnitTestsPanel      = React.lazy(() => import("../components/panels/UnitTestsPanel"));
+// P0.3 — custom policy pack editor for <project>/.datalex/policies/.
+const PolicyPacksPanel    = React.lazy(() => import("../components/panels/PolicyPacksPanel"));
 const SelectionSummaryPanel = React.lazy(() => import("../components/panels/SelectionSummaryPanel"));
 const ModelerPanel        = React.lazy(() => import("../components/panels/ModelerPanel"));
 const SettingsDialog      = React.lazy(() => import("../components/dialogs/SettingsDialog"));
@@ -150,6 +157,7 @@ const LEFT_PANEL_MAX = 520;
 const LOGICAL_BOTTOM_TABS = [
   { id: "modeler",       label: "Blueprint",     icon: Wand2 },
   { id: "validation",    label: "Validation",    icon: ShieldCheck },
+  { id: "policy_packs",  label: "Policy Packs",  icon: Shield },
   { id: "diff",          label: "Diff",          icon: GitCompare },
   { id: "history",       label: "History",       icon: Clock },
 ];
@@ -159,7 +167,11 @@ const PHYSICAL_BOTTOM_TABS = [
   { id: "dbt",           label: "dbt YAML",      icon: Braces },
   { id: "sql",           label: "SQL Preview",   icon: FileCode2 },
   { id: "constraints",   label: "Constraints",   icon: Database },
+  { id: "snapshots",     label: "Snapshots",     icon: Camera },
+  { id: "exposures",     label: "Exposures",     icon: Eye },
+  { id: "unit_tests",    label: "Unit Tests",    icon: FlaskConical },
   { id: "validation",    label: "Validation",    icon: ShieldCheck },
+  { id: "policy_packs",  label: "Policy Packs",  icon: Shield },
   { id: "diff",          label: "Diff",          icon: GitCompare },
 ];
 
@@ -426,6 +438,10 @@ function BottomPanelContent({ tab, table, rel, relationships, schema, activeFile
     case "diff":          node = <DiffPanel />; break;
     case "dictionary":    node = <DictionaryPanel />; break;
     case "history":       node = <HistoryPanel />; break;
+    case "snapshots":     node = <SnapshotsPanel />; break;
+    case "exposures":     node = <ExposuresPanel />; break;
+    case "unit_tests":    node = <UnitTestsPanel />; break;
+    case "policy_packs":  node = <PolicyPacksPanel />; break;
     default:
       node = (
         <SelectionSummaryPanel
