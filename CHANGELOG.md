@@ -7,7 +7,36 @@ from `v0.1.0` onward.
 
 ## [Unreleased]
 
-## [1.4.0] - 2026-04-27
+## [1.4.1] - 2026-04-27
+
+### Changed — First-run onboarding redesigned as an action-oriented journey
+
+- Replaced the small welcome modal + 13-step driver.js spotlight tour
+  with a 480px right-rail **OnboardingJourney** panel that walks new
+  users through six concrete actions:
+  1. Welcome to DataLex (two-line value prop)
+  2. Connect your project (Git URL or local folder)
+  3. Open the Validation drawer to see readiness gaps
+  4. Click `+` to create a first logical / physical entity
+  5. Add an LLM provider + API key
+  6. Ask AI to draw a conceptual diagram (Conceptualizer)
+- Each step has a primary CTA that opens the relevant dialog or
+  activates the relevant panel and auto-advances when the underlying
+  app event fires (`dbt:import:success`, `entity:created`,
+  `ai:settings:saved`, `ai:conceptualize:applied`).
+- Larger, more readable typography: 26-28px panel titles, 22px step
+  titles, 15px / 1.7 body, 14px/600 CTA buttons at 10×18 padding,
+  32px step-number badges with green checks on completion.
+- Progress persists in `localStorage.datalex.onboarding.journey` —
+  closing the panel preserves position; opening a fresh tab resumes
+  at the next incomplete step. A floating "Onboarding · n/6" pill
+  collapses the panel without dismissing it.
+- The legacy 13-step driver.js spotlight tour stays available behind
+  a new **Settings → "Deep feature tour"** button, and **"Replay
+  onboarding"** restarts the journey.
+- Bumped tour version so existing users see the new journey once.
+
+
 
 Minor release — sharpens the dbt modeling moat. Closes the four
 highest-leverage gaps competitors win on today (CI/CD enforcement,

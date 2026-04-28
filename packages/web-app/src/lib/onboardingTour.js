@@ -16,7 +16,7 @@
 import { driver } from "driver.js";
 import "driver.js/dist/driver.css";
 
-export const TOUR_VERSION = 4;
+export const TOUR_VERSION = 5;
 const STORAGE_KEY = "datalex.onboarding.seen";
 
 /** The steps, in order. Each step is a driver.js PopoverStep. */

@@ -6,6 +6,7 @@ import useUiStore from "../../stores/uiStore";
 import useWorkspaceStore from "../../stores/workspaceStore";
 import useDiagramStore from "../../stores/diagramStore";
 import { addInlineDiagramEntity } from "../../design/yamlPatch";
+import { emitJourneyEvent } from "../../lib/onboardingJourney";
 
 const LOGICAL_ENTITY_TYPES = [
   { id: "logical_entity", label: "Logical Entity" },
@@ -162,6 +163,7 @@ export default function NewLogicalEntityDialog() {
     updateContent(next);
     requestLayoutRefresh?.();
     addToast({ type: "success", message: `Created logical entity "${cleanName}".` });
+    emitJourneyEvent("entity:created", { kind: "logical", name: cleanName });
     closeModal();
   };
 

@@ -14,6 +14,7 @@ import useUiStore from "../../stores/uiStore";
 import useWorkspaceStore from "../../stores/workspaceStore";
 import { THEMES } from "../../design/notation";
 import { startOnboardingTour, resetOnboardingSeen } from "../../lib/onboardingTour";
+import { resetJourney, emitJourneyEvent } from "../../lib/onboardingJourney";
 import { testAiSettings, rebuildAiIndex } from "../../lib/api";
 import Modal from "./Modal";
 
@@ -132,6 +133,10 @@ function AiAgentPane() {
     if (saveKey) writeStorage("datalex.ai.apiKey", apiKey);
     else writeStorage("datalex.ai.apiKey", "");
     setStatus(saveKey ? "Saved AI defaults in this browser." : "Saved AI defaults. API key remains session-only.");
+    // Onboarding journey: counts as "configured" when the user has either
+    // saved an API key or selected the local provider (which needs no key).
+    const configured = (saveKey && apiKey.trim()) || provider === "local";
+    if (configured) emitJourneyEvent("ai:settings:saved", { provider });
   };
 
   const testProvider = async () => {
@@ -378,37 +383,44 @@ function ConnectionsPane() {
 
 /* ─────────────────────────── Help & Tour ─────────────────────────── */
 function HelpPane({ onClose }) {
-  const handleReplay = () => {
-    onClose?.();
-    // Tour runs against the underlying shell, so we need the modal
-    // gone first. A short delay keeps the transition clean.
-    setTimeout(() => startOnboardingTour(), 120);
-  };
-  const handleResetAndReplay = () => {
+  const handleReplayJourney = () => {
+    // Reset journey state and seen-flags, then reload so the Shell's
+    // first-run effect re-mounts the journey panel from step 1.
+    resetJourney();
     resetOnboardingSeen();
-    handleReplay();
+    onClose?.();
+    setTimeout(() => {
+      // A reload guarantees the journey re-mounts cleanly even if the
+      // user previously dismissed it within this session.
+      try { window.location.reload(); } catch { /* noop */ }
+    }, 80);
+  };
+  const handleDeepTour = () => {
+    onClose?.();
+    // The 13-step driver.js spotlight tour — runs against the underlying
+    // shell, so we let the modal close first.
+    setTimeout(() => startOnboardingTour(), 120);
   };
   return (
     <div className="dlx-settings-pane">
       <header>
-        <h3 className="dlx-settings-pane-title">Onboarding tour</h3>
+        <h3 className="dlx-settings-pane-title">Onboarding</h3>
         <p className="dlx-settings-pane-sub">
-          Replay the same guided flow shown to new users: DataLex goal,
-          dbt project gaps, the DataLex solution, import, readiness review,
-          modeling, validation, AI proposals, and reviewed YAML changes.
+          Replay the action-oriented six-step journey, or take the deep
+          feature tour that spotlights every panel and dialog.
         </p>
       </header>
       <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-        <button type="button" className="panel-btn primary" onClick={handleReplay}>
-          <Compass size={12} /> Replay onboarding tour
+        <button type="button" className="panel-btn primary" onClick={handleReplayJourney}>
+          <Compass size={12} /> Replay onboarding
         </button>
         <button
           type="button"
           className="panel-btn"
-          onClick={handleResetAndReplay}
-          title="Clear the 'seen' flag so the welcome modal appears again on the next page load"
+          onClick={handleDeepTour}
+          title="Spotlight tour across the import, explorer, modeling, validation, and save flows"
         >
-          Reset + replay from welcome
+          Deep feature tour
         </button>
       </div>
 

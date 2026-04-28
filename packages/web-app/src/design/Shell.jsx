@@ -24,9 +24,9 @@ import { THEMES } from "./notation";
 import { adaptDataLexYaml, adaptDataLexModelYaml, adaptDbtSchemaYaml, adaptDiagramYaml, schemaToPanelModel } from "./schemaAdapter";
 import { appendEntity, addDiagramRelationship, deleteDiagramEntity, deleteEntityDeep, removeFieldRelationship, setEntityDisplay, setDiagramEntityDisplay, setInlineDiagramEntityDisplay } from "./yamlPatch";
 import { addRelationship, deleteRelationship as deleteRelationshipYaml } from "../lib/yamlRoundTrip";
-import { shouldShowFirstRun } from "../lib/onboardingTour";
-
-import { fetchGitStatus } from "../lib/api";
+import { shouldShowFirstRun, markTourSeen } from "../lib/onboardingTour";
+import { shouldShowJourney, emitJourneyEvent } from "../lib/onboardingJourney";
+import { fetchGitStatus, aiConceptualize } from "../lib/api";
 import {
   AddProjectModal,
   EditProjectModal,
@@ -132,7 +132,7 @@ function defaultRelationshipName(fromEntity, toEntity) {
 }
 const SnapshotsDialog     = React.lazy(() => import("../components/dialogs/SnapshotsDialog"));
 const ViewerWelcome       = React.lazy(() => import("../components/viewer/ViewerWelcome"));
-const OnboardingWelcomeDialog = React.lazy(() => import("../components/dialogs/OnboardingWelcomeDialog"));
+const OnboardingJourney   = React.lazy(() => import("../components/onboarding/OnboardingJourney"));
 
 // The three main-canvas alternatives to the diagram. Lazy-loaded so the
 // initial bundle stays tight when the user only ever uses the diagram.
@@ -598,15 +598,20 @@ export default function Shell() {
   const [showShortcuts, setShowShortcuts] = useState(false);
   const [textAiTarget, setTextAiTarget] = useState(null);
 
-  /* ── First-run onboarding welcome ──────────────────────────────────
-     Defer to an effect so SSR-style renders don't read localStorage,
-     and so we don't flash the modal before the shell has finished its
-     first paint. */
+  /* ── First-run onboarding journey ──────────────────────────────────
+     The journey panel walks the user through six concrete actions
+     (welcome → connect → see gaps → design → AI key → ask AI). The
+     legacy 13-step driver.js spotlight tour now lives behind the
+     "Deep feature tour" button in Settings; we mark it seen up-front
+     so it doesn't auto-fire on top of the journey. */
   const [showOnboarding, setShowOnboarding] = useState(false);
   React.useEffect(() => {
-    if (shouldShowFirstRun()) {
-      // Wait for the top-bar / explorer to mount before offering the
-      // tour — the user needs something behind the modal to look at.
+    const wantJourney = shouldShowJourney();
+    // Suppress the legacy driver.js modal — the journey supersedes it.
+    if (shouldShowFirstRun()) markTourSeen();
+    if (wantJourney) {
+      // Wait for the top-bar / explorer to mount before showing the
+      // journey panel — the user needs something behind it to look at.
       const t = setTimeout(() => setShowOnboarding(true), 400);
       return () => clearTimeout(t);
     }
@@ -1879,7 +1884,24 @@ export default function Shell() {
         {activeModal === "snapshots"          && <SnapshotsDialog />}
         {activeModal === "gitBranch"          && <GitBranchDialog />}
         {activeModal === "welcome"            && <WelcomeModal onClose={closeModal} />}
-        {showOnboarding                       && <OnboardingWelcomeDialog onClose={() => setShowOnboarding(false)} />}
+        {showOnboarding                       && (
+          <OnboardingJourney
+            onClose={() => setShowOnboarding(false)}
+            hasActiveProject={!!activeProjectId}
+            onImportProject={() => openModal("importDbtRepo")}
+            onOpenValidation={() => setBottomPanelTab("validation")}
+            onCreateEntity={() => openModal("newLogicalEntity")}
+            onOpenAiSettings={() => openModal("settings", { initialTab: "ai" })}
+            onAskAiToDraw={async () => {
+              if (!activeProjectId) {
+                throw new Error("Open a project first.");
+              }
+              const result = await aiConceptualize(activeProjectId);
+              emitJourneyEvent("ai:conceptualize:applied", { result });
+              return result;
+            }}
+          />
+        )}
       </React.Suspense>
 
       {showShortcuts && <KeyboardShortcutsPanel onClose={() => setShowShortcuts(false)} />}

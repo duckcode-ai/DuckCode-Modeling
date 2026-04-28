@@ -22,6 +22,7 @@ import ImportResultsPanel from "./ImportResultsPanel";
 import useUiStore from "../../stores/uiStore";
 import useWorkspaceStore from "../../stores/workspaceStore";
 import { importDbtProject } from "../../lib/api";
+import { emitJourneyEvent } from "../../lib/onboardingJourney";
 
 const TABS = [
   { id: "git",    label: "Git URL",      icon: GitBranch },
@@ -68,6 +69,10 @@ export default function ImportDbtRepoDialog() {
   // button via `openProject`.
   const showResults = ({ tree, report, sourceLabel, openProject, readinessReview, readinessReviewError }) => {
     setResults({ tree: tree || [], report: report || null, sourceLabel, openProject, readinessReview, readinessReviewError });
+    // Mark the onboarding "Connect your project" step complete as soon as
+    // the import succeeds — even if the user hasn't opened the results yet
+    // they've crossed the meaningful threshold.
+    emitJourneyEvent("dbt:import:success", { sourceLabel });
   };
 
   const handleFolder = async () => {

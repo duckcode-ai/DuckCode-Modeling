@@ -6,6 +6,7 @@ import useWorkspaceStore from "../../stores/workspaceStore";
 import useDiagramStore from "../../stores/diagramStore";
 import { addEntityWithOptions } from "../../lib/yamlRoundTrip";
 import { addDiagramEntries, addInlineDiagramEntity } from "../../design/yamlPatch";
+import { emitJourneyEvent } from "../../lib/onboardingJourney";
 
 function conceptSlug(value) {
   return String(value || "concept")
@@ -109,6 +110,7 @@ export default function NewConceptDialog() {
         type: "success",
         message: `Created concept "${cleanName}".`,
       });
+      emitJourneyEvent("entity:created", { kind: "concept", name: cleanName });
       closeModal();
       return;
     }
@@ -139,6 +141,7 @@ export default function NewConceptDialog() {
       updateContent(nextDiagram);
       requestLayoutRefresh?.();
       addToast({ type: "success", message: `Created concept box "${cleanName}" in the diagram.` });
+      emitJourneyEvent("entity:created", { kind: "concept", name: cleanName });
       closeModal();
       return;
     }
@@ -167,6 +170,7 @@ export default function NewConceptDialog() {
       }
       requestLayoutRefresh?.();
       addToast({ type: "success", message: `Created conceptual entity "${slug}".` });
+      emitJourneyEvent("entity:created", { kind: "concept", name: slug });
       closeModal();
     } catch (err) {
       setError(err?.message || "Could not create conceptual entity file.");
