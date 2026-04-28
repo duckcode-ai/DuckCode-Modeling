@@ -42,6 +42,35 @@ terminal. The `[serve]` extra pulls a portable Node runtime. If you
 already have Node 20+ on PATH, plain `pip install datalex-cli` works
 too.
 
+### Prefer Docker?
+
+Skip the local Python/Node setup — clone the repo, build the image once,
+run it. Useful when a company laptop blocks `pip install`, or when
+you'd rather not pin a venv:
+
+```bash
+git clone https://github.com/duckcode-ai/DataLex.git
+cd DataLex
+docker build -t datalex:local .
+docker run --rm -p 3030:3001 datalex:local       # opens http://localhost:3030
+```
+
+To point Docker at an existing dbt repo on your host, mount it and set
+`REPO_ROOT`:
+
+```bash
+cd ~/path/to/your-dbt-project
+docker run --rm -p 3030:3001 \
+  -v "$PWD":/workspace \
+  -e REPO_ROOT=/workspace \
+  -e DM_CLI=/app/datalex \
+  datalex:local
+```
+
+In the UI, use `/workspace` as the dbt repository path. Full Docker
+notes (env vars, troubleshooting) live in
+[Install → Docker Fallback](#docker-fallback-optional).
+
 ### When the app opens — the Onboarding Journey (1.4.1)
 
 A **480px right-rail panel** slides in on first launch and walks you
