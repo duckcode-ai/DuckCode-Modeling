@@ -406,21 +406,26 @@ function HelpPane({ onClose }) {
       <header>
         <h3 className="dlx-settings-pane-title">Onboarding</h3>
         <p className="dlx-settings-pane-sub">
-          Replay the action-oriented six-step journey, or take the deep
-          feature tour that spotlights every panel and dialog.
+          Replay the new six-step journey panel, or take the legacy
+          spotlight tour that highlights every panel and dialog.
         </p>
       </header>
       <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-        <button type="button" className="panel-btn primary" onClick={handleReplayJourney}>
-          <Compass size={12} /> Replay onboarding
+        <button
+          type="button"
+          className="panel-btn primary"
+          onClick={handleReplayJourney}
+          title="Restarts the 6-step right-rail journey panel from step 1"
+        >
+          <Compass size={12} /> Replay 6-step onboarding journey
         </button>
         <button
           type="button"
           className="panel-btn"
           onClick={handleDeepTour}
-          title="Spotlight tour across the import, explorer, modeling, validation, and save flows"
+          title="Legacy 13-step driver.js spotlight tour across the import, explorer, modeling, validation, and save flows"
         >
-          Deep feature tour
+          Legacy spotlight tour (13 steps)
         </button>
       </div>
 
