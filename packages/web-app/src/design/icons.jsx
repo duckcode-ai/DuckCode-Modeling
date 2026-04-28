@@ -37,6 +37,8 @@ export const Check2 = (p) =>
     Object.assign({ strokeWidth: 1.1 }, p)
   );
 export const Default = (p) => S("M3 3h8l2 2v8H3z M7 9h2 M7 7h4 M7 11h2", p);
+// Document-with-lines shape, used by the Docs view-mode tab.
+export const FileText = (p) => S("M3 2h7l3 3v9H3z M6 7h6 M6 9h6 M6 11h4", p);
 export const NotNull = (p) => S("M3 3v10 M3 3l7 7-1 1V8h4", Object.assign({ strokeWidth: 1.6 }, p));
 export const Generated = (p) =>
   S(
@@ -177,5 +179,6 @@ const Icon = {
   Search, Plus, Minus, X, Chevron, ChevronDown, More, Copy, Edit, Trash, Filter, Download,
   Undo, Redo, Fit, Grid, Layers, Play, Check, Arrow, Db, Branch, Cmd, Relation, Folder,
   Eye, Settings, Sparkle, Bell, Info, Dep,
+  FileText,
 };
 export default Icon;

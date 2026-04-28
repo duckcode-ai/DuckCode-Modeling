@@ -49,7 +49,7 @@ const initialBottom = loadBottom();
    Separate blob for shell-wide preferences (view mode, right-panel tab).
    Kept in its own key so the bottom-panel blob stays focused. */
 const SHELL_STORAGE = "datalex.shell";
-const VALID_SHELL_VIEW_MODES = ["diagram", "table", "views", "enums"];
+const VALID_SHELL_VIEW_MODES = ["diagram", "docs", "table", "views", "enums"];
 const DEFAULT_SHELL = { viewMode: "diagram", rightTab: "COLUMNS", rightWidth: 320 };
 const RIGHT_PANEL_MIN = 280;
 const RIGHT_PANEL_MAX_RESERVE = 400; // leave this much room for the rest of the shell

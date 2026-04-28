@@ -1,6 +1,34 @@
 /* Top bar, project tabs, status bar. Ported from DataLex design prototype. */
 import React from "react";
 import Icon from "./icons";
+import {
+  // Topbar action icons. Switched to lucide-react (already a project dep)
+  // because the previous custom set had real semantic problems: Save and
+  // Import shared the same `Download` icon, Settings rendered as a sun
+  // shape rather than a gear, and several actions used compound icons
+  // that read as visual duplicates. Lucide's set is consistent,
+  // distinct, and instantly recognizable.
+  FilePlus2,
+  FolderOpen,
+  Upload,
+  Download as LucideDownload,   // for actual "import dbt" arrow-in semantics
+  Save as LucideSave,
+  SaveAll as LucideSaveAll,
+  Boxes,
+  Database,
+  Undo2,
+  Redo2,
+  Play,
+  Sparkles,
+  GitCommit,
+  Settings as LucideSettings,
+  Sun,
+  Layers,
+  FileText as LucideFileText,
+  Table as LucideTable,
+  Eye as LucideEye,
+  Hash as LucideHash,
+} from "lucide-react";
 import { THEMES } from "./notation";
 import useUiStore from "../stores/uiStore";
 import BellMenu from "./BellMenu";
@@ -8,13 +36,15 @@ import DomainSwitcher from "./DomainSwitcher";
 import DiffToggle from "./DiffToggle";
 
 /* Segmented view-mode switcher. Drives `uiStore.shellViewMode`, which the
-   Shell inspects to decide whether to render the diagram, the table list,
-   the views manager, or the enums manager in the main canvas cell. */
+   Shell inspects to decide whether to render the diagram, the readable
+   Docs view, the table list, the views manager, or the enums manager.
+   Icons sourced from lucide-react for consistent stroke weight + meaning. */
 const VIEW_MODES = [
-  { id: "diagram", label: "Diagram", Icon: Icon.Layers, tooltip: "Visual ER diagram" },
-  { id: "table",   label: "Table",   Icon: Icon.Table,  tooltip: "Tabular entity list" },
-  { id: "views",   label: "Views",   Icon: Icon.View,   tooltip: "Database views & matviews" },
-  { id: "enums",   label: "Enums",   Icon: Icon.Enum,   tooltip: "Enumerations" },
+  { id: "diagram", label: "Diagram", Icon: Layers,         tooltip: "Visual ER diagram" },
+  { id: "docs",    label: "Docs",    Icon: LucideFileText, tooltip: "Readable model docs (rendered from YAML, AI-assisted)" },
+  { id: "table",   label: "Table",   Icon: LucideTable,    tooltip: "Tabular entity list" },
+  { id: "views",   label: "Views",   Icon: LucideEye,      tooltip: "Database views & matviews" },
+  { id: "enums",   label: "Enums",   Icon: LucideHash,     tooltip: "Enumerations" },
 ];
 
 function ViewSwitcher() {
@@ -35,7 +65,7 @@ function ViewSwitcher() {
             onClick={() => setShellViewMode(m.id)}
             title={m.tooltip}
           >
-            <Ico />
+            <Ico size={14} strokeWidth={1.8} />
             {m.label}
           </button>
         );
@@ -71,38 +101,53 @@ export function TopBar({
       </div>
       <div className="toolbar">
         <div className="tool-group">
-          <button data-tour="new-modeling-asset" className="tool-btn" title="New modeling asset" onClick={onNewFile}><I.Plus /></button>
-          <button className="tool-btn" title="Open project" onClick={onOpenFile}><I.Folder /></button>
-          <button className="tool-btn" title="Import schema (dbt / SQL / DBML)" onClick={onImport}><I.Download style={{ transform: "rotate(180deg)" }} /></button>
+          <button data-tour="new-modeling-asset" className="tool-btn" title="New modeling asset" onClick={onNewFile}>
+            <FilePlus2 size={15} strokeWidth={1.8} />
+          </button>
+          <button className="tool-btn" title="Open project" onClick={onOpenFile}>
+            <FolderOpen size={15} strokeWidth={1.8} />
+          </button>
+          <button className="tool-btn" title="Import schema (dbt / SQL / DBML)" onClick={onImport}>
+            <Upload size={15} strokeWidth={1.8} />
+          </button>
           {onImportDbt && (
-            <button data-tour="import-dbt" className="tool-btn" title="Import dbt repo (folder / git / jaffle-shop demo)" onClick={onImportDbt}><I.Dep /></button>
+            <button data-tour="import-dbt" className="tool-btn" title="Import dbt repo (folder / git / jaffle-shop demo)" onClick={onImportDbt}>
+              <LucideDownload size={15} strokeWidth={1.8} />
+            </button>
           )}
           <button className="tool-btn"
                   title={isDirty ? "Save (⌘S)" : "Nothing to save"}
                   onClick={onSave}
                   disabled={!canSave}
                   style={{ opacity: canSave ? 1 : 0.4 }}>
-            <I.Download />
+            <LucideSave size={15} strokeWidth={1.8} />
             {isDirty && <span style={{ width: 6, height: 6, borderRadius: 3, background: "var(--accent)", marginLeft: 4 }} />}
           </button>
           {onSaveAll && (
             <button data-tour="save-all" className="tool-btn"
-                    title="Save project (flush all edits to disk)"
+                    title="Save all (flush every edit to disk)"
                     onClick={onSaveAll}
                     disabled={!canSaveAll}
                     style={{ opacity: canSaveAll ? 1 : 0.4 }}>
-              <I.Download />
-              <span style={{ marginLeft: 4 }}>All</span>
+              <LucideSaveAll size={15} strokeWidth={1.8} />
             </button>
           )}
         </div>
         <div className="tool-group">
-          <button className="tool-btn" onClick={onNewTable} title="Create conceptual, logical, or physical model"><I.Plus /><I.Table />Model</button>
-          <button className="tool-btn" onClick={onConnections} title="Manage connections"><I.Db />Connect</button>
+          <button className="tool-btn" onClick={onNewTable} title="Create conceptual, logical, or physical model">
+            <Boxes size={15} strokeWidth={1.8} />Model
+          </button>
+          <button className="tool-btn" onClick={onConnections} title="Manage connections">
+            <Database size={15} strokeWidth={1.8} />Connect
+          </button>
         </div>
         <div className="tool-group">
-          <button className="tool-btn" title="Undo" onClick={onUndo}><I.Undo /></button>
-          <button className="tool-btn" title="Redo" onClick={onRedo}><I.Redo /></button>
+          <button className="tool-btn" title="Undo" onClick={onUndo}>
+            <Undo2 size={15} strokeWidth={1.8} />
+          </button>
+          <button className="tool-btn" title="Redo" onClick={onRedo}>
+            <Redo2 size={15} strokeWidth={1.8} />
+          </button>
         </div>
         {/* View-mode switcher replaces the old Diagram/View/Enum triple. */}
         <ViewSwitcher />
@@ -115,10 +160,20 @@ export function TopBar({
           <DiffToggle />
         </div>
         <div className="tool-group">
-          {canRunSql && <button className="tool-btn" onClick={onRunSql}><I.Play />Run SQL</button>}
-          <button className="tool-btn ai-header-btn" title="AI agent setup" onClick={onAiSettings || onAskAi}><I.Sparkle />AI</button>
-          <button className="tool-btn" title="Commit (git)" onClick={onCommit}><I.Branch /></button>
-          <button data-tour="settings" className="tool-btn" title="Settings" onClick={onSettings}><I.Settings /></button>
+          {canRunSql && (
+            <button className="tool-btn" onClick={onRunSql}>
+              <Play size={14} strokeWidth={1.8} />Run SQL
+            </button>
+          )}
+          <button className="tool-btn ai-header-btn" title="AI agent setup" onClick={onAiSettings || onAskAi}>
+            <Sparkles size={14} strokeWidth={1.8} />AI
+          </button>
+          <button className="tool-btn" title="Commit (git)" onClick={onCommit}>
+            <GitCommit size={15} strokeWidth={1.8} />
+          </button>
+          <button data-tour="settings" className="tool-btn" title="Settings" onClick={onSettings}>
+            <LucideSettings size={15} strokeWidth={1.8} />
+          </button>
         </div>
       </div>
       <button
