@@ -21,11 +21,17 @@ import {
 
 const PANEL_WIDTH = 480;
 
-function readAiKey() {
+function isAiConfigured() {
+  // The AI step is "done" when the user either pasted an API key OR picked
+  // the local provider (which needs no key). SettingsDialog uses the same
+  // OR-condition to decide whether to emit `ai:settings:saved`, so the
+  // journey's button-enabled state must agree.
   try {
-    return localStorage.getItem("datalex.ai.apiKey") || "";
+    if (localStorage.getItem("datalex.ai.apiKey")) return true;
+    if (localStorage.getItem("datalex.ai.provider") === "local") return true;
+    return false;
   } catch {
-    return "";
+    return false;
   }
 }
 
@@ -37,9 +43,13 @@ export default function OnboardingJourney({
   onOpenAiSettings,
   onAskAiToDraw,
   hasActiveProject = false,
+  modalOpen = false,
 }) {
   const [state, setState] = useState(() => getJourneyState());
   const [collapsed, setCollapsed] = useState(false);
+  // Separate auto-collapse (driven by `modalOpen`) from the user's manual
+  // collapse so closing a modal doesn't re-expand a panel the user hid.
+  const [autoCollapsed, setAutoCollapsed] = useState(false);
   const [drawing, setDrawing] = useState(false);
   const [drawError, setDrawError] = useState("");
 
@@ -67,7 +77,14 @@ export default function OnboardingJourney({
     if (!collapsed) refresh();
   }, [collapsed, refresh]);
 
-  const aiConfigured = useMemo(() => Boolean(readAiKey()), [state.completed]);
+  // Auto-collapse to the pill while a modal is open. At narrow viewports
+  // (~1280px) the 480px right rail otherwise covers the modal's submit
+  // button. The user's manual `collapsed` state is preserved separately.
+  useEffect(() => {
+    setAutoCollapsed(modalOpen);
+  }, [modalOpen]);
+
+  const aiConfigured = useMemo(() => isAiConfigured(), [state.completed]);
 
   // If the user already has an AI key configured (e.g. they used
   // DataLex before this version), mark the AI step complete on mount
@@ -145,13 +162,19 @@ export default function OnboardingJourney({
   const progressPct = Math.round((completedCount / totalSteps) * 100);
   const allDone = completedCount >= totalSteps;
 
-  // Collapsed mini-pill in the bottom-right.
-  if (collapsed) {
+  // Collapsed mini-pill in the bottom-right. Shown when the user manually
+  // collapsed OR when a modal is open (to keep the panel from covering it).
+  // While auto-collapsed, the pill click is a no-op — the panel re-expands
+  // automatically when the modal closes.
+  const showPill = collapsed || autoCollapsed;
+  if (showPill) {
     return (
       <button
         type="button"
-        onClick={() => setCollapsed(false)}
-        title="Resume onboarding"
+        onClick={() => {
+          if (!autoCollapsed) setCollapsed(false);
+        }}
+        title={autoCollapsed ? "Resumes when the dialog closes" : "Resume onboarding"}
         aria-label="Resume onboarding"
         style={{
           position: "fixed",

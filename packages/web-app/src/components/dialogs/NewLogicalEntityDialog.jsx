@@ -163,7 +163,7 @@ export default function NewLogicalEntityDialog() {
     updateContent(next);
     requestLayoutRefresh?.();
     addToast({ type: "success", message: `Created logical entity "${cleanName}".` });
-    emitJourneyEvent("entity:created", { kind: "logical", name: cleanName });
+    emitJourneyEvent("entity:created", { kind: "logical", entityName: cleanName });
     closeModal();
   };
 

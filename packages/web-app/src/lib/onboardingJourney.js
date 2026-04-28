@@ -154,7 +154,10 @@ const EVENT_NAME = "datalex:onboarding";
 export function emitJourneyEvent(name, detail = {}) {
   if (typeof window === "undefined") return;
   try {
-    window.dispatchEvent(new CustomEvent(EVENT_NAME, { detail: { name, ...detail } }));
+    // Spread `detail` first so the journey event name (used to match
+    // `completeOn`) always wins — a caller passing `{ name: cleanEntityName }`
+    // must not silently shadow the event name.
+    window.dispatchEvent(new CustomEvent(EVENT_NAME, { detail: { ...detail, name } }));
   } catch {
     /* ignore */
   }
