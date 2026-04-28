@@ -292,6 +292,34 @@ export function patchField(yamlText, entityName, fieldName, patch) {
   return dump(doc);
 }
 
+/* Set the top-level model/diagram description.
+ *
+ * For `*.model.yaml` (top-level `model:` block) the description lives at
+ * `model.description`. For `*.diagram.yaml` and other shapes it lives at
+ * the document root. Empty/whitespace deletes the field.
+ */
+export function setModelDescription(yamlText, description) {
+  const doc = loadDoc(yamlText);
+  if (!doc) return null;
+  const trimmed = String(description ?? "").trim();
+  const target = doc.model && typeof doc.model === "object" ? doc.model : doc;
+  if (trimmed) target.description = trimmed;
+  else delete target.description;
+  return dump(doc);
+}
+
+/* Set an entity's description. Empty/whitespace deletes the field. */
+export function setEntityDescription(yamlText, entityName, description) {
+  const doc = loadDoc(yamlText);
+  if (!doc) return null;
+  const entity = findEntity(doc, entityName);
+  if (!entity) return null;
+  const trimmed = String(description ?? "").trim();
+  if (trimmed) entity.description = trimmed;
+  else delete entity.description;
+  return dump(doc);
+}
+
 /* Rename an entity; renames foreign-key references pointing at it too. */
 export function renameEntity(yamlText, oldName, newName) {
   const doc = loadDoc(yamlText);
