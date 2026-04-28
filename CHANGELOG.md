@@ -7,6 +7,181 @@ from `v0.1.0` onward.
 
 ## [Unreleased]
 
+## [1.5.0] - 2026-04-28
+
+Minor release — pivots the modeling experience around a new top-level
+**Docs view**, ships a stdio MCP server so Claude Desktop / Cursor /
+Code can drive DataLex directly, and clears a stack of UX papercuts
+on the onboarding journey, the Help & Tour pane, and the topbar
+icons.
+
+### Added — Top-level Docs view
+
+- **`Docs` workspace tab** next to Diagram / Table / Views / Enums.
+  Renders the active YAML model as readable documentation: header
+  chips (layer / domain / version / owners), inline-editable model
+  description, mermaid ER diagram (drawn client-side from the YAML
+  entities, with PK / FK detection), one section per entity with an
+  editable description and a fields table whose **Description**
+  column is also click-to-edit.
+- **Live re-render on AI edits.** The view subscribes to
+  `activeFileContent`; AI agents that mutate YAML through
+  `updateContent()` (Conceptualizer, AI proposals) show up here
+  without any extra wiring. Verified by an `e2e/docs-view.spec.js`
+  assertion that injects an `updateContent()` call from outside the
+  view and confirms the rendered prose updates with no user
+  interaction.
+- **Per-entity readiness chips** sourced from `/api/dbt/review` —
+  surface "N errors / N warnings" inline so users see exactly which
+  entities the gate flags. **Run readiness check** button refreshes
+  the review on demand.
+- **Suggest with AI** buttons next to every empty description
+  (model-, entity-, and field-level). Click opens the existing
+  `AiAssistantDialog` with a focused `initialMessage` prefilled
+  ("…suggest a 1-2 sentence description grounded in dbt + business
+  modeling conventions. Reply with ONLY the description text."), so
+  users go from blank to candidate text in two clicks. No new
+  endpoints — reuses the existing AI surface.
+- **YAML patch helpers** — `setModelDescription` and
+  `setEntityDescription` in `design/yamlPatch.js`, used by the
+  inline-edit flow. Field-level edits route through the existing
+  `patchField`.
+
+### Added — MCP server (`packages/mcp-server`)
+
+- New stdio MCP server, shipped as the `datalex-mcp` console script.
+  Plug into Claude Desktop / Cursor / Code with
+  `{ "command": "datalex-mcp" }`. Four tools any client can call:
+  - `docs.export` — write per-model + per-domain Markdown (with
+    mermaid ERDs) for a project.
+  - `docs.list` — enumerate recognized DataLex models (path, kind,
+    domain, layer, name, entity_count).
+  - `dbt.doc_blocks` — list `{% docs %}` blocks scanned from the
+    project, or fetch one by name.
+  - `dbt.review` — run the readiness gate over a project; return the
+    per-file score summary.
+- Single source of truth: every tool calls the same `datalex_core`
+  functions the CLI and api-server use.
+
+### Added — Optional static-site docs export
+
+- **`datalex docs export --project <root> --out <dir>`** CLI
+  subcommand. Walks a project, writes
+  `<out>/<domain>/<model>.md` (per-model data dictionary),
+  `<out>/<domain>/README.md` (per-domain summary + mermaid ERD), and
+  `<out>/README.md` (top-level domain index). Doc-block references
+  (`description_ref: { doc: <name> }`) resolve through the existing
+  `DocBlockIndex` so prose lands in the MD, not the jinja reference.
+- **`POST /api/docs/export`** endpoint mirrors the CLI for the
+  api-server. Defaults `out_dir` to `<project_dir>/docs/_generated`.
+- Repositioned in the README as "optional static-site publishing"
+  rather than the primary surface — the in-app Docs view is the
+  default UX; this is for users who want committed `.md` files for
+  GitHub Pages, internal wikis, or AI ingestion.
+
+### Added — One-command updater
+
+- **`bash scripts/update.sh`** auto-detects how `datalex-cli` is
+  installed in the active Python environment and runs the right
+  upgrade: editable source checkout → `git pull` + `pip install -e .`;
+  PyPI install → `pip install -U 'datalex-cli[serve]'`; VCS install
+  → re-install from `main`. `--from-source` forces the GitHub-main
+  path for users on a Python that PyPI hasn't caught up to.
+- README `## Update to the latest` section pointing at the script
+  with the equivalent one-liner for users who'd rather skip the
+  shell wrapper.
+
+### Changed — Topbar icons (lucide-react refresh)
+
+- The previous custom set had real semantic problems flagged by
+  users:
+  - **Save** and **Save All** both rendered with `Download` (wrong
+    meaning, and the same icon for two distinct actions).
+  - **Import schema** rotated `Download` 180° as a hack for upload
+    semantics.
+  - **Settings** rendered as a sun-with-rays, not the gear shape
+    every other app uses.
+- Switched the topbar action set to lucide-react (already a project
+  dep) so each button has a distinct, conventional icon: `Save`
+  (floppy), `SaveAll`, `Upload` (Import), `Download` (Import dbt —
+  actual download semantics now), `Settings` (real gear),
+  `GitCommit`, `Boxes` (New Model), `Database` (Connect),
+  `Undo2 / Redo2`, `Play` (Run SQL), `Sparkles` (AI), `FilePlus2`,
+  `FolderOpen`. View-switcher tabs: `Layers / FileText / Table /
+  Eye / Hash`.
+- Domain-specific icons (cardinality, key flags, relationship types)
+  stay in `design/icons.jsx` — that namespace continues to own
+  modeling glyphs.
+
+### Changed — Docker quickstart promoted up front
+
+- New `### Prefer Docker?` subsection in the README sits right after
+  the pip Quickstart, with the build + run commands and the
+  volume-mount form. Was previously buried at the start of the
+  `## Install` chapter, so users on machines where pip install was
+  awkward had to scroll past the entire onboarding journey
+  description and tutorial picker to find it. No content moved or
+  removed — the `### Docker Fallback (Optional)` section under
+  Install stays untouched.
+
+### Changed — Help & Tour disambiguation
+
+- Renamed the two replay buttons in **Settings → Help & Tour** so
+  they're impossible to confuse:
+  - `Replay onboarding` → **`Replay 6-step onboarding journey`**
+  - `Deep feature tour` → **`Legacy spotlight tour (13 steps)`**
+- Added an `e2e/replay-onboarding.spec.js` regression that wipes
+  `datalex.onboarding.journey` + `datalex.onboarding.seen` and
+  reloads, asserts the new journey panel mounts and no driver.js
+  popover appears.
+
+### Fixed — Onboarding journey: three blocking bugs
+
+- **Step 4 never auto-completed.** `emitJourneyEvent("entity:created", ...)`
+  did `{ name, ...detail }`; every entity-creation call site passed
+  `{ kind, name: cleanEntityName }`, so the spread silently
+  overwrote the journey event name with the entity name. The journey
+  listener never matched; step 4 stayed active even after the entity
+  was visibly created on the canvas. Spread order is flipped (event
+  name wins) and call sites now use `entityName` for clarity. Fixes
+  `core_engine/src/datalex_core/lib/onboardingJourney.js:157` and
+  the 4 callers in `NewLogicalEntityDialog.jsx` and
+  `NewConceptDialog.jsx`.
+- **Step 6 was unreachable when picking the recommended local AI
+  provider.** `aiConfigured` checked only
+  `localStorage.datalex.ai.apiKey`, but the local provider needs no
+  key. Now matches `SettingsDialog`'s existing
+  `provider === "local"` OR-condition.
+- **At ~1280px the 480px right-rail panel covered the import
+  dialog's submit button.** Panel now auto-collapses to its pill
+  while any modal is open and re-expands when the modal closes —
+  separate from the user's manual-collapse state, so closing a modal
+  doesn't re-expand a panel the user hid.
+
+### Fixed — Python 3.14 incompat in `dbt docs reindex`
+
+- The `datalex dbt docs reindex` subparser had
+  `help="Rebuild the {% docs %} block index..."`. Python 3.14 added
+  stricter validation in `argparse._check_help` that runs the help
+  string through `% {}`, and the bare `%` followed later by ` d`
+  was read as a `%d` conversion. The CLI failed to start on Python
+  3.14 with `ValueError: badly formed help string` — including
+  `datalex serve`. Escaped both percents as `%%`. Verified clean on
+  Python 3.14.2.
+
+### Added — Playwright coverage
+
+- `e2e/onboarding-journey.spec.js` — full 6-step journey walk
+  against jaffle-shop. Catches regressions on event names,
+  auto-completion, persistence, and the auto-collapse-on-modal
+  behaviour.
+- `e2e/docs-view.spec.js` — top-level Docs tab renders next to
+  Diagram/Table/Views/Enums; inline description edits round-trip
+  through `yamlPatch` → `updateContent` → DocsView re-render; live
+  re-render on AI/external `updateContent()`.
+- `e2e/replay-onboarding.spec.js` — Settings → Help & Tour replay
+  flow doesn't fall back to the legacy driver.js tour.
+
 ## [1.4.1] - 2026-04-27
 
 ### Changed — First-run onboarding redesigned as an action-oriented journey
@@ -1301,7 +1476,10 @@ Labs** (company).
   root; a `pip install`ed package run outside the repo needs
   `--schemas-root` or the repo on disk.
 
-[Unreleased]: https://github.com/duckcode-ai/DataLex/compare/v1.3.7...HEAD
+[Unreleased]: https://github.com/duckcode-ai/DataLex/compare/v1.5.0...HEAD
+[1.5.0]: https://github.com/duckcode-ai/DataLex/compare/v1.4.1...v1.5.0
+[1.4.1]: https://github.com/duckcode-ai/DataLex/compare/v1.4.0...v1.4.1
+[1.4.0]: https://github.com/duckcode-ai/DataLex/compare/v1.3.7...v1.4.0
 [1.3.7]: https://github.com/duckcode-ai/DataLex/compare/v1.3.6...v1.3.7
 [1.3.6]: https://github.com/duckcode-ai/DataLex/compare/v1.3.5...v1.3.6
 [1.3.5]: https://github.com/duckcode-ai/DataLex/compare/v1.3.4...v1.3.5
