@@ -155,32 +155,39 @@ const LEFT_PANEL_WIDTH_STORAGE = "datalex.leftPanelWidth";
 const LEFT_PANEL_MIN = 220;
 const LEFT_PANEL_MAX = 520;
 
+/* Bottom-drawer tab order. The leftmost tab is the default when no
+   persisted choice is in scope — so Validation comes first to make
+   "what's broken / missing" the answer the user sees on open. After
+   that, the order follows the typical "edit → preview → test → diff"
+   workflow: SQL Preview, Unit Tests, then Diff. Authoring tools
+   (Studio, dbt YAML, Constraints, etc.) and reference panels
+   (Snapshots, Exposures, Policy Packs, History) sit further right. */
 const LOGICAL_BOTTOM_TABS = [
-  { id: "modeler",       label: "Blueprint",     icon: Wand2 },
   { id: "validation",    label: "Validation",    icon: ShieldCheck },
-  { id: "policy_packs",  label: "Policy Packs",  icon: Shield },
   { id: "diff",          label: "Diff",          icon: GitCompare },
+  { id: "modeler",       label: "Blueprint",     icon: Wand2 },
+  { id: "policy_packs",  label: "Policy Packs",  icon: Shield },
   { id: "history",       label: "History",       icon: Clock },
 ];
 
 const PHYSICAL_BOTTOM_TABS = [
+  { id: "validation",    label: "Validation",    icon: ShieldCheck },
+  { id: "sql",           label: "SQL Preview",   icon: FileCode2 },
+  { id: "unit_tests",    label: "Unit Tests",    icon: FlaskConical },
+  { id: "diff",          label: "Diff",          icon: GitCompare },
   { id: "modeler",       label: "Studio",        icon: Wand2 },
   { id: "dbt",           label: "dbt YAML",      icon: Braces },
-  { id: "sql",           label: "SQL Preview",   icon: FileCode2 },
   { id: "constraints",   label: "Constraints",   icon: Database },
   { id: "snapshots",     label: "Snapshots",     icon: Camera },
   { id: "exposures",     label: "Exposures",     icon: Eye },
-  { id: "unit_tests",    label: "Unit Tests",    icon: FlaskConical },
-  { id: "validation",    label: "Validation",    icon: ShieldCheck },
   { id: "policy_packs",  label: "Policy Packs",  icon: Shield },
-  { id: "diff",          label: "Diff",          icon: GitCompare },
 ];
 
 const CONCEPTUAL_BOTTOM_TABS = [
+  { id: "validation",    label: "Validation",    icon: ShieldCheck },
   { id: "modeler",       label: "Studio",        icon: Wand2 },
   { id: "dictionary",    label: "Dictionary",    icon: BookOpen },
   { id: "relationships", label: "Relationships", icon: GitBranch },
-  { id: "validation",    label: "Validation",    icon: ShieldCheck },
   { id: "history",       label: "History",       icon: Clock },
 ];
 

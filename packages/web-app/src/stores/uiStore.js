@@ -7,7 +7,12 @@ import { create } from "zustand";
 const BOTTOM_STORAGE = "datalex.bottomPanel";
 const DEFAULT_BOTTOM = {
   open: true,
-  tab: "properties",
+  // Default to Validation so the first thing a user sees on open is
+  // "what's broken / missing" rather than a structural panel. The Shell's
+  // activeBottomTabs effect falls back to the first tab in the active
+  // model-kind list when this id isn't present, which is also Validation
+  // across LOGICAL / PHYSICAL / CONCEPTUAL.
+  tab: "validation",
   height: 280,
   maximized: false,
 };
