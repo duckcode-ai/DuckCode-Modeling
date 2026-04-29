@@ -8,6 +8,8 @@ import { tmpdir } from "os";
 import { createRequire } from "module";
 import { randomBytes } from "crypto";
 import { listProviderMeta } from "./ai/providerMeta.js";
+import { classifyIntent } from "./ai/intent-router.js";
+import { runIntentEndpoint } from "./ai/intent-endpoints.js";
 import {
   callAiProvider as callConfiguredAiProvider,
   resolveAiProviderConfig as resolveConfiguredAiProvider,
@@ -4699,11 +4701,105 @@ app.post("/api/ai/suggest", requireAdmin, express.json(), async (req, res, next)
   }
 });
 
+/* ── Per-intent AI endpoints (Path B Phases 3-5) ────────────────────
+ * Each endpoint is a thin wrapper that:
+ *   1. Resolves the project + provider config (with NO_PROVIDER guard)
+ *   2. Calls runIntentEndpoint(intent, ...) which prefetches deterministic
+ *      tool context, calls the LLM with a focused per-intent prompt, and
+ *      validates the response against the intent's schema
+ *   3. Returns the typed payload to the UI
+ *
+ * Compared to /api/ai/ask: no 4-agent run, no 8-skill dump, no 7-key
+ * generic JSON, no memory pollution. Tools fetch real content.
+ */
+async function intentEndpointHandler(intent, req, res, next) {
+  try {
+    const { project } = await resolveProjectAndStructure(req.body?.projectId);
+    const config = resolveAiProviderConfig(req.body?.provider || {});
+    if (!config.provider || config.provider === "local") {
+      return apiFail(
+        res,
+        503,
+        "NO_PROVIDER",
+        "No AI provider configured. Add an OpenAI, Anthropic, Gemini, or Ollama provider in Settings → AI to enable per-intent AI endpoints.",
+      );
+    }
+    if (!String(req.body?.message || "").trim()) {
+      throw new ApiError(400, "VALIDATION", "message is required");
+    }
+    // Build the AI index once per call so search_records / lineage_lookup
+    // tools have something to query against.
+    const index = AI_INDEX_CACHE.get(project.id) || await buildAiIndex(project);
+    const helpers = {
+      validateYamlOnSave,
+      searchAiIndex,
+      index,
+    };
+    const result = await runIntentEndpoint(intent, {
+      project,
+      body: req.body,
+      providerConfig: config,
+      helpers,
+      callAiProvider,
+    });
+    if (!result.ok) {
+      const code = result.error?.code || "INTERNAL";
+      const status = code === "PROVIDER_FAILED" ? 502 : code === "PARSE_FAILED" || code === "SCHEMA_INVALID" ? 422 : 500;
+      return apiFail(res, status, code, result.error?.message || "intent endpoint failed", result.error?.raw);
+    }
+    res.json(result);
+  } catch (err) {
+    next(err);
+  }
+}
+
+app.post("/api/ai/fix",      requireAdmin, express.json(), (req, res, next) => intentEndpointHandler("validation_fix",  req, res, next));
+app.post("/api/ai/explain",  requireAdmin, express.json(), (req, res, next) => intentEndpointHandler("explain",          req, res, next));
+app.post("/api/ai/explore",  requireAdmin, express.json(), (req, res, next) => intentEndpointHandler("explore",          req, res, next));
+app.post("/api/ai/create",   requireAdmin, express.json(), (req, res, next) => intentEndpointHandler("create_artifact", req, res, next));
+app.post("/api/ai/refactor", requireAdmin, express.json(), (req, res, next) => intentEndpointHandler("refactor",         req, res, next));
+
+/* ── Phase 6: Route legacy /api/ai/ask through the intent classifier ──
+ * Free-form chat still works, but high-confidence (≥ 0.75) intents are
+ * forwarded to the per-intent endpoint so the user gets a focused
+ * response instead of the generic 7-key JSON. Logged so we can tune
+ * the confidence threshold from real usage.
+ */
+function logIntentRouting(project, decision, message) {
+  try {
+    if (!project?.path) return;
+    const log = join(project.path, ".datalex", "ai", "intent-routing.log");
+    mkdirSync(dirname(log), { recursive: true });
+    const line = JSON.stringify({
+      at: new Date().toISOString(),
+      intent: decision.intent,
+      confidence: decision.confidence,
+      messagePreview: String(message || "").slice(0, 120),
+    }) + "\n";
+    require("fs").appendFileSync(log, line);
+  } catch { /* logging is best-effort */ }
+}
+
 app.post("/api/ai/ask", requireAdmin, async (req, res, next) => {
   try {
     const { project } = await resolveProjectAndStructure(req.body?.projectId);
     const message = String(req.body?.message || "").trim();
     if (!message) throw new ApiError(400, "VALIDATION", "message is required");
+    // Phase 6 routing — only for the regular chat surface; description
+    // requests already use /api/ai/suggest directly.
+    const routingConfig = resolveAiProviderConfig(req.body?.provider || {});
+    if (routingConfig.provider && routingConfig.provider !== "local") {
+      const decision = classifyIntent(message, req.body?.context || {});
+      logIntentRouting(project, decision, message);
+      const ROUTABLE = ["validation_fix", "explain", "explore", "create_artifact", "refactor"];
+      if (decision.confidence >= 0.75 && ROUTABLE.includes(decision.intent)) {
+        // Re-route by re-invoking the intent handler. The original /api/ai/ask
+        // body shape is compatible — we just hand off without sending the
+        // legacy 7-key envelope.
+        return intentEndpointHandler(decision.intent, req, res, next);
+      }
+    }
+    // Fall through to the legacy pipeline below.
     const index = AI_INDEX_CACHE.get(project.id) || await buildAiIndex(project);
     const contextPreview = buildAiContextPreview(index, {
       message,

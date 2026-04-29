@@ -298,6 +298,51 @@ export async function suggestAiDescription({ projectId, target, provider, mode =
   });
 }
 
+/* ── Per-intent endpoints (Path B) ───────────────────────────────────
+ * Each one returns { ok, intent, response } on success.
+ * - fix      → { explanation, patch: { path, ops[] } }
+ * - explain  → { answer, sources[] }
+ * - explore  → { matches[], summary }
+ * - create   → { change: { type, path, content } }
+ * - refactor → { patches[] }
+ * 503 NO_PROVIDER when no real LLM is configured (UI disables the
+ * relevant button + shows a tooltip).
+ */
+export async function aiFix({ projectId, message, context, provider }) {
+  return request("/ai/fix", {
+    method: "POST",
+    body: JSON.stringify({ projectId, message, context, provider }),
+  });
+}
+
+export async function aiExplain({ projectId, message, context, provider }) {
+  return request("/ai/explain", {
+    method: "POST",
+    body: JSON.stringify({ projectId, message, context, provider }),
+  });
+}
+
+export async function aiExplore({ projectId, message, context, provider }) {
+  return request("/ai/explore", {
+    method: "POST",
+    body: JSON.stringify({ projectId, message, context, provider }),
+  });
+}
+
+export async function aiCreateArtifact({ projectId, message, context, provider }) {
+  return request("/ai/create", {
+    method: "POST",
+    body: JSON.stringify({ projectId, message, context, provider }),
+  });
+}
+
+export async function aiRefactor({ projectId, message, context, provider }) {
+  return request("/ai/refactor", {
+    method: "POST",
+    body: JSON.stringify({ projectId, message, context, provider }),
+  });
+}
+
 export async function previewAiContext(body = {}) {
   return request("/ai/context/preview", {
     method: "POST",
