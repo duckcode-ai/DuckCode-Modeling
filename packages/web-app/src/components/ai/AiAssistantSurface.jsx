@@ -276,6 +276,10 @@ export default function AiAssistantSurface({ payload = null, onClose, compact = 
   const [workStepIndex, setWorkStepIndex] = React.useState(0);
   const [lastRequest, setLastRequest] = React.useState("");
   const scrollRef = React.useRef(null);
+  // Tracks which payload identity we've already auto-submitted for.
+  // React 18 StrictMode runs effects twice in dev, so without this guard
+  // the autoSubmit fires twice and produces two identical AI responses.
+  const autoSubmittedPayloadRef = React.useRef(null);
 
   React.useEffect(() => {
     setMessage(payload?.initialMessage || "");
@@ -287,8 +291,15 @@ export default function AiAssistantSurface({ payload = null, onClose, compact = 
     // Caller can request the message be sent immediately. Used by the
     // Validation panel's "Ask AI" buttons so a click feels like an
     // action, not a "now type your prompt" handoff. We pass the text
-    // explicitly because the setMessage above hasn't flushed yet.
-    if (payload?.autoSubmit && payload?.initialMessage) {
+    // explicitly because the setMessage above hasn't flushed yet, and
+    // we ref-guard against StrictMode's double-invoke so the same
+    // payload doesn't submit twice.
+    if (
+      payload?.autoSubmit
+      && payload?.initialMessage
+      && autoSubmittedPayloadRef.current !== payload
+    ) {
+      autoSubmittedPayloadRef.current = payload;
       queueMicrotask(() => { submit(payload.initialMessage); });
     }
     // submit is intentionally omitted from deps — we only re-trigger on

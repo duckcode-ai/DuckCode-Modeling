@@ -770,11 +770,15 @@ export default function ValidationPanel() {
       "",
       `Code: ${issue?.code || "(no code)"}`,
       `Severity: ${issue?.severity || "warn"}`,
-      filePath ? `File: ${filePath}` : "",
-      issue?.path ? `Target: ${issue.path}` : "",
+      filePath ? `File (FIX THIS EXACT FILE): ${filePath}` : "",
+      issue?.path ? `Target (JSON-pointer inside the file): ${issue.path}` : "",
       issue?.message ? `Message: ${issue.message}` : "",
       "",
-      "Use the `patch_yaml` change type with explicit JSON-patch ops where possible.",
+      "REQUIRED:",
+      "- Use the `patch_yaml` change type targeting the file path above.",
+      "- Do NOT propose `create_diagram` or `create_model` — this is a fix to an existing file, not a new artifact.",
+      "- Use JSON-patch ops (op/path/value) when possible.",
+      "- Return exactly ONE proposed change.",
     ].filter(Boolean).join("\n");
     openAiPanel({
       source: "validation",
@@ -815,17 +819,24 @@ export default function ValidationPanel() {
       ? [
           `Explain this dbt readiness finding in one plain-English sentence, then propose the smallest YAML patch that resolves it.`,
           ``,
-          `File: ${path}`,
+          `File (FIX THIS EXACT FILE): ${path}`,
           `Code: ${finding.code || "(no code)"}`,
           `Severity: ${finding.severity || "warn"}`,
           `Message: ${finding.message || "(no message)"}`,
           ``,
-          `Use the dbt-naming-conventions and dbt-test-coverage skills as ground truth. Use \`patch_yaml\` change type.`,
+          `REQUIRED:`,
+          `- Use the \`patch_yaml\` change type targeting the file path above.`,
+          `- Do NOT propose \`create_diagram\` or \`create_model\` — this is a fix to an existing file.`,
+          `- Use JSON-patch ops where possible.`,
+          `- Use the dbt-naming-conventions and dbt-test-coverage skills as ground truth.`,
         ].join("\n")
       : [
           `Review the file at ${path} against the dbt readiness gate. List every gap and propose focused YAML patches that bring it from yellow / red to green.`,
           ``,
-          `Use the dbt-naming-conventions and dbt-test-coverage skills as ground truth. One \`patch_yaml\` change per gap.`,
+          `REQUIRED:`,
+          `- One \`patch_yaml\` change per gap, all against the file path above.`,
+          `- Do NOT propose \`create_diagram\` or \`create_model\`.`,
+          `- Use the dbt-naming-conventions and dbt-test-coverage skills as ground truth.`,
         ].join("\n");
     openAiPanel({
       source: "dbt-readiness",

@@ -2702,6 +2702,9 @@ function classifyAiAgents(message, context = {}) {
     context?.selectedText,
     context?.filePath,
   ].filter(Boolean).join(" ").toLowerCase();
+  const contextKind = String(context?.kind || "").toLowerCase();
+  const isFixIntent = contextKind === "validation_issue" || contextKind === "dbt_readiness_finding";
+
   const selected = [];
   for (const [id, profile] of Object.entries(AI_AGENT_PROFILES)) {
     let score = 0;
@@ -2711,6 +2714,21 @@ function classifyAiAgents(message, context = {}) {
     if (profile.layer && String(context?.modelKind || context?.layer || "").toLowerCase() === profile.layer) score += 4;
     if (id === "relationship_modeler" && (context?.kind === "relationship" || context?.relId)) score += 5;
     if (id === "yaml_patch_engineer" && /\b(create|update|modify|delete|fix|generate|propose|patch)\b/.test(text)) score += 4;
+
+    // Fix-intent overrides: a "validation_issue" / "dbt_readiness_finding"
+    // task is structurally a YAML patch — the agent set must reflect that.
+    // Boost the patch + governance agents hard; suppress agents whose
+    // contract doesn't apply (description_writer is for prose, the
+    // conceptualizer / canonicalizer infer entities from staging,
+    // none of which is what "fix this finding" means).
+    if (isFixIntent) {
+      if (id === "yaml_patch_engineer") score += 20;
+      if (id === "governance_reviewer") score += 15;
+      if (id === "description_writer" || id === "conceptualizer" || id === "canonicalizer") {
+        score = 0; // hard suppress regardless of keyword matches
+      }
+    }
+
     if (score > 0) selected.push({ id, ...profile, score });
   }
   if (!selected.length) {
@@ -2719,9 +2737,12 @@ function classifyAiAgents(message, context = {}) {
   if (!selected.some((agent) => agent.id === "yaml_patch_engineer") && /\b(yaml|file|change|proposal|apply)\b/.test(text)) {
     selected.push({ id: "yaml_patch_engineer", ...AI_AGENT_PROFILES.yaml_patch_engineer, score: 2 });
   }
+  // Fix-intent caps the agent set to 2 specialists — extra agents on a
+  // YAML-patch task add noise to the prompt without changing the answer.
+  const cap = isFixIntent ? 2 : 4;
   return selected
     .sort((a, b) => b.score - a.score)
-    .slice(0, 4)
+    .slice(0, cap)
     .map((agent) => ({
       id: agent.id,
       label: agent.label,
@@ -3527,6 +3548,8 @@ function selectAiSkills(index, { message, context = {}, agents = [], sources = [
   const disabled = new Set(normalizeAiArray(skillControls.disabled || skillControls.disabledPaths).map((v) => v.toLowerCase()));
   const pinned = new Set(normalizeAiArray(skillControls.pinned || skillControls.pinnedPaths).map((v) => v.toLowerCase()));
   const agentIds = new Set((agents || []).map((agent) => agent.id));
+  const contextKind = String(context?.kind || "").toLowerCase();
+  const isFixIntent = contextKind === "validation_issue" || contextKind === "dbt_readiness_finding";
   const queryText = [
     message,
     context?.kind,
@@ -3552,9 +3575,25 @@ function selectAiSkills(index, { message, context = {}, agents = [], sources = [
     for (const token of aiTokens([record.name, record.tags, record.use_when, record.description].join(" "))) {
       if (queryText.includes(token)) score += 1;
     }
+
+    // Fix-intent: prose / conceptual skills are noise on a YAML-patch
+    // task. Boost the patch-relevant ones; suppress description-writing,
+    // conceptual-business-modeling, and any layer-mismatched skills so
+    // they don't crowd the system prompt.
+    if (isFixIntent) {
+      const fileName = String(record.path || record.name || "").toLowerCase();
+      if (/yaml-proposal-safety|governance|dbt-test-coverage|dbt-naming-conventions/.test(fileName)) score += 25;
+      if (/description-writing|conceptual-business-modeling/.test(fileName)) score = 0;
+    }
+
     if (score > 0) skills.push({ ...record, score });
   }
-  return skills.sort((a, b) => b.score - a.score).slice(0, 8).map(redactAiRecord);
+  // Fix-intent caps to 3 skills (was 8) — patch tasks need a tight
+  // contract, not a kitchen sink. Keeps the system prompt focused and
+  // matches what the user actually expects to see in the "Skills used"
+  // panel for a "fix this finding" click.
+  const cap = isFixIntent ? 3 : 8;
+  return skills.sort((a, b) => b.score - a.score).slice(0, cap).map(redactAiRecord);
 }
 
 function buildAiContextPreview(index, { message = "", context = {}, skillControls = {} } = {}) {
@@ -4688,11 +4727,25 @@ app.post("/api/ai/ask", requireAdmin, async (req, res, next) => {
       .filter((m) => m.role === "user" || m.role === "assistant");
     let answer = null;
     if (config.provider && config.provider !== "local") {
+      // When the user is fixing an existing finding (validation issue or
+      // dbt readiness gap), the model has been wandering off into
+      // create_diagram / create_model proposals against new files. Anchor
+      // it explicitly: the only allowed change types are patch_yaml and
+      // update_file against the file path the caller specified.
+      const requestContextKind = String(req.body?.context?.kind || "").toLowerCase();
+      const isFixIntent = requestContextKind === "validation_issue" || requestContextKind === "dbt_readiness_finding";
+      const fixIntentAnchors = isFixIntent ? [
+        "INTENT = FIX-EXISTING-FILE.",
+        "The user is asking you to fix an existing file at the path in `context.filePath`. The ONLY allowed change types for this request are `patch_yaml` and `update_file` against that exact path. DO NOT propose `create_diagram`, `create_model`, `create_file`, `delete_file`, or `rename_file`.",
+        "If the file is missing a top-level key (e.g. the validation says `MISSING_MODEL_SECTION`), the patch must ADD that key in place — propose a single `patch_yaml` with JSON-patch ops, NOT a fresh diagram or model document.",
+        "Do not create new files in canonical paths like `DataLex/<domain>/<Layer>/...` — that path-canonicalization rule applies only when the user explicitly asks to create a new artifact, NOT when fixing an existing finding.",
+      ] : [];
       const system = [
         "You are the DataLex agentic modeling assistant.",
         "Return JSON only with keys: answer, questions, proposed_changes, commands_to_run, risks, confidence, requires_user_approval.",
         "All file changes must be proposed_changes only. Never claim files are changed.",
         "Use DataLex YAML, preserve existing files unless a focused patch is proposed, and never run dbt or apply DDL.",
+        ...fixIntentAnchors,
         "Use the built-in DataLex modeling skills as baseline industry/dbt/governance standards when user-defined skills are absent or not relevant.",
         "Prefer user-provided project skills over built-in defaults when they conflict, but never ignore the selected specialist contract.",
         `Selected specialist agents: ${contextPreview.agents.map((agent) => `${agent.id} (${agent.contract})`).join(" | ")}`,
