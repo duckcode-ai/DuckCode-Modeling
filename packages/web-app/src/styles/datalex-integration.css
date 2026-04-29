@@ -2828,7 +2828,10 @@ body.drawer-resizing .bottom-drawer-resize-grip { opacity: 1; background: var(--
 .ai-plan-review-workspace {
   min-width: 0;
   display: grid;
-  grid-template-columns: calc(var(--ai-plan-split, 0.55) * 100%) 6px minmax(0, 1fr);
+  /* 14px column for the splitter — wider than the visible bar so the
+     hit target is easy to grab. The visible 4px bar is painted by the
+     splitter's ::before, centered in the column. */
+  grid-template-columns: calc(var(--ai-plan-split, 0.55) * 100%) 14px minmax(0, 1fr);
   flex: 1 0 auto;
   min-height: 540px;
 }
@@ -2845,30 +2848,51 @@ body.drawer-resizing .bottom-drawer-resize-grip { opacity: 1; background: var(--
 .ai-plan-splitter {
   position: relative;
   cursor: col-resize;
-  background: var(--border-default);
-  transition: background 120ms;
+  background: transparent;
   display: flex;
   align-items: center;
   justify-content: center;
+  flex-shrink: 0;
+  z-index: 5;
+  user-select: none;
+  -webkit-user-select: none;
+  touch-action: none;
 }
-.ai-plan-splitter:hover,
-body.ai-plan-resizing .ai-plan-splitter {
+.ai-plan-splitter::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 5px;
+  right: 5px;
+  border-radius: 2px;
+  background: var(--border-default);
+  transition: background 120ms, left 120ms, right 120ms;
+  pointer-events: none;
+}
+.ai-plan-splitter:hover::before,
+body.ai-plan-resizing .ai-plan-splitter::before {
   background: var(--accent, #3b82f6);
+  left: 4px;
+  right: 4px;
 }
 .ai-plan-splitter-grip {
   display: block;
   width: 2px;
   height: 36px;
   border-radius: 2px;
-  background: color-mix(in srgb, var(--text-tertiary) 60%, transparent);
+  background: color-mix(in srgb, var(--text-tertiary) 70%, transparent);
   pointer-events: none;
+  position: relative;
+  z-index: 1;
 }
 .ai-plan-splitter:hover .ai-plan-splitter-grip,
 body.ai-plan-resizing .ai-plan-splitter-grip {
-  background: rgba(255, 255, 255, 0.85);
+  background: rgba(255, 255, 255, 0.92);
 }
 body.ai-plan-resizing { cursor: col-resize; user-select: none; }
 body.ai-plan-resizing * { cursor: col-resize !important; }
+body.ai-plan-resizing .ai-plan-editor-body { overflow: hidden; }
 .ai-plan-preview-grid .ai-proposal-preview {
   margin: 0;
 }
