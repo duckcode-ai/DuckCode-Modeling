@@ -106,6 +106,70 @@ function severityConfig(severity) {
 }
 
 const ISSUE_GUIDANCE = {
+  MISSING_MODEL_SECTION: {
+    why: "Model files (kind: model) need a top-level model: block carrying name / version / domain / owners — that's how the readiness gate identifies the artifact.",
+    nextStep: "Add a model: block with name, version, domain, and owners. Diagram files (kind: diagram) don't need this — if this is a diagram, set kind: diagram at the root.",
+  },
+  INVALID_MODEL_NAME: {
+    why: "model.name is the slug used by dbt refs and CI artifacts; it has to be lowercase letters / numbers / underscores so it's safe in SQL and file paths.",
+    nextStep: "Rename model.name to a lowercase snake_case slug (e.g. customer_360 not Customer 360).",
+  },
+  INVALID_MODEL_VERSION: {
+    why: "SemVer lets consumers reason about breaking changes vs. additive updates.",
+    nextStep: "Set model.version to a SemVer string like 1.0.0.",
+  },
+  INVALID_MODEL_DOMAIN: {
+    why: "Without a domain, the readiness gate can't sort or scope this model under a bounded context.",
+    nextStep: "Set model.domain to your business area (e.g. sales, finance, marketing).",
+  },
+  INVALID_MODEL_OWNERS: {
+    why: "Ownership routes quality issues, access requests, and change reviews to a clear team.",
+    nextStep: "Add at least one email address to model.owners.",
+  },
+  INVALID_OWNER_EMAIL: {
+    why: "model.owners must be parseable as emails so the CI gate can route notifications.",
+    nextStep: "Replace the value with a valid email like data-team@example.com.",
+  },
+  INVALID_MODEL_STATE: {
+    why: "model.state controls promotion: draft is in-progress, approved is reviewed, deprecated is on the way out.",
+    nextStep: "Set model.state to one of draft | approved | deprecated.",
+  },
+  INVALID_MODEL_LAYER: {
+    why: "model.layer tells consumers whether they're looking at source, transform, or report-grade data.",
+    nextStep: "Set model.layer to one of source | transform | report.",
+  },
+  INVALID_MODEL_KIND: {
+    why: "model.kind disambiguates conceptual vs logical vs physical when the layer alone isn't enough.",
+    nextStep: "Set model.kind to one of conceptual | logical | physical.",
+  },
+  INVALID_ENTITIES: {
+    why: "A model file with no entities can't represent any data.",
+    nextStep: "Add at least one entity under entities:, or convert this file to kind: diagram if it's a layout-only artifact.",
+  },
+  INVALID_ENTITY_NAME: {
+    why: "Logical and physical entity names become dbt model names (and class identifiers in code), so they need to be PascalCase identifiers — no spaces, no leading digits.",
+    nextStep: "Rename to PascalCase (e.g. SalesOrder not 'Sales Order'). Conceptual concepts on diagrams keep human names — they're exempt.",
+  },
+  INVALID_ENTITY_TYPE: {
+    why: "The entity type drives what other rules apply (a concept is checked differently than a fact_table).",
+    nextStep: "Set entity.type to one of the supported types (concept, logical_entity, table, view, fact_table, dimension_table, hub, link, satellite, …).",
+  },
+  DBT_ENTITY_NO_COLUMNS: {
+    why: "An entity without columns can't generate a dbt contract or a useful schema.yml.",
+    nextStep: "Declare the columns with name + data_type. (Conceptual concepts are exempt — they're meaning, not row shape.)",
+  },
+  DBT_ENTITY_NO_DESCRIPTION: {
+    why: "Without a description, downstream consumers can't tell what this entity represents.",
+    nextStep: "Add a one-sentence description that says what the entity is and when to use it.",
+  },
+  DBT_COLUMN_NO_DESCRIPTION: {
+    why: "Column descriptions show up in dbt docs and BI tools — empty fields hurt discoverability.",
+    nextStep: "Add a description on the column.",
+  },
+  DBT_COLUMN_NO_TYPE: {
+    why: "Without a data_type, dbt contract enforcement can't run.",
+    nextStep: "Add a data_type (e.g. varchar, integer, timestamp, decimal).",
+  },
   MISSING_GRAIN: {
     why: "Grain defines the row-level meaning of the model. Without it, metrics, joins, and downstream modeling assumptions drift.",
     nextStep: "Declare the business grain on the entity using the field or fields that uniquely identify one record.",
@@ -619,36 +683,22 @@ function IssueRow({ issue, toneOverride = "", onAskAi = null }) {
           <p style={{ margin: "3px 0 0", fontSize: 11.5, color: "var(--text-secondary)", lineHeight: 1.45 }}>
             {issue.message}
           </p>
-          <div style={{ display: "grid", gap: 6, marginTop: 8 }}>
-            <div
-              style={{
-                padding: "8px 10px",
-                borderRadius: 6,
-                background: "var(--bg-0)",
-                border: "1px solid var(--border-subtle)",
-              }}
-            >
-              <div style={{ fontSize: 10, letterSpacing: "0.06em", textTransform: "uppercase", color: "var(--text-tertiary)", marginBottom: 4 }}>
-                Why This Matters
-              </div>
-              <div style={{ fontSize: 11, color: "var(--text-secondary)", lineHeight: 1.45 }}>
-                {guidance.why}
-              </div>
+          {/* Why / Next-step copy used to render as two boxed cards
+              stacked under every finding, which made the panel feel
+              overcrowded. Now inline, two short lines — same content,
+              less chrome. */}
+          <div style={{ marginTop: 6, fontSize: 11, color: "var(--text-secondary)", lineHeight: 1.45 }}>
+            <div>
+              <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: "0.06em", textTransform: "uppercase", color: "var(--text-tertiary)", marginRight: 6 }}>
+                Why
+              </span>
+              {guidance.why}
             </div>
-            <div
-              style={{
-                padding: "8px 10px",
-                borderRadius: 6,
-                background: "var(--bg-0)",
-                border: "1px solid var(--border-subtle)",
-              }}
-            >
-              <div style={{ fontSize: 10, letterSpacing: "0.06em", textTransform: "uppercase", color: "var(--text-tertiary)", marginBottom: 4 }}>
-                Next Step
-              </div>
-              <div style={{ fontSize: 11, color: "var(--text-secondary)", lineHeight: 1.45 }}>
-                {guidance.nextStep}
-              </div>
+            <div style={{ marginTop: 3 }}>
+              <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: "0.06em", textTransform: "uppercase", color: "var(--text-tertiary)", marginRight: 6 }}>
+                Fix
+              </span>
+              {guidance.nextStep}
             </div>
           </div>
         </div>
@@ -958,34 +1008,21 @@ export default function ValidationPanel() {
       subtitle={totalIssues === 0 ? "All checks passed" : `${totalIssues} total findings`}
       actions={headerStatus}
     >
-      <PanelSection
-        title="How To Read This"
-        icon={<Info size={11} />}
-        description="This page now separates blockers from quality guidance and documentation coverage."
-      >
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(210px, 1fr))", gap: 8 }}>
-          <PanelCard
-            dense
-            tone={blockerCount > 0 ? "error" : "success"}
-            title={blockerCount > 0 ? `${blockerCount} blockers to fix first` : "No blocking issues"}
-            subtitle="Start here"
-          >
-            <div style={{ fontSize: 11, color: "var(--text-secondary)", lineHeight: 1.45 }}>
-              These findings will break validation, semantic checks, or relationship integrity.
-            </div>
-          </PanelCard>
-          <PanelCard dense tone={modelQualityIssues.length > 0 ? "warning" : "neutral"} title="Model quality issues" subtitle="Design and structure">
-            <div style={{ fontSize: 11, color: "var(--text-secondary)", lineHeight: 1.45 }}>
-              Warnings and dimensional issues highlight modeling choices that can confuse joins, metrics, and downstream use.
-            </div>
-          </PanelCard>
-          <PanelCard dense tone={coverageIssues.length > 0 || completeness ? "info" : "neutral"} title="Coverage missing" subtitle="Trust and discoverability">
-            <div style={{ fontSize: 11, color: "var(--text-secondary)", lineHeight: 1.45 }}>
-              Coverage shows what is still missing for documentation, ownership, testing, and contract clarity. It is not the same as a hard failure.
-            </div>
-          </PanelCard>
+      {/* "How To Read This" used to render as a 3-card grid taking most
+          of the first viewport. It's reference content, not a finding,
+          so it's now a collapsible details element below the totals.
+          The card chrome is gone; the legend text is one line per
+          severity. Click to expand if you need a refresher. */}
+      <details style={{ margin: "0 0 14px", padding: "8px 12px", borderRadius: 8, border: "1px solid var(--border-default)", background: "var(--bg-1)" }}>
+        <summary style={{ cursor: "pointer", fontSize: 12, fontWeight: 600, color: "var(--text-secondary)", listStyle: "none", display: "flex", alignItems: "center", gap: 8 }}>
+          <Info size={12} /> How to read this panel
+        </summary>
+        <div style={{ marginTop: 8, display: "grid", gap: 6, fontSize: 11.5, lineHeight: 1.55, color: "var(--text-secondary)" }}>
+          <div><strong style={{ color: "var(--text-primary)" }}>Blockers</strong> — break validation or semantic gate checks. Fix first.</div>
+          <div><strong style={{ color: "var(--text-primary)" }}>Model quality</strong> — design choices that confuse joins, metrics, or downstream use. Fix soon.</div>
+          <div><strong style={{ color: "var(--text-primary)" }}>Coverage</strong> — missing descriptions, owners, tests, contract clarity. Guidance, not a hard failure.</div>
         </div>
-      </PanelSection>
+      </details>
 
       <PanelSection
         title="dbt Readiness"

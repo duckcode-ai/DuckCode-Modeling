@@ -528,10 +528,20 @@ function parseYaml(yamlText) {
 function structuralIssues(model) {
   const issues = [];
   const modelKind = currentModelKind(model);
+  // Diagrams (`kind: diagram`) don't carry a top-level `model:` block by
+  // design — they're a thin overlay file pointing at entities elsewhere.
+  // Same goes for the conceptual layer where the diagram itself is the
+  // document. Enforcing the model-block contract on those files spams the
+  // Validation tab with false positives.
+  const isDiagram = String(model?.kind || "").toLowerCase() === "diagram";
+  // Conceptual entities use human business names ("Sales Order",
+  // "Loyalty Program"). PascalCase enforcement belongs to logical /
+  // physical layers only.
+  const isConceptualScope = isDiagram || modelKind === "conceptual";
 
-  if (!isObject(model.model)) {
+  if (!isDiagram && !isObject(model.model)) {
     issues.push(issue("error", "MISSING_MODEL_SECTION", "Missing required 'model' object.", "/model"));
-  } else {
+  } else if (isObject(model.model)) {
     const meta = model.model;
     if (typeof meta.name !== "string" || !MODEL_NAME.test(meta.name)) {
       issues.push(
@@ -591,7 +601,9 @@ function structuralIssues(model) {
   }
 
   if (!Array.isArray(model.entities) || model.entities.length === 0) {
-    issues.push(issue("error", "INVALID_ENTITIES", "entities must be a non-empty array.", "/entities"));
+    if (!isDiagram) {
+      issues.push(issue("error", "INVALID_ENTITIES", "entities must be a non-empty array.", "/entities"));
+    }
   } else {
     model.entities.forEach((entity, entityIdx) => {
       if (!isObject(entity)) {
@@ -600,7 +612,26 @@ function structuralIssues(model) {
         );
         return;
       }
-      if (typeof entity.name !== "string" || !ENTITY_NAME.test(entity.name)) {
+      // Conceptual concepts use human names — "Sales Order", "Loyalty
+      // Program". PascalCase is only the right contract on logical /
+      // physical entities. We also accept the canvas-style `entity:`
+      // field used by diagram files.
+      const entityName = entity?.name ?? entity?.entity;
+      const entityIsConcept = String(entity?.type || "").toLowerCase() === "concept";
+      if (typeof entityName !== "string") {
+        issues.push(
+          issue(
+            "error",
+            "INVALID_ENTITY_NAME",
+            "Entity must have a name.",
+            `/entities/${entityIdx}/name`
+          )
+        );
+      } else if (
+        !isConceptualScope &&
+        !entityIsConcept &&
+        !ENTITY_NAME.test(entityName)
+      ) {
         issues.push(
           issue(
             "error",

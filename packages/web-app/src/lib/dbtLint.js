@@ -36,8 +36,13 @@
 export function lintEntity(entity, opts = {}) {
   if (!entity || typeof entity !== "object") return [];
   const filePath = opts.filePath || "";
-  const entityName = entity.name || "(unnamed)";
+  const entityName = entity.name || entity.entity || "(unnamed)";
   const pathBase = filePath ? `${filePath}#${entityName}` : entityName;
+  // Conceptual concepts don't have columns by design — they describe
+  // business meaning, not row shape. Skip dbt-style column-bearing
+  // checks for them so the Validation tab stops shouting "X declares
+  // no columns" at every concept on a conceptual diagram.
+  const isConcept = String(entity?.type || "").toLowerCase() === "concept";
 
   const out = [];
 
@@ -51,7 +56,10 @@ export function lintEntity(entity, opts = {}) {
     });
   }
 
-  // Column-level rules run once per column, then aggregate.
+  // Column-level rules run once per column, then aggregate. Skipped
+  // entirely for concept-type entities (see comment above).
+  if (isConcept) return out;
+
   const columns = pickColumns(entity);
   if (columns.length === 0) {
     out.push({
