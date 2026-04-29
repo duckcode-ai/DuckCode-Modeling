@@ -382,6 +382,22 @@ export async function fetchDbtReadinessReview(projectId) {
   return request(`/dbt/review?projectId=${encodeURIComponent(projectId)}`);
 }
 
+/* OSI export — fetches the project's Open Semantic Interchange v0.1.1
+   bundle. Returns { osi_version, bundle, validation } when validate=true. */
+export async function fetchOsiBundle(projectId, { validate = false } = {}) {
+  const qs = validate ? "?validate=1" : "";
+  return request(`/projects/${encodeURIComponent(projectId)}/export/osi${qs}`);
+}
+
+/* Trigger a download of the project's OSI bundle as <projectId>.osi.json.
+   Routes through the same HTTP endpoint with download=1 so the browser
+   gets a Content-Disposition: attachment response. */
+export function osiDownloadUrl(projectId) {
+  // Use a relative URL so the dev proxy and the bundled api-server both work.
+  const base = (typeof window !== "undefined" && window.__DATALEX_API_BASE__) || "/api";
+  return `${base}/projects/${encodeURIComponent(projectId)}/export/osi?download=1`;
+}
+
 export async function importSchemaContent({ format, content, filename, modelName }) {
   return request("/import", {
     method: "POST",

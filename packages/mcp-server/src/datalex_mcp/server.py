@@ -32,6 +32,7 @@ from mcp.server.stdio import stdio_server
 
 from datalex_core.dbt.doc_blocks import DocBlockIndex
 from datalex_core.docs_export import export_docs, walk_project
+from datalex_core.osi import export_osi_bundle_for_dir, validate_osi_bundle
 
 
 SERVER_NAME = "datalex"
@@ -97,6 +98,32 @@ def tool_dbt_doc_blocks(args: Dict[str, Any]) -> List[types.TextContent]:
         "sources_scanned": len(idx.sources),
         "blocks": idx.blocks,
     })
+
+
+def tool_osi_export(args: Dict[str, Any]) -> List[types.TextContent]:
+    """Emit an Open Semantic Interchange v0.1.1 bundle for the project.
+
+    The bundle is the canonical "context layer" exchange format finalized
+    January 2026 by Snowflake / dbt Labs / Salesforce / Atlan / Mistral /
+    ThoughtSpot. Returning it through MCP lets any agent (Claude Desktop,
+    Cursor, Code) read DataLex concepts/relationships as native context
+    without re-parsing YAML.
+
+    Honors entity-level and relationship-level `visibility:` fields:
+    `internal` is skipped; `shared` (default) and `public` are included.
+    """
+    project_dir = _project_dir(args)
+    bundle = export_osi_bundle_for_dir(project_dir)
+    payload: Dict[str, Any] = {
+        "ok": True,
+        "project_dir": str(project_dir),
+        "osi_version": bundle.get("version"),
+        "bundle": bundle,
+    }
+    if args.get("validate"):
+        issues = validate_osi_bundle(bundle)
+        payload["validation"] = {"valid": not issues, "issues": issues}
+    return _ok(payload)
 
 
 def tool_dbt_review(args: Dict[str, Any]) -> List[types.TextContent]:
@@ -187,6 +214,27 @@ TOOLS: Dict[str, Dict[str, Any]] = {
             },
         },
         "handler": tool_dbt_review,
+    },
+    "osi.export": {
+        "description": (
+            "Export the DataLex project as an Open Semantic Interchange (OSI) v0.1.1 "
+            "bundle — concepts, datasets, relationships, and metrics in the "
+            "vendor-neutral context format used by Snowflake, dbt Labs, Atlan, "
+            "Mistral, and ThoughtSpot. Honors `visibility:` so internal-only "
+            "concepts are skipped. Set validate=true to include a validation report."
+        ),
+        "input_schema": {
+            "type": "object",
+            "required": ["project_dir"],
+            "properties": {
+                "project_dir": {"type": "string", "description": "Path to the DataLex project root"},
+                "validate": {
+                    "type": "boolean",
+                    "description": "Run a lightweight schema validator and include the report.",
+                },
+            },
+        },
+        "handler": tool_osi_export,
     },
 }
 
