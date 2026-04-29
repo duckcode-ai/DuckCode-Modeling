@@ -22,7 +22,7 @@
  */
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import yaml from "js-yaml";
-import { Sparkles, FileText, AlertTriangle, Loader2 } from "lucide-react";
+import { Sparkles, FileText, AlertTriangle, Loader2, Download } from "lucide-react";
 import useWorkspaceStore from "../../stores/workspaceStore";
 import {
   setModelDescription,
@@ -34,6 +34,7 @@ import {
   fetchDbtReadinessReview,
   runDbtReadinessReview,
   suggestAiDescription,
+  osiDownloadUrl,
 } from "../../lib/api";
 import EditableDescription from "./EditableDescription";
 import MermaidERD from "./MermaidERD";
@@ -931,26 +932,55 @@ export default function DocsView() {
             }}>
               {title}
             </h1>
-            <button
-              type="button"
-              onClick={runReview}
-              disabled={reviewing || !activeProjectId}
-              title="Run the dbt readiness gate over this project"
-              style={{
-                padding: "7px 13px",
-                borderRadius: 8,
-                border: "1px solid var(--border-default)",
-                background: "var(--bg-2)",
-                color: "var(--text-secondary)",
-                fontSize: 12,
-                fontWeight: 600,
-                cursor: reviewing || !activeProjectId ? "not-allowed" : "pointer",
-                whiteSpace: "nowrap",
-                marginTop: 4,
-              }}
-            >
-              {reviewing ? "Running readiness…" : "Run readiness check"}
-            </button>
+            <div style={{ display: "flex", gap: 6, marginTop: 4, flexWrap: "wrap" }}>
+              <button
+                type="button"
+                onClick={runReview}
+                disabled={reviewing || !activeProjectId}
+                title="Run the dbt readiness gate over this project"
+                style={{
+                  padding: "7px 13px",
+                  borderRadius: 8,
+                  border: "1px solid var(--border-default)",
+                  background: "var(--bg-2)",
+                  color: "var(--text-secondary)",
+                  fontSize: 12,
+                  fontWeight: 600,
+                  cursor: reviewing || !activeProjectId ? "not-allowed" : "pointer",
+                  whiteSpace: "nowrap",
+                }}
+              >
+                {reviewing ? "Running readiness…" : "Run readiness check"}
+              </button>
+              {/* Export OSI bundle — Open Semantic Interchange v0.1.1 (Jan 2026
+                  vendor-neutral context format). Browser hits the api-server
+                  endpoint with download=1 so the response is a JSON file
+                  attachment named after the project id. Honors the
+                  visibility: field on entities and relationships. */}
+              <a
+                href={activeProjectId ? osiDownloadUrl(activeProjectId) : undefined}
+                aria-disabled={!activeProjectId}
+                onClick={(e) => { if (!activeProjectId) e.preventDefault(); }}
+                title="Export this project as an Open Semantic Interchange (OSI) v0.1.1 bundle, ready to share with AI agents and external semantic layers."
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: 5,
+                  padding: "7px 13px",
+                  borderRadius: 8,
+                  border: "1px solid color-mix(in srgb, var(--accent, #3b82f6) 60%, var(--border-default))",
+                  background: activeProjectId ? "rgba(59,130,246,0.08)" : "var(--bg-2)",
+                  color: activeProjectId ? "var(--accent, #3b82f6)" : "var(--text-tertiary)",
+                  fontSize: 12,
+                  fontWeight: 600,
+                  cursor: activeProjectId ? "pointer" : "not-allowed",
+                  whiteSpace: "nowrap",
+                  textDecoration: "none",
+                }}
+              >
+                <Download size={12} /> Export OSI
+              </a>
+            </div>
           </div>
           {/* Meta pills row */}
           <div style={{ marginTop: 12, display: "flex", gap: 6, flexWrap: "wrap" }}>

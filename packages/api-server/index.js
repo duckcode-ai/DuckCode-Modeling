@@ -12,6 +12,7 @@ import { listProviderMeta } from "./ai/providerMeta.js";
 import { classifyIntent } from "./ai/intent-router.js";
 import { runIntentEndpoint } from "./ai/intent-endpoints.js";
 import { classifyYamlDocument, isDbtYamlDocumentKind } from "./ai/yamlDocumentKind.js";
+import { exportOsiBundle, validateOsiBundle, OSI_SPEC_VERSION } from "./ai/osi/osi-export.js";
 import {
   callAiProvider as callConfiguredAiProvider,
   resolveAiProviderConfig as resolveConfiguredAiProvider,
@@ -1560,6 +1561,57 @@ app.get("/api/projects/:id/files", async (req, res) => {
       projectModelPath: structure.modelPath,
       projectConfig: structure.projectConfig,
       files,
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/* OSI export — emits an Open Semantic Interchange v0.1.1 bundle for the
+   given project, ready to ship to AI agents / external semantic layers
+   (Snowflake, dbt Labs, Atlan, Mistral all signed onto the spec).
+   Honors entity-level and relationship-level `visibility:` fields:
+   `internal` artifacts are skipped, `shared` and `public` are included.
+
+   Query string:
+     ?validate=1  — runs the lightweight validator and returns issues[]
+                    alongside the bundle (status 200 either way; the
+                    front-end can decide whether to show a warning).
+*/
+app.get("/api/projects/:id/export/osi", async (req, res) => {
+  try {
+    const projects = await loadProjects();
+    const project = projects.find((p) => p.id === req.params.id);
+    if (!project) return res.status(404).json({ error: "Project not found" });
+    const pathErr = await assertReadableDirectory(project.path);
+    if (pathErr) return res.status(400).json({ error: `Project path is not accessible: ${project.path}` });
+    const structure = await loadProjectStructure(project.path);
+    const fileList = await walkYamlFiles(structure.modelPath);
+    const yamlDocs = await Promise.all(
+      fileList.map(async (file) => {
+        try {
+          const content = await readFile(file.fullPath, "utf-8");
+          return { path: file.path, content };
+        } catch (_err) {
+          return null;
+        }
+      })
+    );
+    const bundle = exportOsiBundle({
+      projectName: project.name || project.id,
+      yamlDocs: yamlDocs.filter(Boolean),
+    });
+    const wantsValidation = String(req.query.validate || "").trim() === "1";
+    const issues = wantsValidation ? validateOsiBundle(bundle) : null;
+    if (String(req.query.download || "").trim() === "1") {
+      res.setHeader("Content-Disposition", `attachment; filename=\"${project.id}.osi.json\"`);
+      res.setHeader("Content-Type", "application/json");
+      return res.send(JSON.stringify(bundle, null, 2));
+    }
+    res.json({
+      osi_version: OSI_SPEC_VERSION,
+      bundle,
+      ...(issues ? { validation: { issues, valid: issues.length === 0 } } : {}),
     });
   } catch (err) {
     res.status(500).json({ error: err.message });
