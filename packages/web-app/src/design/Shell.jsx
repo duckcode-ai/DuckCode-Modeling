@@ -334,6 +334,26 @@ function AiProposalExplanation({ proposal }) {
   );
 }
 
+/* Persisted split between the diagram preview (left) and YAML editor
+   (right) in the AI review modal. Keep it generous on first open so the
+   diagram has room to breathe; let the user drag once and it sticks. */
+const AI_PLAN_SPLIT_KEY = "datalex.aiPlanSplit";
+const AI_PLAN_SPLIT_DEFAULT = 0.55;
+const AI_PLAN_SPLIT_MIN = 0.25;
+const AI_PLAN_SPLIT_MAX = 0.85;
+
+function readPersistedSplit() {
+  try {
+    const raw = window.localStorage?.getItem(AI_PLAN_SPLIT_KEY);
+    if (!raw) return AI_PLAN_SPLIT_DEFAULT;
+    const parsed = Number(raw);
+    if (!Number.isFinite(parsed)) return AI_PLAN_SPLIT_DEFAULT;
+    return Math.max(AI_PLAN_SPLIT_MIN, Math.min(AI_PLAN_SPLIT_MAX, parsed));
+  } catch {
+    return AI_PLAN_SPLIT_DEFAULT;
+  }
+}
+
 function AiPlanReviewEditor({ document, onClose }) {
   const content = String(document?.content || "");
   const proposals = Array.isArray(document?.proposals) ? document.proposals : [];
@@ -342,6 +362,9 @@ function AiPlanReviewEditor({ document, onClose }) {
   const [validation, setValidation] = React.useState(null);
   const [error, setError] = React.useState("");
   const [busy, setBusy] = React.useState("");
+  const [splitFraction, setSplitFraction] = React.useState(readPersistedSplit);
+  const workspaceRef = React.useRef(null);
+  const dragStateRef = React.useRef({ dragging: false, rafId: 0, pendingFraction: splitFraction });
   React.useEffect(() => {
     setActiveIndex(0);
     setDrafts(proposals.map((proposal) => proposal.editor_yaml || proposalEditableYaml(proposal)));
@@ -388,9 +411,59 @@ function AiPlanReviewEditor({ document, onClose }) {
       setBusy("");
     }
   };
+  /* Drag the splitter between preview and YAML. We mutate a CSS var on
+     the workspace ref during the drag (rAF-throttled) so React doesn't
+     re-render at 60 fps; on mouseup we commit the final fraction to
+     state + localStorage. */
+  const onSplitterMove = React.useCallback((event) => {
+    const st = dragStateRef.current;
+    if (!st.dragging) return;
+    const node = workspaceRef.current;
+    if (!node) return;
+    const rect = node.getBoundingClientRect();
+    if (rect.width <= 0) return;
+    const raw = (event.clientX - rect.left) / rect.width;
+    const next = Math.max(AI_PLAN_SPLIT_MIN, Math.min(AI_PLAN_SPLIT_MAX, raw));
+    st.pendingFraction = next;
+    if (!st.rafId) {
+      st.rafId = requestAnimationFrame(() => {
+        node.style.setProperty("--ai-plan-split", `${st.pendingFraction}`);
+        st.rafId = 0;
+      });
+    }
+  }, []);
+  const onSplitterEnd = React.useCallback(() => {
+    const st = dragStateRef.current;
+    if (!st.dragging) return;
+    st.dragging = false;
+    if (st.rafId) { cancelAnimationFrame(st.rafId); st.rafId = 0; }
+    document.body.classList.remove("ai-plan-resizing");
+    document.removeEventListener("mousemove", onSplitterMove);
+    document.removeEventListener("mouseup", onSplitterEnd);
+    setSplitFraction(st.pendingFraction);
+    try { window.localStorage?.setItem(AI_PLAN_SPLIT_KEY, String(st.pendingFraction)); } catch { /* ignore */ }
+  }, [onSplitterMove]);
+  const onSplitterStart = React.useCallback((event) => {
+    event.preventDefault();
+    const st = dragStateRef.current;
+    st.dragging = true;
+    st.pendingFraction = splitFraction;
+    document.body.classList.add("ai-plan-resizing");
+    document.addEventListener("mousemove", onSplitterMove);
+    document.addEventListener("mouseup", onSplitterEnd);
+  }, [splitFraction, onSplitterMove, onSplitterEnd]);
+  const onSplitterDoubleClick = React.useCallback(() => {
+    setSplitFraction(AI_PLAN_SPLIT_DEFAULT);
+    try { window.localStorage?.setItem(AI_PLAN_SPLIT_KEY, String(AI_PLAN_SPLIT_DEFAULT)); } catch { /* ignore */ }
+    if (workspaceRef.current) {
+      workspaceRef.current.style.setProperty("--ai-plan-split", `${AI_PLAN_SPLIT_DEFAULT}`);
+    }
+  }, []);
+
   if (!document) return null;
   const activeIsPatch = isPatchYamlProposal(activeProposal);
   const activePatchOps = proposalPatchOps(activePreviewChange || activeProposal);
+  const workspaceStyle = { "--ai-plan-split": String(splitFraction) };
   return (
     <section className="ai-plan-editor-shell" aria-label="AI review plan">
       <div className="ai-plan-editor-header">
@@ -435,7 +508,7 @@ function AiPlanReviewEditor({ document, onClose }) {
         )}
         {proposals.length > 0 && <AiProposalExplanation proposal={activeProposal} />}
         {proposals.length > 0 ? (
-            <div className="ai-plan-review-workspace">
+            <div ref={workspaceRef} className="ai-plan-review-workspace" style={workspaceStyle}>
             {activeIsPatch ? (
               <div className="ai-plan-preview-grid">
                 <div className="panel-card" style={{ padding: 12, display: "grid", gap: 8 }}>
@@ -458,6 +531,17 @@ function AiPlanReviewEditor({ document, onClose }) {
                 {activePreviewChange && <AiProposalPreview change={activePreviewChange} />}
               </div>
             )}
+            <div
+              className="ai-plan-splitter"
+              role="separator"
+              aria-orientation="vertical"
+              aria-label="Resize diagram and YAML panes"
+              title="Drag to resize · double-click to reset"
+              onMouseDown={onSplitterStart}
+              onDoubleClick={onSplitterDoubleClick}
+            >
+              <span className="ai-plan-splitter-grip" />
+            </div>
             <div className="ai-plan-yaml-pane">
               <div className="ai-plan-yaml-toolbar">
                 <strong>{activeIsPatch ? "Editable JSON Patch" : "Editable YAML"}</strong>
