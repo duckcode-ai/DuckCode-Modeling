@@ -10,6 +10,7 @@
  * welcome modal was too small to read. */
 import React from "react";
 import { Check, ArrowRight } from "lucide-react";
+import WelcomeIntro from "./WelcomeIntro";
 
 const ACCENT = "var(--accent, #3b82f6)";
 const DONE = "#22c55e";
@@ -87,16 +88,20 @@ export default function JourneyStepCard({
 
       {isActive && (
         <>
-          <p
-            style={{
-              margin: "0 0 18px 0",
-              fontSize: 15,
-              lineHeight: 1.7,
-              color: "var(--text-secondary)",
-            }}
-          >
-            {step.body}
-          </p>
+          {step.id === "welcome" ? (
+            <WelcomeIntro />
+          ) : (
+            <p
+              style={{
+                margin: "0 0 18px 0",
+                fontSize: 15,
+                lineHeight: 1.7,
+                color: "var(--text-secondary)",
+              }}
+            >
+              {step.body}
+            </p>
+          )}
 
           <div style={{ display: "flex", alignItems: "center", gap: 14, flexWrap: "wrap" }}>
             <button
