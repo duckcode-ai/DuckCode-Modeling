@@ -18,7 +18,12 @@
  * or reorder steps (mirrors TOUR_VERSION on onboardingTour.js).
  */
 
-export const JOURNEY_VERSION = 1;
+/* JOURNEY_VERSION 2 — adds the "docs" step (read the auto-generated
+   docs view) between connect and gaps, and refreshes the validation
+   copy to point users at the new red/yellow/green status dot. Bumping
+   the version re-triggers the journey for users who already finished
+   v1 so they see the new steps. */
+export const JOURNEY_VERSION = 2;
 const STORAGE_KEY = "datalex.onboarding.journey";
 
 export const JOURNEY_STEPS = [
@@ -39,10 +44,18 @@ export const JOURNEY_STEPS = [
     completeOn: "dbt:import:success",
   },
   {
+    id: "docs",
+    title: "Read your auto-generated docs",
+    body:
+      "Switch to the Docs tab to see your project as a readable docs page — entities, relationships, and dbt resources (semantic models, metrics, saved queries, sources) rendered as cards instead of raw YAML. Hover any description to edit it inline.",
+    cta: "Open Docs",
+    completeOn: "docs:opened",
+  },
+  {
     id: "gaps",
     title: "See what's missing",
     body:
-      "Open the Validation drawer to see readiness scores per file — missing descriptions, unknown column types, missing tests, contracts, owners. This is exactly what the readiness gate enforces in CI.",
+      "The Validation tab shows a red / yellow / green dot the moment you open a file — red for blockers, yellow for warnings, green for clean. Click it to see readiness scores, missing descriptions, untyped columns, missing tests, and contracts — the exact list the readiness gate enforces in CI.",
     cta: "Open Validation",
     completeOn: "validation:opened",
   },
@@ -50,7 +63,7 @@ export const JOURNEY_STEPS = [
     id: "design",
     title: "Design your first business domain",
     body:
-      "Click + to add a logical entity (with keys + attributes) or a physical entity (dbt-backed). Start with one core concept like Customer or Order — DataLex tracks it from concept to dbt asset.",
+      "Open the Build tab to add a logical entity (with keys + attributes) or a physical entity (dbt-backed). Start with one core concept like Customer or Order — DataLex tracks it from concept to dbt asset.",
     cta: "Create entity",
     completeOn: "entity:created",
   },
@@ -66,7 +79,7 @@ export const JOURNEY_STEPS = [
     id: "draw",
     title: "Ask AI to draw a diagram",
     body:
-      "Now that you're connected and configured, let the Conceptualizer propose entities and relationships from your staging models in one click. You'll review the proposal before anything writes to YAML.",
+      "Now that you're connected and configured, let the Conceptualizer propose entities and relationships from your staging models in one click. You'll review the proposal — with the new draggable diagram/YAML splitter and full AI explanation — before anything writes to YAML.",
     cta: "Propose conceptual diagram",
     completeOn: "ai:conceptualize:applied",
   },

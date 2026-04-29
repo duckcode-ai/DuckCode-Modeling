@@ -762,7 +762,7 @@ export default function Shell() {
     activeModal, openModal, closeModal,
     bottomPanelOpen, bottomPanelTab, setBottomPanelTab, toggleBottomPanel,
     rightPanelOpen, rightPanelTab, rightPanelWidth, commandPaletteOpen, setCommandPaletteOpen,
-    shellViewMode,
+    shellViewMode, setShellViewMode,
     openAiPanel,
     addToast,
     aiReviewDocument,
@@ -2099,7 +2099,14 @@ export default function Shell() {
             hasActiveProject={!!activeProjectId}
             modalOpen={Boolean(activeModal)}
             onImportProject={() => openModal("importDbtRepo")}
-            onOpenValidation={() => setBottomPanelTab("validation")}
+            onOpenDocs={() => {
+              setShellViewMode("docs");
+              emitJourneyEvent("docs:opened");
+            }}
+            onOpenValidation={() => {
+              setBottomPanelTab("validation");
+              emitJourneyEvent("validation:opened");
+            }}
             onCreateEntity={() => openModal("newLogicalEntity")}
             onOpenAiSettings={() => openModal("settings", { initialTab: "ai" })}
             onAskAiToDraw={async () => {

@@ -38,6 +38,7 @@ function isAiConfigured() {
 export default function OnboardingJourney({
   onClose,
   onImportProject,
+  onOpenDocs,
   onOpenValidation,
   onCreateEntity,
   onOpenAiSettings,
@@ -106,6 +107,12 @@ export default function OnboardingJourney({
         case "connect":
           onImportProject?.();
           return;
+        case "docs":
+          onOpenDocs?.();
+          // Switching to the Docs tab succeeds synchronously; mark optimistically.
+          markStepComplete("docs");
+          refresh();
+          return;
         case "gaps":
           onOpenValidation?.();
           // The validation tab opens immediately; mark complete optimistically.
@@ -136,7 +143,7 @@ export default function OnboardingJourney({
           return;
       }
     },
-    [onAskAiToDraw, onCreateEntity, onImportProject, onOpenAiSettings, onOpenValidation, refresh]
+    [onAskAiToDraw, onCreateEntity, onImportProject, onOpenAiSettings, onOpenDocs, onOpenValidation, refresh]
   );
 
   const handleSkipStep = useCallback(
@@ -302,7 +309,7 @@ export default function OnboardingJourney({
             color: "var(--text-secondary)",
           }}
         >
-          Six short steps from an empty workspace to an AI-drawn diagram you can review.
+          {totalSteps} short steps from an empty workspace to an AI-drawn diagram you can review.
         </p>
 
         <div style={{ marginTop: 14 }}>
@@ -370,6 +377,10 @@ export default function OnboardingJourney({
             } else if (drawError) {
               primaryHint = drawError;
             }
+          }
+          if (step.id === "docs" && !hasActiveProject) {
+            primaryDisabled = true;
+            primaryHint = "Import a project first (step 2).";
           }
           if (step.id === "gaps" && !hasActiveProject) {
             primaryDisabled = true;
