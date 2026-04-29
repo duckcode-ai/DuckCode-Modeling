@@ -159,48 +159,49 @@ const LEFT_PANEL_WIDTH_STORAGE = "datalex.leftPanelWidth";
 const LEFT_PANEL_MIN = 220;
 const LEFT_PANEL_MAX = 520;
 
-/* Bottom-drawer tab order. The leftmost tab is the default when no
-   persisted choice is in scope — so Validation comes first to make
-   "what's broken / missing" the answer the user sees on open. After
-   that, the order follows the typical "edit → preview → test → diff"
-   workflow: SQL Preview, Unit Tests, then Diff. Authoring tools
-   (Studio, dbt YAML, Constraints, etc.) and reference panels
-   (Snapshots, Exposures, Policy Packs, History) sit further right. */
+/* Bottom-drawer tab order.
+   - Validation comes first so "what's broken / missing" is the default answer.
+   - Diff is second for the change-review path.
+   - Build (was "Studio") is the create/edit surface — forms + buttons that
+     mutate the active YAML for the active layer. Renamed because "Studio"
+     told users nothing about what it actually does.
+   - Policy Packs (and History on layers that support it) sit on the right.
+
+   We deliberately do NOT include a "dbt" bottom tab here. Earlier we shipped
+   one, but the same data is rendered richer (and scrollable) in the top-row
+   Docs view, which is the canonical "what's in this file" surface. The bottom
+   panel is for interactive / layer-specific tools — read-only resource lists
+   live one row up.
+
+   `description` is shown as a tooltip when the user hovers the tab so each
+   tab self-documents without anyone having to ask "what is this for?". */
 const LOGICAL_BOTTOM_TABS = [
-  { id: "validation",    label: "Validation",    icon: ShieldCheck },
-  { id: "diff",          label: "Diff",          icon: GitCompare },
-  { id: "modeler",       label: "Blueprint",     icon: Wand2 },
-  { id: "policy_packs",  label: "Policy Packs",  icon: Shield },
-  { id: "history",       label: "History",       icon: Clock },
+  { id: "validation",    label: "Validation",    icon: ShieldCheck, description: "Findings, blockers, dimensional nudges, and a documentation completeness score for the active file." },
+  { id: "diff",          label: "Diff",          icon: GitCompare,  description: "Semantic gate against a baseline plus the full git workspace (status, staging, unified diff, commit, push)." },
+  { id: "modeler",       label: "Build",         icon: Wand2,       description: "Create and edit logical entities, relationships, and keys for the active layer." },
+  { id: "policy_packs",  label: "Policy Packs",  icon: Shield,      description: "Author and review .datalex/policies governance rules for this project." },
+  { id: "history",       label: "History",       icon: Clock,       description: "Snapshot history for the active project." },
 ];
 
-/* PHYSICAL layer was 10 tabs; six of them either rendered as
-   placeholder LayerSupportPanel cards (SQL Preview, dbt YAML,
-   Constraints) or only fired for one specific YAML key
-   (Snapshots / Exposures / Unit Tests). The new "dbt" tab folds all
-   the dbt-shape readers behind a single panel that adapts to the
-   active file, so nothing is ever blank. The legacy ids are still
-   routed in BottomPanelContent — they're just not in the strip. */
 const PHYSICAL_BOTTOM_TABS = [
-  { id: "validation",    label: "Validation",    icon: ShieldCheck },
-  { id: "diff",          label: "Diff",          icon: GitCompare },
-  { id: "modeler",       label: "Studio",        icon: Wand2 },
-  { id: "dbt",           label: "dbt",           icon: Braces },
-  { id: "policy_packs",  label: "Policy Packs",  icon: Shield },
+  { id: "validation",    label: "Validation",    icon: ShieldCheck, description: "Findings, blockers, dbt readiness review, and a documentation completeness score for the active file." },
+  { id: "diff",          label: "Diff",          icon: GitCompare,  description: "Semantic gate against a baseline plus the full git workspace (status, staging, unified diff, commit, push)." },
+  { id: "modeler",       label: "Build",         icon: Wand2,       description: "Create and edit physical entities, relationships, and dbt model targets for the active diagram." },
+  { id: "policy_packs",  label: "Policy Packs",  icon: Shield,      description: "Author and review .datalex/policies governance rules for this project." },
 ];
 
 const CONCEPTUAL_BOTTOM_TABS = [
-  { id: "validation",    label: "Validation",    icon: ShieldCheck },
-  { id: "modeler",       label: "Studio",        icon: Wand2 },
-  { id: "dictionary",    label: "Dictionary",    icon: BookOpen },
-  { id: "relationships", label: "Relationships", icon: GitBranch },
-  { id: "history",       label: "History",       icon: Clock },
+  { id: "validation",    label: "Validation",    icon: ShieldCheck, description: "Findings and completeness for the conceptual model." },
+  { id: "modeler",       label: "Build",         icon: Wand2,       description: "Create concepts, business relationships, and capture domain definitions." },
+  { id: "dictionary",    label: "Dictionary",    icon: BookOpen,    description: "Project-wide glossary of terms and concepts referenced from this model." },
+  { id: "relationships", label: "Relationships", icon: GitBranch,   description: "Cross-entity relationships, role names, cardinality, and identifying status." },
+  { id: "history",       label: "History",       icon: Clock,       description: "Snapshot history for the active project." },
 ];
 
 const VIEWER_BOTTOM_TABS = [
-  { id: "properties",    label: "Properties",    icon: Columns3 },
-  { id: "dictionary",    label: "Dictionary",    icon: BookOpen },
-  { id: "history",       label: "History",       icon: Clock },
+  { id: "properties",    label: "Properties",    icon: Columns3,    description: "Properties of the selected entity, column, or relationship." },
+  { id: "dictionary",    label: "Dictionary",    icon: BookOpen,    description: "Project-wide glossary of terms and concepts." },
+  { id: "history",       label: "History",       icon: Clock,       description: "Snapshot history for the active project." },
 ];
 
 const LazyFallback = (

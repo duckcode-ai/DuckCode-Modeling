@@ -123,11 +123,11 @@ export default function ModelerPanel() {
 
   if (!model) {
     return (
-      <PanelFrame icon={<Wand2 size={14} />} eyebrow="Workspace" title="Modeler">
+      <PanelFrame icon={<Wand2 size={14} />} eyebrow="Build" title="Build">
         <PanelEmpty
           icon={Wand2}
           title="No model open"
-          description="Open a model to use the modeler workspace."
+          description="Build is the create/edit surface — once you open a DataLex model you can add entities, relationships, and (on the physical layer) generate dbt targets without hand-editing YAML."
         />
       </PanelFrame>
     );
@@ -141,7 +141,7 @@ export default function ModelerPanel() {
     return (
       <PanelFrame
         icon={<Wand2 size={14} />}
-        eyebrow="Conceptual Studio"
+        eyebrow="Build · Conceptual"
         title="Business Model"
         subtitle={`${entities.length} ${entities.length === 1 ? "concept" : "concepts"} · ${relationshipCount} relationships`}
       >
@@ -259,7 +259,7 @@ export default function ModelerPanel() {
     return (
       <PanelFrame
         icon={<Wand2 size={14} />}
-        eyebrow="Logical Blueprint"
+        eyebrow="Build · Logical"
         title="Logical Model"
         subtitle={`${entities.length} ${entities.length === 1 ? "entity" : "entities"} · ${relationshipCount} relationships`}
       >
@@ -378,7 +378,7 @@ export default function ModelerPanel() {
     return (
       <PanelFrame
         icon={<Wand2 size={14} />}
-        eyebrow="Physical Studio"
+        eyebrow="Build · Physical"
         title="dbt-backed Physical Model"
         subtitle={`${entities.length} ${entities.length === 1 ? "object" : "objects"} · ${relationshipCount} relationships`}
       >

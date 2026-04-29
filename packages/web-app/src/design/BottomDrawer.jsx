@@ -121,19 +121,25 @@ export default function BottomDrawer({ tabs, children }) {
 
       <div className="bottom-drawer-tabs">
         <div className="bottom-drawer-tabs-scroller">
-          {tabs.map(({ id, label, icon: Icon, status, statusTitle }) => (
-            <button
-              key={id}
-              data-tour={`panel-tab-${id}`}
-              className={`bottom-drawer-tab ${bottomPanelTab === id ? "active" : ""}`}
-              onClick={() => setBottomPanelTab(id)}
-              title={statusTitle ? `${label} — ${statusTitle}` : label}
-            >
-              {Icon && <Icon size={12} />}
-              <span className="bottom-drawer-tab-label">{label}</span>
-              {status && <span className={`bottom-drawer-tab-status status-${status}`} aria-label={statusTitle || ""} />}
-            </button>
-          ))}
+          {tabs.map(({ id, label, icon: Icon, status, statusTitle, description }) => {
+            const tooltip = [
+              statusTitle ? `${label} — ${statusTitle}` : label,
+              description || "",
+            ].filter(Boolean).join("\n");
+            return (
+              <button
+                key={id}
+                data-tour={`panel-tab-${id}`}
+                className={`bottom-drawer-tab ${bottomPanelTab === id ? "active" : ""}`}
+                onClick={() => setBottomPanelTab(id)}
+                title={tooltip}
+              >
+                {Icon && <Icon size={12} />}
+                <span className="bottom-drawer-tab-label">{label}</span>
+                {status && <span className={`bottom-drawer-tab-status status-${status}`} aria-label={statusTitle || ""} />}
+              </button>
+            );
+          })}
         </div>
         <div className="bottom-drawer-actions">
           <button

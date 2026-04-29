@@ -210,7 +210,7 @@ export default function TableView({
             title={tables.length === 0 ? "No entities" : "No matches"}
             description={
               tables.length === 0
-                ? "This model has no entities yet. Add one from the top bar or via the Modeler panel."
+                ? "This model has no entities yet. Add one from the top bar or via the Build panel."
                 : "Adjust your search or subject-area filter."
             }
           />
