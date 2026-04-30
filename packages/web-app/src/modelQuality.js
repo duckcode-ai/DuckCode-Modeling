@@ -438,7 +438,19 @@ const ENTITY_REF = /^[A-Z][A-Za-z0-9]*$/;
 const ALLOWED_STATES = new Set(["draft", "approved", "deprecated"]);
 const ALLOWED_LAYERS = new Set(["source", "transform", "report"]);
 const ALLOWED_KINDS = new Set(["conceptual", "logical", "physical"]);
-const ALLOWED_ENTITY_TYPES = new Set(["concept", "logical_entity", "table", "view", "materialized_view", "external_table", "snapshot", "fact_table", "dimension_table", "bridge_table", "hub", "link", "satellite"]);
+const ALLOWED_ENTITY_TYPES = new Set([
+  // Conceptual / logical / physical taxonomy
+  "concept", "logical_entity",
+  "table", "view", "materialized_view", "external_table", "snapshot",
+  "fact_table", "dimension_table", "bridge_table",
+  // Data Vault
+  "hub", "link", "satellite",
+  // EventStorming (Phase 4a) — vocabulary borrowed verbatim from the
+  // Brandolini canon. Each shape maps 1:1 to its sticky-note color in
+  // the diagram renderer (event=orange, command=blue, actor=yellow,
+  // policy=pink, aggregate=light-yellow).
+  "event", "command", "actor", "policy", "aggregate",
+]);
 const PK_REQUIRED_TYPES = new Set(["table", "fact_table", "dimension_table", "hub", "link"]);
 const GRAIN_REQUIRED_TYPES = new Set(["table", "view", "materialized_view", "fact_table"]);
 const ALLOWED_CARDINALITY = new Set([
@@ -646,7 +658,7 @@ function structuralIssues(model) {
           issue(
             "error",
             "INVALID_ENTITY_TYPE",
-            "Entity type must be one of: concept, logical_entity, table, view, materialized_view, external_table, snapshot, fact_table, dimension_table, bridge_table, hub, link, satellite.",
+            "Entity type must be one of: concept, logical_entity, table, view, materialized_view, external_table, snapshot, fact_table, dimension_table, bridge_table, hub, link, satellite, event, command, actor, policy, aggregate.",
             `/entities/${entityIdx}/type`
           )
         );

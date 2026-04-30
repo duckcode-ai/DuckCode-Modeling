@@ -37,6 +37,15 @@ const ENTITY_TYPES = {
   hub: { label: "Hub", family: "Data Vault", description: "Business-key anchor entity." },
   link: { label: "Link", family: "Data Vault", description: "Associative vault structure between hubs." },
   satellite: { label: "Satellite", family: "Data Vault", description: "Descriptive history attached to a hub or link." },
+  // EventStorming family — colors and vocabulary borrowed verbatim
+  // from the Brandolini canon. Useful when the conceptual model needs
+  // to capture *behavior* (events + commands + actors + policies)
+  // alongside *structure* (concepts).
+  event:     { label: "Event",     family: "EventStorming", description: "A domain event that happened (orange sticky). Past tense: \"Order Placed\"." },
+  command:   { label: "Command",   family: "EventStorming", description: "An actor's intent before the event (blue sticky). Imperative: \"Place Order\"." },
+  actor:     { label: "Actor",     family: "EventStorming", description: "A person, role, or external system that issues commands (yellow sticky)." },
+  policy:    { label: "Policy",    family: "EventStorming", description: "A rule that reacts to events and may issue further commands (pink sticky)." },
+  aggregate: { label: "Aggregate", family: "EventStorming", description: "A consistency boundary holding the state needed to handle commands (light-yellow sticky)." },
 };
 
 const CARDINALITY_OPTIONS = [
@@ -53,7 +62,14 @@ function defaultEntityType(viewMode, modelKind) {
 }
 
 function allowedTypes(viewMode) {
-  if (viewMode === "conceptual") return ["concept"];
+  // EventStorming shapes (event/command/actor/policy/aggregate) are
+  // valid on the conceptual layer alongside `concept` — they describe
+  // business behavior, not warehouse structure. Logical and physical
+  // layers don't surface them to keep their dropdowns focused on data
+  // shape.
+  if (viewMode === "conceptual") {
+    return ["concept", "event", "command", "actor", "policy", "aggregate"];
+  }
   if (viewMode === "logical") return ["logical_entity", "fact_table", "dimension_table", "bridge_table", "hub", "link", "satellite"];
   return ["table", "view", "materialized_view", "fact_table", "dimension_table", "bridge_table", "hub", "link", "satellite"];
 }

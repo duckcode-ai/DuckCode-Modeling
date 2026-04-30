@@ -37,6 +37,20 @@ const TYPE_COLORS = {
   hub: { bg: "from-emerald-50 to-green-100/60", border: "border-emerald-300", badge: "bg-emerald-100 text-emerald-700" },
   link: { bg: "from-fuchsia-50 to-pink-100/60", border: "border-fuchsia-300", badge: "bg-fuchsia-100 text-fuchsia-700" },
   satellite: { bg: "from-lime-50 to-yellow-100/60", border: "border-lime-300", badge: "bg-lime-100 text-lime-700" },
+  // EventStorming canonical palette (Phase 4a). Sticky-note colors
+  // borrowed verbatim from the Brandolini convention so anyone who's
+  // run an EventStorming workshop reads the diagram the same way:
+  //   event     — orange (a domain event happened)
+  //   command   — blue (an actor's intent before the event)
+  //   actor     — yellow (a person, role, or external system)
+  //   policy    — pink/lavender (a rule that reacts to events)
+  //   aggregate — light yellow (the consistency boundary holding
+  //                              command-handling state)
+  event:     { bg: "from-orange-100 to-orange-200/70", border: "border-orange-400", badge: "bg-orange-200 text-orange-800" },
+  command:   { bg: "from-sky-100 to-blue-200/70",      border: "border-blue-400",   badge: "bg-blue-200 text-blue-800" },
+  actor:     { bg: "from-yellow-50 to-yellow-200/70",  border: "border-yellow-400", badge: "bg-yellow-200 text-yellow-800" },
+  policy:    { bg: "from-pink-100 to-fuchsia-200/70",  border: "border-pink-400",   badge: "bg-pink-200 text-pink-800" },
+  aggregate: { bg: "from-yellow-50 to-amber-100/60",   border: "border-amber-300",  badge: "bg-amber-100 text-amber-800" },
 };
 
 const SENSITIVITY_COLORS = {

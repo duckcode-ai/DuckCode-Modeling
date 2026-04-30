@@ -212,6 +212,48 @@ relationships:
   assert.equal(errorCodes.includes("INVALID_RELATIONSHIP_TO"), false);
 });
 
+test("runModelChecks accepts EventStorming entity types (event / command / actor / policy / aggregate)", () => {
+  // Phase 4a: business-flow modeling using the EventStorming canon.
+  // None of these types should produce INVALID_ENTITY_TYPE.
+  const yamlText = `kind: diagram
+layer: conceptual
+domain: sales
+entities:
+  - name: PlaceOrder
+    type: command
+  - name: OrderPlaced
+    type: event
+  - name: Customer
+    type: actor
+  - name: SettleOnPayment
+    type: policy
+  - name: Order
+    type: aggregate
+`;
+  const check = runModelChecks(yamlText);
+  const codes = (check.errors || []).map((e) => e.code);
+  assert.equal(
+    codes.includes("INVALID_ENTITY_TYPE"),
+    false,
+    `EventStorming types must be allowed; got: ${codes.join(", ")}`,
+  );
+});
+
+test("runModelChecks rejects unknown entity types", () => {
+  // Negative test: prove the suite would have caught it if I'd
+  // forgotten to register the EventStorming types.
+  const yamlText = `kind: diagram
+layer: conceptual
+domain: sales
+entities:
+  - name: Customer
+    type: not_a_real_type
+`;
+  const check = runModelChecks(yamlText);
+  const codes = (check.errors || []).map((e) => e.code);
+  assert.ok(codes.includes("INVALID_ENTITY_TYPE"));
+});
+
 test("runModelChecks treats dbt semantic YAML without version as dbt semantic", () => {
   const yamlText = `semantic_models:
   - name: orders
