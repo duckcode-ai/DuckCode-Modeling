@@ -812,9 +812,26 @@ export default function ValidationPanel() {
 
   const handleAskAiIssue = (issue) => {
     const filePath = activeFile?.path || activeFile?.fullPath || activeFile?.name || "";
-    // Build a focused prompt the AI can act on immediately rather than
-    // dumping the user into a blank chat with the issue in context.
-    // Auto-submit so the click feels like an action.
+    // Pipe the same Why/Fix copy the user reads into the AI prompt so the
+    // panel and the agent share one rule-recipe table. Was wasted context
+    // before — the panel had it, the agent didn't.
+    const guidance = issueGuidance(issue);
+    // Rules that need human-only inputs (emails, project name, columns)
+    // route to needs_user_input by default; the agent's job is to ask
+    // the right question, not to invent the answer.
+    const NEEDS_USER_INPUT_CODES = new Set([
+      "MISSING_MODEL_SECTION",
+      "INVALID_MODEL_NAME",
+      "INVALID_MODEL_DOMAIN",
+      "INVALID_MODEL_OWNERS",
+      "INVALID_OWNER_EMAIL",
+      "INVALID_ENTITIES",
+      "DBT_ENTITY_NO_COLUMNS",
+    ]);
+    const expectedOutcome = NEEDS_USER_INPUT_CODES.has(issue?.code)
+      ? "needs_user_input — ask the user the smallest set of questions you need to fill the gap."
+      : "patch_yaml — return the smallest JSON-patch that satisfies the FIX guidance below.";
+
     const prompt = [
       "Explain this DataLex validation finding in one plain-English sentence, then propose the smallest YAML patch that resolves it.",
       "",
@@ -824,11 +841,16 @@ export default function ValidationPanel() {
       issue?.path ? `Target (JSON-pointer inside the file): ${issue.path}` : "",
       issue?.message ? `Message: ${issue.message}` : "",
       "",
+      "WHY: " + (guidance.why || "—"),
+      "FIX: " + (guidance.nextStep || "—"),
+      `EXPECTED OUTCOME: ${expectedOutcome}`,
+      "",
       "REQUIRED:",
-      "- Use the `patch_yaml` change type targeting the file path above.",
+      "- Use the `patch_yaml` change type targeting the file path above (or `needs_user_input` per EXPECTED OUTCOME).",
       "- Do NOT propose `create_diagram` or `create_model` — this is a fix to an existing file, not a new artifact.",
       "- Use JSON-patch ops (op/path/value) when possible.",
       "- Return exactly ONE proposed change.",
+      "- If the rule is INVALID_ENTITY_NAME and you rename an entity, also rewrite every relationships[].from/.to and every fields[].foreign_key.entity that references the old name — one patch, multiple ops.",
     ].filter(Boolean).join("\n");
     openAiPanel({
       source: "validation",
@@ -841,6 +863,8 @@ export default function ValidationPanel() {
         issue: {
           ...issue,
           pointer: issue?.path || issue?.pointer || "",
+          guidance,                              // surface to the agent as well
+          expected_outcome: NEEDS_USER_INPUT_CODES.has(issue?.code) ? "needs_user_input" : "patch_yaml",
         },
         pointer: issue?.path || issue?.pointer || "",
         filePath,

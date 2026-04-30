@@ -430,26 +430,21 @@ entities:
     assert.match(readFileSync(target, "utf-8"), /label:\s*Order Total/);
   });
 
-  test("validation fix endpoint preserves exact file path through legacy proposal envelope", async () => {
+  test("validation fix short-circuits MISSING_MODEL_SECTION to needs_user_input (no LLM round-trip)", async () => {
+    // MISSING_MODEL_SECTION needs human-only inputs (project name, domain,
+    // owner emails). Letting the LLM answer means it invents placeholders
+    // from the file path. The validation-fix-recipes route catches this
+    // class of rule and emits a canonical needs_user_input payload with
+    // a stable question shape — no provider call, no hallucination.
     const targetRel = "crm/Conceptual/missing_model.model.yaml";
     const target = join(project.modelPath, targetRel);
     writeFileSync(target, "entities: []\n", "utf-8");
 
-    const fakeProvider = createServer((req, res) => {
-      assert.equal(req.url, "/api/chat");
+    let providerHits = 0;
+    const fakeProvider = createServer((_req, res) => {
+      providerHits += 1;
       res.setHeader("Content-Type", "application/json");
-      res.end(JSON.stringify({
-        message: {
-          content: JSON.stringify({
-            status: "patch_yaml",
-            explanation: "The file is missing the top-level model metadata object.",
-            patch: {
-              path: "/model",
-              ops: [{ op: "add", path: "/model", value: { name: "missing_model", kind: "conceptual", domain: "crm" } }],
-            },
-          }),
-        },
-      }));
+      res.end(JSON.stringify({ message: { content: "{}" } }));
     });
     await new Promise((resolve) => fakeProvider.listen(0, "127.0.0.1", resolve));
     const { port } = fakeProvider.address();
@@ -476,12 +471,11 @@ entities:
 
       assert.equal(res.status, 200);
       assert.equal(res.body.ok, true);
-      assert.equal(res.body.response.status, "patch_yaml");
-      assert.equal(res.body.response.patch.path, targetRel);
-      assert.equal(res.body.proposed_changes.length, 1);
-      assert.equal(res.body.proposed_changes[0].type, "patch_yaml");
-      assert.equal(res.body.proposed_changes[0].path, targetRel);
-      assert.deepEqual(res.body.proposed_changes[0].patch, [{ op: "add", path: "/model", value: { name: "missing_model", kind: "conceptual", domain: "crm" } }]);
+      assert.equal(res.body.response.status, "needs_user_input");
+      assert.equal(res.body.response.rule_code, "MISSING_MODEL_SECTION");
+      assert.equal(res.body.response.short_circuited, true);
+      assert.ok(Array.isArray(res.body.response.questions) && res.body.response.questions.length >= 3);
+      assert.equal(providerHits, 0, "LLM must not be called for short-circuited rules");
     } finally {
       await new Promise((resolve) => fakeProvider.close(resolve));
     }

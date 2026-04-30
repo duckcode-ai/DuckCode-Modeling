@@ -21,8 +21,34 @@
  */
 
 import yaml from "js-yaml";
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+import path from "node:path";
 import { invokeTool, listTools } from "./tools.js";
 import { classifyYamlText, dbtVersionWarning, YAML_DOCUMENT_KINDS } from "./yamlDocumentKind.js";
+
+/* Load the validation-fix-recipes skill once at module init so the
+   validation_fix system prompt actually carries the rule-by-rule
+   recipe table. The file is a Markdown doc kept under Skills/, so
+   humans and the agent are reading the same source of truth.
+   Resolved relative to the repo root. Falls back to an empty string
+   when the file isn't shipped (e.g. minimal install) so the prompt
+   still works — just without the rule table. */
+const __INTENT_DIRNAME = path.dirname(fileURLToPath(import.meta.url));
+function loadValidationFixRecipes() {
+  const candidates = [
+    path.join(__INTENT_DIRNAME, "..", "..", "..", "Skills", "validation-fix-recipes.md"),
+    path.join(__INTENT_DIRNAME, "..", "..", "..", "..", "Skills", "validation-fix-recipes.md"),
+  ];
+  for (const candidate of candidates) {
+    try {
+      const body = readFileSync(candidate, "utf-8");
+      if (body && body.length > 100) return body;
+    } catch (_err) { /* keep trying */ }
+  }
+  return "";
+}
+const VALIDATION_FIX_RECIPES = loadValidationFixRecipes();
 
 /**
  * Per-intent system prompts. Each describes the agent's job, the
@@ -38,8 +64,11 @@ export const INTENT_SYSTEM_PROMPTS = {
     "Output schema when the missing value cannot be safely inferred: { \"status\": \"needs_user_input\", \"explanation\": string, \"questions\": [string] }.",
     "Output schema for a false-positive validation finding: { \"status\": \"no_patch_needed\", \"explanation\": string }.",
     "Hard rules: target the EXISTING file at the path the user gave. Use ONLY the patch_yaml shape above. Do NOT propose create_diagram, create_model, create_file, delete_file, or rename_file. If the file is missing a top-level key, ADD it via a single JSON-patch op.",
+    VALIDATION_FIX_RECIPES
+      ? "Follow the rule-by-rule recipe table below. Match by `code` from the user's prompt. The user prompt also carries WHY/FIX guidance which should agree with this table — if they conflict, prefer the recipe.\n\n--- VALIDATION FIX RECIPES ---\n" + VALIDATION_FIX_RECIPES + "\n--- END RECIPES ---"
+      : "",
     "Reply with JSON only — no preamble, no code fences.",
-  ].join(" "),
+  ].filter(Boolean).join(" "),
 
   explain: [
     "You are the DataLex Governance Reviewer.",
@@ -223,6 +252,108 @@ function isFalsePositiveDbtMetricFinding(issue, yamlDocumentKind) {
   return yamlDocumentKind === YAML_DOCUMENT_KINDS.DBT_SEMANTIC && /^INVALID_METRIC_/.test(code);
 }
 
+/* Rule codes whose fix requires human-only data (emails, project name,
+   columns, …) and therefore should never go through the LLM — the agent
+   would just guess. We short-circuit straight to needs_user_input with
+   a stable question shape so the user gets the same prompt every time
+   (and the LLM doesn't burn tokens hallucinating placeholders). */
+const RULE_FIX_PLAYBOOK = {
+  MISSING_MODEL_SECTION: {
+    explanation: "This file is missing the top-level model: block that names, versions, and credits the artifact. The agent can't invent owners or domain — answer the questions below and a follow-up patch will materialize.",
+    questions: [
+      "What slug should model.name use? (lowercase snake_case, e.g. customer_360)",
+      "What domain owns this model? (sales, finance, marketing, …)",
+      "Which email addresses should appear in model.owners?",
+      "Should this remain a kind: model file, or convert to a layout-only kind: diagram?",
+    ],
+  },
+  INVALID_MODEL_NAME: {
+    explanation: "model.name has to be lowercase letters, numbers, and underscores so it is safe in SQL and dbt refs.",
+    questions: ["What lowercase snake_case slug should we use for model.name?"],
+  },
+  INVALID_MODEL_VERSION: {
+    explanation: "model.version must be a SemVer string so consumers can reason about breaking vs additive changes.",
+    questions: ["What SemVer should model.version be set to? (1.0.0 if this is the first release)"],
+  },
+  INVALID_MODEL_DOMAIN: {
+    explanation: "model.domain scopes this artifact under a bounded context; the agent won't pick one for you.",
+    questions: ["Which business domain does this model belong to? (sales, finance, marketing, …)"],
+  },
+  INVALID_MODEL_OWNERS: {
+    explanation: "model.owners routes change reviews and access decisions; it must contain at least one email.",
+    questions: ["Which email addresses should be listed as model.owners?"],
+  },
+  INVALID_OWNER_EMAIL: {
+    explanation: "One of the model.owners entries isn't a parseable email. The agent won't invent a replacement.",
+    questions: ["Which email should replace the invalid one in model.owners?"],
+  },
+  INVALID_ENTITIES: {
+    explanation: "This kind: model file declares no entities, so it doesn't represent any data yet. The agent can't invent business entities for you.",
+    questions: [
+      "What entities should this model contain? (entity name + 1-line definition each)",
+      "If this should actually be a layout-only file, would you rather convert it to kind: diagram?",
+    ],
+  },
+  DBT_ENTITY_NO_COLUMNS: {
+    explanation: "An entity without columns can't generate a dbt contract or a schema.yml. The agent doesn't know the schema — only you do.",
+    questions: [
+      "What columns should this entity expose? Provide name + data_type for each (varchar, integer, timestamp, decimal, …).",
+    ],
+  },
+  DBT_COLUMN_NO_TYPE: {
+    explanation: "data_type drives dbt contract enforcement; the agent shouldn't guess.",
+    questions: ["What data_type should the column carry? (varchar, integer, timestamp, decimal, …)"],
+  },
+  CONCEPTUAL_MISSING_OWNER: {
+    explanation: "Conceptual concepts need a steward so business questions and definition changes have a clear owner.",
+    questions: ["Which team or person should own this concept? (e.g. CRM, Revenue Operations, Product)"],
+  },
+  CONCEPTUAL_MISSING_SUBJECT_AREA: {
+    explanation: "Subject areas are how enterprise teams group concepts into bounded contexts.",
+    questions: ["Which subject area (or bounded context) does this concept belong to?"],
+  },
+  CONCEPTUAL_MISSING_GLOSSARY_LINK: {
+    explanation: "Without glossary linkage, the conceptual model stays disconnected from the business dictionary.",
+    questions: ["Which glossary term names should be linked to this concept? (comma-separated)"],
+  },
+  CONCEPTUAL_MISSING_DOMAIN: {
+    explanation: "model.domain tells consumers which business area owns this conceptual view.",
+    questions: ["What bounded context or enterprise domain does this conceptual model cover?"],
+  },
+  LOGICAL_UNRESOLVED_TYPE: {
+    explanation: "Logical attributes need a platform-neutral type so they can map cleanly into physical dialect types.",
+    questions: ["What logical type should this attribute carry? (string, number, date, timestamp, boolean, identifier, money)"],
+  },
+  LOGICAL_MANY_TO_MANY_NEEDS_ASSOCIATIVE_ENTITY: {
+    explanation: "Many-to-many relationships have to be resolved with an associative entity before physical generation can build reliable dbt tables.",
+    questions: [
+      "What should the associative entity be named?",
+      "Which fields on each side should the bridge carry?",
+    ],
+  },
+  PHYSICAL_MISSING_DBT_SOURCE: {
+    explanation: "Physical diagrams should be grounded in dbt model/source YAML so the canvas reflects runnable assets.",
+    questions: ["Which dbt model or source YAML files should be referenced from this physical diagram?"],
+  },
+  PHYSICAL_MISSING_SQL_OUTPUT: {
+    explanation: "Physical release readiness needs generated or referenced SQL.",
+    questions: ["Should we generate SQL now under generated-sql/, or link existing dbt SQL? Provide the path if linking."],
+  },
+};
+
+function shortCircuitValidationFix(issue) {
+  const code = String(issue?.code || "").toUpperCase();
+  const playbook = RULE_FIX_PLAYBOOK[code];
+  if (!playbook) return null;
+  return {
+    status: "needs_user_input",
+    explanation: playbook.explanation,
+    questions: playbook.questions,
+    rule_code: code,
+    short_circuited: true,
+  };
+}
+
 async function postProcessValidationFix(parsed, project, body, context, helpers) {
   const issue = context?.issue || body?.context?.issue || {};
   const filePath = normalizeRequestPath(body?.context?.filePath || body?.filePath || "");
@@ -369,6 +500,25 @@ export async function runIntentEndpoint(intent, args) {
   const userMessage = String(body?.message || "").trim();
   if (!userMessage) {
     throw new Error("message required");
+  }
+
+  // Validation-fix short-circuit. Some rule codes (MISSING_MODEL_SECTION,
+  // INVALID_OWNER_EMAIL, DBT_ENTITY_NO_COLUMNS, …) need human-only data
+  // — emails, project name, schema. Routing them through the LLM only
+  // results in invented placeholders. We respond directly with the
+  // canonical needs_user_input payload so the user always gets the
+  // same set of questions and zero hallucinated values.
+  if (intent === "validation_fix") {
+    const shortCircuit = shortCircuitValidationFix(context?.issue || body?.context?.issue || {});
+    if (shortCircuit) {
+      return {
+        ok: true,
+        intent,
+        response: shortCircuit,
+        warnings: warnings || [],
+        short_circuited: true,
+      };
+    }
   }
 
   const userPayload = JSON.stringify({
