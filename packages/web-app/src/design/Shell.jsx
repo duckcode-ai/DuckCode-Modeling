@@ -144,6 +144,7 @@ const TableView           = React.lazy(() => import("./views/TableView"));
 const ViewsView           = React.lazy(() => import("./views/ViewsView"));
 const EnumsView           = React.lazy(() => import("./views/EnumsView"));
 const DocsView            = React.lazy(() => import("../components/docs/DocsView"));
+const CapabilityMap       = React.lazy(() => import("./views/CapabilityMap"));
 
 import useWorkspaceStore from "../stores/workspaceStore";
 import useAuthStore from "../stores/authStore";
@@ -1933,6 +1934,11 @@ export default function Shell() {
       {shellViewMode === "docs" && (
         <React.Suspense fallback={<div className="shell-view" style={{ padding: 20, color: "var(--text-tertiary)", fontSize: 12 }}>Rendering docs…</div>}>
           <DocsView />
+        </React.Suspense>
+      )}
+      {shellViewMode === "capabilities" && (
+        <React.Suspense fallback={<div className="shell-view" style={{ padding: 20, color: "var(--text-tertiary)", fontSize: 12 }}>Loading capability map…</div>}>
+          <CapabilityMap />
         </React.Suspense>
       )}
 
