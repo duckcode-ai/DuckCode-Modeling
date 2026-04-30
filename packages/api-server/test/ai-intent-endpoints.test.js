@@ -78,3 +78,45 @@ describe("Per-intent system prompts + validators", () => {
     assert.match(ENDPOINTS_SRC, /change\.content is not parseable YAML/);
   });
 });
+
+describe("Validation-fix rule short-circuit (zero-LLM hallucination guard)", () => {
+  test("RULE_FIX_PLAYBOOK covers human-only-data rules", () => {
+    // These codes need values the LLM cannot infer (emails, project name,
+    // schema, etc.) and must therefore route to needs_user_input without
+    // a provider call. If you intentionally remove one of these, also
+    // remove its entry from the panel's NEEDS_USER_INPUT_CODES set so
+    // the prompt label stays honest.
+    const required = [
+      "MISSING_MODEL_SECTION",
+      "INVALID_MODEL_NAME",
+      "INVALID_MODEL_OWNERS",
+      "INVALID_OWNER_EMAIL",
+      "INVALID_ENTITIES",
+      "DBT_ENTITY_NO_COLUMNS",
+      "DBT_COLUMN_NO_TYPE",
+      "CONCEPTUAL_MISSING_OWNER",
+      "CONCEPTUAL_MISSING_SUBJECT_AREA",
+      "CONCEPTUAL_MISSING_GLOSSARY_LINK",
+      "PHYSICAL_MISSING_DBT_SOURCE",
+    ];
+    for (const code of required) {
+      assert.match(
+        ENDPOINTS_SRC,
+        new RegExp(`${code}:\\s*\\{`),
+        `RULE_FIX_PLAYBOOK is missing entry for ${code}`,
+      );
+    }
+  });
+
+  test("shortCircuitValidationFix bypasses the LLM call", () => {
+    // The short-circuit must run before callAiProvider so token cost +
+    // hallucination risk are both zero on these rules.
+    assert.match(ENDPOINTS_SRC, /function shortCircuitValidationFix/);
+    assert.match(ENDPOINTS_SRC, /short_circuited:\s*true/);
+    // Wired into runIntentEndpoint before the provider call.
+    const wireOrder = ENDPOINTS_SRC.indexOf("shortCircuitValidationFix(");
+    const providerOrder = ENDPOINTS_SRC.indexOf("await callAiProvider(");
+    assert.ok(wireOrder !== -1 && providerOrder !== -1, "both functions must exist");
+    assert.ok(wireOrder < providerOrder, "short-circuit must be checked before provider call");
+  });
+});
