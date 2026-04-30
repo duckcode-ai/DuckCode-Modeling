@@ -28,6 +28,7 @@ import {
   Table as LucideTable,
   Eye as LucideEye,
   Hash as LucideHash,
+  Boxes as LucideBoxes,
 } from "lucide-react";
 import { THEMES } from "./notation";
 import useUiStore from "../stores/uiStore";
@@ -40,11 +41,12 @@ import DiffToggle from "./DiffToggle";
    Docs view, the table list, the views manager, or the enums manager.
    Icons sourced from lucide-react for consistent stroke weight + meaning. */
 const VIEW_MODES = [
-  { id: "diagram", label: "Diagram", Icon: Layers,         tooltip: "Visual ER diagram" },
-  { id: "docs",    label: "Docs",    Icon: LucideFileText, tooltip: "Readable model docs (rendered from YAML, AI-assisted)" },
-  { id: "table",   label: "Table",   Icon: LucideTable,    tooltip: "Tabular entity list" },
-  { id: "views",   label: "Views",   Icon: LucideEye,      tooltip: "Database views & matviews" },
-  { id: "enums",   label: "Enums",   Icon: LucideHash,     tooltip: "Enumerations" },
+  { id: "diagram",      label: "Diagram",      Icon: Layers,         tooltip: "Visual ER diagram" },
+  { id: "docs",         label: "Docs",         Icon: LucideFileText, tooltip: "Readable model docs (rendered from YAML, AI-assisted)" },
+  { id: "capabilities", label: "Capabilities", Icon: LucideBoxes,    tooltip: "Domain capability map — concepts grouped by bounded context, click to drill in" },
+  { id: "table",        label: "Table",        Icon: LucideTable,    tooltip: "Tabular entity list" },
+  { id: "views",        label: "Views",        Icon: LucideEye,      tooltip: "Database views & matviews" },
+  { id: "enums",        label: "Enums",        Icon: LucideHash,     tooltip: "Enumerations" },
 ];
 
 function ViewSwitcher() {
