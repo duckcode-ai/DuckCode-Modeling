@@ -18,13 +18,15 @@ will coordinate a timeline with the reporter.
 
 ## Supported versions
 
-DataLex is pre-1.0 and under active development. Security fixes land on
-`main` and the most recent tagged release. Older tags are not patched.
+DataLex is under active development. Security fixes land on `main` and
+the latest minor release. Older minors receive critical-severity fixes
+only on a best-effort basis; older majors are not patched.
 
-| Version | Supported          |
-|---------|--------------------|
-| 0.1.x   | :white_check_mark: |
-| < 0.1   | :x:                |
+| Version | Supported                    |
+|---------|------------------------------|
+| 1.7.x   | :white_check_mark:           |
+| 1.6.x   | :warning: critical-only      |
+| < 1.6   | :x:                          |
 
 ## Scope
 

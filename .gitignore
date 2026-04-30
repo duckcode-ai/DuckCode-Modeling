@@ -12,12 +12,29 @@ packages/web-app/test-results/
 packages/web-app/playwright-report/
 packages/web-app/playwright/.cache/
 
-# Virtual environment
+# Virtual environments
 .venv/
+venv-312/
+venv*/
 
 # DataLex local runtime files
 .dm-connections.json
 .dm-projects.json
+# Local agent BM25 index — large JSON of every doc the agent saw, gets
+# regenerated on demand. Never commit (it can balloon the repo and
+# can carry per-machine paths).
+.datalex/
+
+# Local working copies created by `datalex serve` and imported
+# projects. User-specific; not source. Anchored to repo-root so
+# packages/<...>/projects (a real source path) isn't accidentally
+# matched.
+/projects/
+/imported/
+/domains/
+/core/
+/generated-sql/
+/sales/
 
 # Auto-written CLI shim (datalex serve writes this to REPO_ROOT — host-specific shebang)
 /dm

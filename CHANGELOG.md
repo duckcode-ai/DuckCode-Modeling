@@ -7,6 +7,292 @@ from `v0.1.0` onward.
 
 ## [Unreleased]
 
+## [1.7.3] - 2026-04-30
+
+Patch release. The AI fix-agent now actually has rule-by-rule recipes
+loaded into its prompt and refuses to hallucinate values it can't
+legitimately know.
+
+### Added
+
+- **`Skills/validation-fix-recipes.md`** — single source of truth
+  mapping every validation rule code to: trigger, output contract
+  (`patch_yaml` / `needs_user_input` / `no_patch_needed`), and the
+  exact action. Loaded once at module init and injected into the
+  `validation_fix` system prompt (prompt grew from ~840 chars to
+  ~9.8k carrying the full table).
+- **14-rule server-side short-circuit.** Rule codes whose fix needs
+  human-only data (project name, owner emails, columns, schema)
+  bypass the LLM entirely and emit a stable `needs_user_input`
+  payload. Zero tokens, zero hallucinated placeholders. Covered:
+  `MISSING_MODEL_SECTION`, `INVALID_MODEL_NAME/VERSION/DOMAIN/OWNERS`,
+  `INVALID_OWNER_EMAIL`, `INVALID_ENTITIES`, `DBT_ENTITY_NO_COLUMNS`,
+  `DBT_COLUMN_NO_TYPE`, `CONCEPTUAL_MISSING_OWNER/SUBJECT_AREA/
+  GLOSSARY_LINK/DOMAIN`, `LOGICAL_UNRESOLVED_TYPE`, `LOGICAL_MANY_TO_
+  MANY_NEEDS_ASSOCIATIVE_ENTITY`, `PHYSICAL_MISSING_DBT_SOURCE/
+  SQL_OUTPUT`.
+- Validation panel pipes the same Why/Fix copy into the user prompt,
+  so panel and agent share one source of truth.
+
+### Changed
+
+- **`Skills/dbt-naming-conventions.md`** — was telling the agent
+  "snake_case everywhere. Never PascalCase in YAML." which directly
+  contradicted `INVALID_ENTITY_NAME`'s PascalCase requirement.
+  Replaced with a layered rule: snake_case for fields/paths/keys,
+  PascalCase for logical/physical entity names, human names for
+  conceptual concepts.
+
+PR: [#97](https://github.com/duckcode-ai/DataLex/pull/97).
+
+## [1.7.2] - 2026-04-29
+
+Patch release polishing the Validation panel.
+
+### Changed
+
+- **Three rules no longer fire on conceptual files where they don't
+  apply.** `MISSING_MODEL_SECTION` (diagrams have no `model:` block by
+  design), `INVALID_ENTITY_NAME` PascalCase enforcement (concepts use
+  human names like "Sales Order"), and `DBT_ENTITY_NO_COLUMNS`
+  (concepts describe meaning, not row shape). On the Sales Conceptual
+  Model fixture this drops 6 blockers → ~3 and 4 coverage findings →
+  0 without changing what the CI gate actually enforces.
+- **Per-finding "Why this matters" / "Next step" copy** is now
+  rule-specific. 12 new `ISSUE_GUIDANCE` entries replace the
+  templated "this issue blocks the model from passing validation"
+  boilerplate that was rendering identically under every finding.
+- **IssueCard density** — Why and Fix used to render as two stacked
+  boxed cards under every finding. Now inline: short labels in
+  tertiary tone, text on the same line. Same content, half the
+  vertical space.
+- **"How to read this"** is a one-line collapsible `<details>`
+  ("How to read this panel") instead of a 3-card grid eating the
+  first viewport.
+
+PR: [#96](https://github.com/duckcode-ai/DataLex/pull/96).
+
+## [1.7.1] - 2026-04-29
+
+Patch release: clarity polish + a crash fix surfaced during the
+1.7.0 walkthrough.
+
+### Changed
+
+- **Renames.** Docs button "Run readiness check" → **"Run CI
+  readiness gate"**. Validation panel "Rerun" → **"Rerun gate"**.
+  Tooltips/descriptions on both surfaces now cross-reference each
+  other in plain English so users stop confusing the per-file
+  Validation tab with the project-wide CI gate.
+
+### Fixed
+
+- **DictionaryPanel TypeError on conceptual files.** Opening
+  Dictionary on a `kind: diagram` file with object-shape
+  relationship endpoints (`from: { entity, field }`) crashed with
+  `TypeError: (r.from || "").split is not a function`.
+  `EntityCard.relationships` filter now handles both string and
+  object endpoint shapes via the same `endpointEntity()` helper used
+  in DocsView.
+
+PR: [#95](https://github.com/duckcode-ai/DataLex/pull/95).
+
+## [1.7.0] - 2026-04-29
+
+Major release. **DataLex is now the Git-native authoring tool for
+the [Open Semantic Interchange](https://github.com/open-semantic-interchange/OSI)
+v0.1.1 standard** finalized January 2026 by Snowflake / dbt Labs /
+Salesforce / Atlan / Mistral / ThoughtSpot. None of the OSI
+signatories ship a YAML-first authoring experience; that gap is now
+the wedge.
+
+Five PRs landed as the launch bundle:
+
+### Added — OSI export & MCP context endpoint (Phase 2a, headline)
+
+- **OSI v0.1.1 bundle export** through three surfaces:
+  - HTTP: `GET /api/projects/:id/export/osi`
+    (`?validate=1` adds a validation report; `?download=1` triggers
+    a Content-Disposition download).
+  - MCP: new `osi.export` tool in the existing `datalex-mcp` stdio
+    server so Claude Desktop / Cursor / Code can read DataLex
+    concepts as native context.
+  - Frontend: "Export OSI" button in the Docs header.
+- **Honors `visibility:`** — entities and relationships marked
+  `internal` are skipped from the export. `shared` (default) and
+  `public` are included.
+- Mapping: DataLex `entities[]` → OSI `Dataset[]`,
+  `relationships[]` → `Relationship[]` with the business verb
+  rendered as `ai_context.instructions`, entity `terms[]` →
+  `Dataset.ai_context.synonyms`. Provenance carried in
+  `custom_extensions[].vendor_name: COMMON`.
+- Vendored OSI 0.1.1 schema at `packages/api-server/ai/osi/osi-schema.json`
+  + lightweight validator with no extra runtime dep.
+
+PR: [#93](https://github.com/duckcode-ai/DataLex/pull/93).
+
+### Added — Conceptual Build panel becomes workshop-ready (Phase 1A)
+
+- **Inline-edit Selected Concept**: Domain, Owner, Subject area,
+  Tags, Glossary terms, Visibility (Internal / Shared / Public),
+  Definition. Each commits to YAML on blur via per-field setters in
+  `yamlPatch.js`. Six new helpers shipped: `setEntityOwner`,
+  `setEntityDomain`, `setEntitySubjectArea`, `setEntityTags`,
+  `setEntityTerms`, `setEntityVisibility`.
+- **Quick-add concept form** in the Build panel — type a name,
+  press Enter, concept lands on the canvas with sensible defaults.
+  "More options…" link still opens the full new-concept dialog.
+- **Verb autocomplete** on the New Relationship dialog (conceptual
+  level): a `<datalist>` of verbs already used in the active file
+  + 19 common conceptual-modeling verbs (`places`, `owns`,
+  `contains`, `generates`, `depends_on`, …).
+- `visibility:` reserved as a YAML field on entities and
+  relationships for Phase 2a's OSI gate to consume without a
+  breaking schema change.
+
+PR: [#90](https://github.com/duckcode-ai/DataLex/pull/90).
+
+### Added — Bidirectional concept ↔ glossary linking (Phase 1B)
+
+- **Build panel** — Glossary terms appear as clickable purple
+  chips. Click jumps to the Dictionary tab.
+- **Dictionary panel** — each glossary card shows a "Used by"
+  strip listing concepts whose `terms:` reference the term. Click
+  selects the concept on the canvas and switches to Build.
+
+PR: [#91](https://github.com/duckcode-ai/DataLex/pull/91).
+
+### Added — Conceptualizer business verbs (Phase 1C)
+
+- AI conceptualizer (Python `core_engine`) replaces the
+  "X references Y" tautology with three signals stacked in
+  priority: column-name patterns (`created_by` → `created_by`),
+  entity-pair lookup (~30 common pairs: Customer × Order =
+  `places`, Order × Invoice = `generates`, Order × Payment =
+  `is_paid_by`, …), and a passive `is_associated_with` fallback.
+- Verbs are now single-token snake_case so they roundtrip cleanly
+  with Phase 1A's verb-autocomplete + Phase 1B's glossary layer.
+
+PR: [#92](https://github.com/duckcode-ai/DataLex/pull/92).
+
+### Added — Narrative DocsView for conceptual files (Phase 2b)
+
+- DocsView used to render every YAML file with the same
+  field-table layout (designed for physical/logical models). For
+  `kind: diagram` and `layer: conceptual` files (or any file
+  containing `type: concept` entities), it now renders a
+  three-block narrative:
+  - **Domain TOC** — concepts grouped by domain with counts and
+    anchor links. Hidden when there's only one domain.
+  - **Business flow** — numbered list of relationship sentences
+    using Phase 1C verbs ("Customer **places** Order. Order
+    **contains** Order Line Item.").
+  - **Per-concept paragraphs** — name + type + owner +
+    visibility pill, editable definition (via the existing
+    `EditableDescription`), glossary terms (purple chips matching
+    the Build panel TermsField), and tags (green chips).
+- The existing physical/logical/dbt renderers stay unchanged — an
+  `isConceptual` gate routes between the two paths.
+
+PR: [#94](https://github.com/duckcode-ai/DataLex/pull/94).
+
+## [1.6.1] - 2026-04-29
+
+Patch release: onboarding journey explains the v1.6.0 features.
+
+### Added
+
+- **Three-pillar Welcome card** replaces the single-paragraph
+  Welcome step with a visually engaging value layout:
+  Layered modeling · Git-native · AI-ready. Each pillar = one
+  icon + headline + one-line tagline.
+- **New "Read your auto-generated docs" step** between Connect and
+  See gaps — walks users through the new Docs view shipped in
+  1.6.0.
+- **Refreshed validation step copy** mentioning the new red /
+  yellow / green status dot on the Validation tab.
+
+### Changed
+
+- `JOURNEY_VERSION` bumped 1 → 2 so existing users re-see the
+  journey with the new step.
+- `validation:opened` event is now actually emitted (was declared
+  in the journey step's `completeOn` but never fired before).
+
+PR: [#89](https://github.com/duckcode-ai/DataLex/pull/89).
+
+## [1.6.0] - 2026-04-29
+
+Major release — bundles AI architecture rebuild, Docs view dbt-shape
+rendering, validation panel + status-dot, and a bottom-tab
+consolidation.
+
+### Added — AI architecture rebuild
+
+- **Per-intent endpoints + tool registry** under
+  `packages/api-server/ai/`: `intent-router.js` (deterministic
+  classifier with 6 intents), `tools.js` (12 tools the per-intent
+  prefetchers can call), `intent-endpoints.js` (one focused agent
+  per intent: `validation_fix`, `explain`, `explore`,
+  `create_artifact`, `refactor`).
+- **Surgical `patch_yaml` fixes** anchored to the validation
+  finding instead of dumping the model into a fresh file.
+- **Shared YAML shape classifier** at
+  `packages/web-app/src/lib/yamlDocumentKind.js` and
+  `packages/api-server/ai/yamlDocumentKind.js`. Recognizes
+  DataLex-native, dbt schema.yml, dbt semantic_models / metrics,
+  dbt saved_queries.
+- **DocsView renders dbt-native YAML shapes** —
+  `semantic_models[]`, `metrics[]` (grouped by type), `saved_queries[]`,
+  schema.yml `models[]`, `sources[]` (with table+column drilldown),
+  `exposures[]`, `snapshots[]`. Closes the "blank Docs page for dbt
+  files" gap.
+- **AI conceptualizer auto-proposes** entities from staging dbt
+  models with verbs and cardinality.
+
+### Added — Validation panel
+
+- **Red / yellow / green status dot** on the Validation bottom tab
+  driven by the active file's findings. Severity visible without
+  clicking the tab.
+- `lintDoc` extended to cover `semantic_models`, `metrics`,
+  `saved_queries`, `exposures`, `snapshots` so a fresh dbt-imported
+  file always has substantive findings instead of an empty panel.
+- `DBT_SCHEMA_DETECTED` advisory filtered out of status (was making
+  every dbt file yellow regardless of actual issues).
+
+### Changed — Bottom tab consolidation
+
+- PHYSICAL layer slimmed from 10 tabs to 5: **Validation · Diff ·
+  Build · Policy Packs**.
+- Studio renamed to **Build** with clarifying eyebrows
+  ("Build · Conceptual / Logical / Physical") and improved
+  empty-state copy.
+- Redundant **dbt** bottom tab removed (DocsView is the canonical
+  structured viewer for dbt resources).
+- Every tab carries a `description` field rendered as a hover
+  tooltip — each tab self-documents.
+
+### Added — AI proposal review modal
+
+- **Zoom + maximize** on the diagram preview (50–250% in 20%
+  steps, ESC exits fullscreen).
+- **Full AI explanation panel** above the workspace:
+  `rationale`, `explanation`, `validation_impact`,
+  `source_context`, `questions`.
+- **Draggable splitter** between the diagram preview and YAML
+  editor (14px hit area, persisted to localStorage,
+  double-click to reset).
+- Modal body switched from `overflow: hidden` grid to a
+  scrollable flex column with a 540px workspace min-height —
+  the user can scroll the whole review surface when content
+  overflows.
+
+Bundled the in-progress stack of PRs (#84, #85, #86, #87, #88) into
+one squash-merge on `main` as commit
+[`7c7adbe`](https://github.com/duckcode-ai/DataLex/commit/7c7adbe);
+the four lower PRs were closed as superseded.
+
 ## [1.5.0] - 2026-04-28
 
 Minor release — pivots the modeling experience around a new top-level
