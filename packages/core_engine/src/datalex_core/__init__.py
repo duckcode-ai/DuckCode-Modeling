@@ -44,12 +44,22 @@ from datalex_core.semantic import (
     EntityCompleteness,
     ModelCompleteness,
 )
+from datalex_core.draft import (
+    DraftError,
+    condense_manifest,
+    draft_starter,
+    load_manifest,
+)
 
 __all__ = [
     "compile_model",
     "completeness_as_dict",
     "completeness_report",
+    "condense_manifest",
     "ConnectorConfig",
+    "draft_starter",
+    "DraftError",
+    "load_manifest",
     "ConnectorResult",
     "dbt_scaffold_files",
     "diagnostics_as_json",

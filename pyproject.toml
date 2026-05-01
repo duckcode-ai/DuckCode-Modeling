@@ -32,6 +32,9 @@ dependencies = [
 # Bundled Node runtime — `pip install datalex-cli[serve]` gives the user
 # a working `datalex serve` even on hosts without Node on PATH.
 serve = ["nodejs-wheel>=20,<23"]
+# AI-assisted drafting — `pip install datalex-cli[draft]` enables
+# `datalex draft` (calls Anthropic; needs ANTHROPIC_API_KEY at runtime).
+draft = ["anthropic>=0.40.0"]
 duckdb = ["duckdb>=0.9"]
 postgres = ["psycopg2-binary"]
 mysql = ["mysql-connector-python"]
@@ -42,6 +45,7 @@ sqlserver = ["pyodbc"]
 redshift = ["redshift-connector"]
 all = [
   "nodejs-wheel>=20,<23",
+  "anthropic>=0.40.0",
   "duckdb>=0.9",
   "psycopg2-binary",
   "mysql-connector-python",
@@ -78,4 +82,6 @@ where = [
   "_schemas/**/*.json",
   "_server/**/*",
   "_webapp/**/*",
+  "draft/few_shot/**/*.json",
+  "draft/few_shot/**/*.yaml",
 ]

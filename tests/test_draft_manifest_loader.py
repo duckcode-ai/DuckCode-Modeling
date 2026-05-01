@@ -1,9 +1,9 @@
-"""Smoke tests for scripts/draft/manifest_loader.py.
+"""Smoke tests for datalex_core.draft.manifest_loader.
 
-The drafting script's manifest condenser runs deterministically without an
-Anthropic API key, so contributors can verify Phase 1.1 with `pytest` alone.
-These tests build tiny in-memory dbt manifests and assert the condenser
-extracts what the prompt expects.
+The drafting pipeline's manifest condenser runs deterministically without an
+Anthropic API key, so contributors can verify it with `pytest` alone. These
+tests build tiny in-memory dbt manifests and assert the condenser extracts
+what the prompt expects.
 """
 
 import sys
@@ -11,9 +11,9 @@ from pathlib import Path
 
 import pytest
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "packages" / "core_engine" / "src"))
 
-from draft.manifest_loader import condense_manifest  # noqa: E402
+from datalex_core.draft.manifest_loader import condense_manifest  # noqa: E402
 
 
 def _model(name: str, *, schema: str = "marts", refs=None, columns=None, meta=None):
@@ -169,9 +169,7 @@ def test_condense_jaffle_shop_real_manifest():
 
     Skipped automatically if the example repo isn't sitting next to DataLex.
     """
-    import json
-
-    from draft.manifest_loader import load_manifest
+    from datalex_core.draft.manifest_loader import load_manifest
 
     manifest = load_manifest(Path("/Users/Kranthi_1/DuckCode-DQL/jaffle-shop-DataLex"))
     out = condense_manifest(manifest)

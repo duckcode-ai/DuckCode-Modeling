@@ -1509,6 +1509,112 @@ def cmd_import_dbt(args: argparse.Namespace) -> int:
     return 1 if has_errors(issues) else 0
 
 
+def cmd_draft(args: argparse.Namespace) -> int:
+    """AI-assisted DataLex starter from a dbt project.
+
+    Pipeline:
+      1. Load and condense the dbt manifest at <dbt>/target/manifest.json.
+      2. Call Anthropic with a system prompt + 2-shot pack (cache-controlled).
+      3. Extract a fenced YAML block from the response.
+      4. Schema-validate against the bundled DataLex model schema.
+      5. Print to stdout, or print a unified diff against --out and only
+         write when --force is passed.
+    """
+    import difflib
+    import subprocess
+
+    from datalex_core import (
+        DraftError,
+        condense_manifest,
+        draft_starter,
+        load_manifest,
+    )
+
+    dbt_path = Path(args.dbt)
+    if not dbt_path.exists():
+        sys.stderr.write(f"--dbt path does not exist: {dbt_path}\n")
+        return 2
+    try:
+        manifest = load_manifest(dbt_path)
+    except (FileNotFoundError, subprocess.CalledProcessError) as exc:
+        sys.stderr.write(f"failed to load dbt manifest: {exc}\n")
+        return 2
+    condensed = condense_manifest(manifest, include_glob=args.include)
+    if not condensed["models"]:
+        msg = "[draft] no dbt models found in manifest"
+        if args.include:
+            msg += f" matching --include {args.include!r}"
+        sys.stderr.write(msg + ". Nothing to draft.\n")
+        return 2
+
+    owner = args.owner or _detect_owner_email()
+    schema_path = Path(args.schema) if args.schema else Path(_default_schema_path())
+    try:
+        yaml_text, summary = draft_starter(
+            condensed=condensed,
+            domain=args.domain,
+            owner=owner,
+            model=args.model,
+            max_tokens=args.max_tokens,
+            schema_path=schema_path,
+        )
+    except DraftError as exc:
+        sys.stderr.write(f"[draft] {exc}\n")
+        return 3
+
+    sys.stderr.write(
+        f"[draft] tokens: input={summary.get('input_tokens', '?')} "
+        f"output={summary.get('output_tokens', '?')} "
+        f"cache_read={summary.get('cache_read_tokens', 0)} "
+        f"cache_write={summary.get('cache_write_tokens', 0)}\n"
+    )
+    sys.stderr.write(
+        f"[draft] entities={summary['entities']} fields={summary['fields']} "
+        f"relationships={summary['relationships']} rules={summary['rules']}\n"
+    )
+
+    out = Path(args.out) if args.out else None
+    if out is None:
+        sys.stdout.write(yaml_text)
+        return 0
+    if out.exists():
+        existing = out.read_text()
+        diff = "".join(
+            difflib.unified_diff(
+                existing.splitlines(keepends=True),
+                yaml_text.splitlines(keepends=True),
+                fromfile=str(out),
+                tofile=f"{out} (proposed)",
+            )
+        )
+        sys.stdout.write(diff or "[draft] no changes\n")
+        if not args.force:
+            sys.stderr.write(f"[draft] {out} exists; pass --force to overwrite.\n")
+            return 0
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(yaml_text)
+    sys.stderr.write(f"[draft] wrote {out}\n")
+    return 0
+
+
+def _detect_owner_email() -> str:
+    import subprocess
+
+    try:
+        result = subprocess.run(
+            ["git", "config", "--get", "user.email"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        email = result.stdout.strip()
+        if email:
+            return email
+    except FileNotFoundError:
+        pass
+    return "data@example.com"
+
+
 def cmd_serve(args: argparse.Namespace) -> int:
     """Start the bundled DataLex server.
 
@@ -3497,6 +3603,55 @@ def build_parser() -> argparse.ArgumentParser:
     import_dbt_parser.add_argument("--owner", action="append", default=[], help="Owner email (repeatable)")
     import_dbt_parser.add_argument("--schema", default=_default_schema_path(), help="Path to model schema JSON")
     import_dbt_parser.set_defaults(func=cmd_import_dbt)
+
+    draft_parser = sub.add_parser(
+        "draft",
+        help="AI-assisted DataLex starter from a dbt project",
+        description=(
+            "Turn a dbt project's target/manifest.json into a draft DataLex "
+            "*.model.yaml the user reviews, edits, and commits. Reviewable AI "
+            "output -- never silent rewrites of project files."
+        ),
+    )
+    draft_parser.add_argument(
+        "--dbt",
+        required=True,
+        help="dbt project root (must contain target/manifest.json or dbt_project.yml)",
+    )
+    draft_parser.add_argument(
+        "--domain",
+        required=True,
+        help="DataLex domain to assign (e.g. commerce, finance)",
+    )
+    draft_parser.add_argument(
+        "--out",
+        help="Write proposed YAML to this path (default: stdout)",
+    )
+    draft_parser.add_argument(
+        "--force",
+        action="store_true",
+        help="Allow --out to overwrite an existing file",
+    )
+    draft_parser.add_argument(
+        "--model",
+        default="claude-opus-4-7",
+        help="Anthropic model id (default: claude-opus-4-7)",
+    )
+    draft_parser.add_argument("--max-tokens", type=int, default=8000)
+    draft_parser.add_argument(
+        "--owner",
+        help="Email for model.owners (default: git user.email or data@example.com)",
+    )
+    draft_parser.add_argument(
+        "--include",
+        help="dbt model name glob to include (e.g. dim_*)",
+    )
+    draft_parser.add_argument(
+        "--schema",
+        default=None,
+        help="Path to DataLex model JSON schema (default: bundled)",
+    )
+    draft_parser.set_defaults(func=cmd_draft)
 
     # dbt round-trip subcommand group
     dbt_parser = sub.add_parser("dbt", help="dbt round-trip: sync DataLex metadata into dbt schema.yml files")
