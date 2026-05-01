@@ -163,6 +163,57 @@ Try the experiment that makes the wedge real: ask the same question two differen
 
 ---
 
+## Stage 4 — what happens when the AI gets a question with no certified block? (≈1 min)
+
+Real AI usage doesn't always have a certified block ready. Watch what happens for a question we never built a contract for. Ask:
+
+> *"What's the average order total per customer type in Jaffle Shop?"*
+
+There's no `commerce.Customer.avg_order_total_per_customer_type` contract. The agent calls `query_via_block` first → no match → falls back to `query_via_metadata` (Tier 2). The result returns **with the `uncertified: true` flag visible** so you know the answer wasn't backed by a certified contract — and the proposal is auto-saved as a draft block under `blocks/_drafts/`.
+
+Inspect the draft:
+
+```bash
+ls jaffle-shop-dql/blocks/_drafts/
+# avg_order_total_per_customer_type.dql
+
+cat jaffle-shop-dql/blocks/_drafts/avg_order_total_per_customer_type.dql
+# block "avg_order_total_per_customer_type" {
+#     domain = "customer"
+#     status = "draft"
+#     description = """What's the average order total per customer type?"""
+#     datalex_contract = ""        # ← human fills this in during certify
+#     _proposed {
+#         asked_times = 1          # ← increments if the question is re-asked
+#         proposed_contract_id = "customer.Customer.avg_order_total_per_customer_type"
+#         ...
+#     }
+#     query = """SELECT customer_type, AVG(order_total) ..."""
+# }
+```
+
+Promote it to certified — one command:
+
+```bash
+dql certify --from-draft blocks/_drafts/avg_order_total_per_customer_type.dql \
+            --domain customer \
+            --contract customer.Customer.avg_order_total_per_customer_type@1 \
+            --owner growth@example.com
+```
+
+That:
+
+1. Moves the file to `blocks/customer/avg_order_total_per_customer_type.dql`.
+2. Flips `status` to `certified` and sets `datalex_contract`.
+3. Drops the `_proposed { ... }` provenance block.
+4. Prints the patch you need to apply to `datalex-manifest.json` (the contract entry that needs to land for the reference to resolve).
+
+Apply that patch, run `dql compile`, restart your AI agent, and ask the same question again. **Same answer, this time certified.** The wedge just learned a new contract.
+
+That's the **promotion loop**: every uncertified question becomes a candidate for governance. Questions asked repeatedly bubble to the top of the review queue (`mcp call list_proposals --asked-at-least-times 3`). Read [DQL's graduated-trust doc](https://duckcode-ai.github.io/dql/architecture/graduated-trust/) for the full architecture.
+
+---
+
 ## What you just proved
 
 | Without DataLex + DQL | With DataLex + DQL |

@@ -7,6 +7,42 @@ from `v0.1.0` onward.
 
 ## [Unreleased]
 
+## [1.9.0] - 2026-05-01
+
+Minor release — bundles the OSS roadmap milestones that landed in #106
+(`datalex draft` AI-assisted authoring, community foothold artifacts,
+launch HQ) and #108 (embedded `manifest-spec` v1) in a single user-
+visible version, plus the joint-tutorial Tier-2 update from this PR.
+
+### Added
+
+- **`datalex draft` CLI** — AI-assisted starter generation from a dbt
+  project. Reads `target/manifest.json`, condenses to <50 KB JSON, calls
+  Anthropic with a system prompt + 2-shot pack (cache-controlled), and
+  emits a draft `*.model.yaml` validated against the v3 model schema.
+  Reviewable AI output — never silent rewrites of project files. Opt-in
+  install via `pip install datalex-cli[draft]`. From #106.
+- **Manifest-spec v1 embedded** at `docs/manifest-spec/`. Stable schema
+  URLs at `https://duckcode-ai.github.io/DataLex/manifest-spec/v1/{datalex,dql}-manifest.schema.json`
+  for external consumers (Atlan, Marquez, Monte Carlo) to pin. From
+  #108.
+- **`SUPPORT.md`, `ROADMAP.md`, `docs/rfcs/0000-template.md`** — public
+  community routing + triage SLA + RFC scaffold. From #106.
+- **`docs/launch/`** — coordinated-launch artifacts: readiness
+  checklist, 5 channel post drafts (HN, dbt Slack, LinkedIn, X,
+  r/dataengineering), 60-second demo script, custom-domain runbook.
+  From #106.
+- **5-minute end-to-end tutorial** at
+  `docs/tutorials/datalex-plus-dql-end-to-end.md` updated to walk the
+  full graduated-trust loop: Tier 1 certified → Tier 2
+  `query_via_metadata` capture → `dql certify --from-draft` promotion.
+  Pairs with [duckcode-ai/dql#31](https://github.com/duckcode-ai/dql/pull/31).
+
+### Changed
+
+- `tests/test_draft_manifest_loader.py` covers the deterministic
+  manifest condenser (8/8 cases, no API key needed in CI).
+
 ## [1.8.2] - 2026-04-30
 
 Patch release — Roadmap **Phase 4b** (EventStorming narrative in DocsView)
