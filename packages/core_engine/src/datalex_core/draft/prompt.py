@@ -84,6 +84,35 @@ def _load_few_shot_pair(name: str) -> tuple[str, str]:
     return input_json, output_yaml
 
 
+def build_neutral_messages(
+    *,
+    domain: str,
+    owner: str,
+    condensed: dict[str, Any],
+) -> tuple[str, list[tuple[str, str]], str]:
+    """Provider-agnostic prompt assembly.
+
+    Returns (system_prompt, few_shot_pairs, user_message). Each provider
+    transforms this neutral format into its native API call. See
+    providers/base.py for the contract.
+    """
+    few_shot_pairs: list[tuple[str, str]] = []
+    for example in ("01_simple_starter", "02_with_relationships"):
+        input_json, output_yaml = _load_few_shot_pair(example)
+        few_shot_pairs.append(
+            (
+                f'<input domain="commerce" owner="data@example.com">\n{input_json}\n</input>',
+                f"<output>\n{output_yaml}\n</output>",
+            )
+        )
+
+    user_message = (
+        f'<input domain="{domain}" owner="{owner}">\n'
+        f"{json.dumps(condensed, indent=2)}\n</input>"
+    )
+    return SYSTEM_PROMPT, few_shot_pairs, user_message
+
+
 def build_messages(
     *,
     domain: str,

@@ -32,12 +32,42 @@ DataLex is the layer that turns that "no" into "yes" — by giving your dbt proj
     pip install datalex-cli
     ```
 
-=== "AI drafting (optional)"
+=== "AI drafting — Anthropic"
 
     ```bash
     pip install datalex-cli[draft]
     export ANTHROPIC_API_KEY=sk-ant-...
+    datalex draft --dbt /path/to/dbt-project --domain commerce
     ```
+
+=== "AI drafting — OpenAI"
+
+    ```bash
+    pip install datalex-cli[draft-openai]
+    export OPENAI_API_KEY=sk-...
+    datalex draft --dbt /path/to/dbt-project --domain commerce --provider openai
+    ```
+
+=== "AI drafting — Gemini"
+
+    ```bash
+    pip install datalex-cli[draft-gemini]
+    export GOOGLE_API_KEY=...
+    datalex draft --dbt /path/to/dbt-project --domain commerce --provider gemini
+    ```
+
+=== "AI drafting — local Ollama"
+
+    ```bash
+    pip install datalex-cli[draft-ollama]   # no SDK needed; uses HTTP
+    ollama serve
+    datalex draft --dbt /path/to/dbt-project --domain commerce \
+                  --provider ollama --model llama3.1:8b
+    ```
+
+The CLI auto-detects the provider from env vars when `--provider` is
+omitted: `ANTHROPIC_API_KEY` > `OPENAI_API_KEY` > `GOOGLE_API_KEY` >
+Ollama fallback. Pin a specific provider explicitly with the flag.
 
 === "Run web UI"
 

@@ -5,11 +5,25 @@ Public entry point for `datalex draft`. The CLI command in
 """
 
 from datalex_core.draft.manifest_loader import condense_manifest, load_manifest
+from datalex_core.draft.providers import (
+    AUTO_DETECT_ORDER,
+    PROVIDERS,
+    Provider,
+    ProviderError,
+    detect_provider,
+    get_provider,
+)
 from datalex_core.draft.runner import DraftError, draft_starter
 
 __all__ = [
+    "AUTO_DETECT_ORDER",
     "DraftError",
+    "PROVIDERS",
+    "Provider",
+    "ProviderError",
     "condense_manifest",
+    "detect_provider",
     "draft_starter",
+    "get_provider",
     "load_manifest",
 ]
