@@ -1,0 +1,53 @@
+{
+  "manifestSpecVersion": "1.0.0",
+  "dqlVersion": "1.5.3",
+  "generatedAt": "2026-05-01T12:00:00Z",
+  "project": {
+    "name": "jaffle_shop_dql",
+    "root": "/path/to/jaffle-shop-dql"
+  },
+  "blocks": [
+    {
+      "name": "Monthly Active Customers",
+      "domain": "customer",
+      "type": "custom",
+      "status": "certified",
+      "description": "Count of distinct customers who placed at least one order each calendar month.",
+      "owner": "growth@jaffle.example",
+      "tags": ["customers", "mau", "engagement", "monthly"],
+      "datalex_contract": "commerce.Customer.monthly_active_customers@1",
+      "query": "SELECT DATE_TRUNC('month', ordered_at) AS order_month, COUNT(DISTINCT customer_id) AS monthly_active_customers FROM fct_orders GROUP BY 1 ORDER BY 1",
+      "outputs": [
+        {
+          "name": "order_month",
+          "type": "date",
+          "lineage": [
+            {"kind": "dbt_model_column", "ref": "fct_orders.ordered_at"}
+          ]
+        },
+        {
+          "name": "monthly_active_customers",
+          "type": "integer",
+          "lineage": [
+            {"kind": "dbt_model_column", "ref": "fct_orders.customer_id"}
+          ]
+        }
+      ],
+      "llmContext": "Use when finance, growth, or customer success asks about monthly active customers, MAU trends, or distinct transacting customers in a given month."
+    }
+  ],
+  "lineage": {
+    "edges": [
+      {
+        "from": {"kind": "dbt_model", "ref": "fct_orders"},
+        "to": {"kind": "dql_block", "ref": "Monthly Active Customers"},
+        "relationship": "uses"
+      },
+      {
+        "from": {"kind": "datalex_contract", "ref": "commerce.Customer.monthly_active_customers"},
+        "to": {"kind": "dql_block", "ref": "Monthly Active Customers"},
+        "relationship": "implements"
+      }
+    ]
+  }
+}

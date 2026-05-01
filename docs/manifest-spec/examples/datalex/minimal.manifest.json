@@ -1,0 +1,61 @@
+{
+  "manifestSpecVersion": "1.0.0",
+  "datalexVersion": "1.8.2",
+  "generatedAt": "2026-05-01T12:00:00Z",
+  "project": {
+    "name": "jaffle_shop_datalex",
+    "description": "Minimal DataLex example used by the manifest-spec repo for schema validation.",
+    "dialect": "duckdb",
+    "owners": ["data@duckcode.ai"]
+  },
+  "domains": [
+    {
+      "name": "commerce",
+      "description": "Order and customer concepts for the jaffle shop.",
+      "owners": ["data@duckcode.ai"],
+      "entities": [
+        {
+          "name": "Customer",
+          "description": "One row per customer.",
+          "tags": ["GOLD", "MART", "PII"],
+          "fields": [
+            {
+              "name": "customer_id",
+              "type": "integer",
+              "primary_key": true,
+              "nullable": false
+            },
+            {
+              "name": "customer_email",
+              "type": "string",
+              "nullable": false,
+              "classification": "PII"
+            }
+          ],
+          "contracts": [
+            {
+              "id": "commerce.Customer.monthly_active_customers",
+              "name": "monthly_active_customers",
+              "description": "Customers who placed at least one order in the calendar month.",
+              "version": 1,
+              "signature": {
+                "inputs": [
+                  {"name": "order_month", "type": "date"}
+                ],
+                "outputs": [
+                  {"name": "monthly_active_customers", "type": "integer", "constraints": ["positive"]}
+                ]
+              },
+              "owner": "growth@jaffle.example",
+              "tags": ["mau", "engagement"]
+            }
+          ],
+          "binding": {
+            "kind": "dbt_model",
+            "ref": "dim_customers"
+          }
+        }
+      ]
+    }
+  ]
+}

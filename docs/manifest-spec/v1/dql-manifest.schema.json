@@ -1,0 +1,204 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://duckcode-ai.github.io/manifest-spec/v1/dql-manifest.schema.json",
+  "title": "DQL Manifest v1",
+  "description": "Compiled output of the DQL compiler (`dql compile`). Describes blocks, apps, dashboards, and lineage edges. Producers (DQL 1.5.x and later) emit JSON validating against this schema. Consumers (catalogs, AI agents, governance tools, the DQL MCP) read it to resolve certified-block queries and lineage impact.",
+  "type": "object",
+  "required": ["manifestSpecVersion", "dqlVersion", "generatedAt", "project", "blocks"],
+  "additionalProperties": true,
+  "properties": {
+    "manifestSpecVersion": {
+      "type": "string",
+      "pattern": "^1\\.[0-9]+\\.[0-9]+$"
+    },
+    "dqlVersion": {
+      "type": "string",
+      "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$"
+    },
+    "generatedAt": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "project": {
+      "type": "object",
+      "required": ["name"],
+      "properties": {
+        "name": {"type": "string"},
+        "root": {"type": "string"}
+      }
+    },
+    "blocks": {
+      "type": "array",
+      "items": {"$ref": "#/$defs/block"}
+    },
+    "apps": {
+      "type": "array",
+      "items": {"$ref": "#/$defs/app"}
+    },
+    "dashboards": {
+      "type": "array",
+      "items": {"$ref": "#/$defs/dashboard"}
+    },
+    "notebooks": {
+      "type": "array",
+      "items": {"$ref": "#/$defs/notebook"}
+    },
+    "lineage": {
+      "type": "object",
+      "description": "DAG of edges from sources -> dbt models -> DQL blocks -> apps. See lineage.edges for the binding fabric.",
+      "properties": {
+        "edges": {
+          "type": "array",
+          "items": {"$ref": "#/$defs/lineageEdge"}
+        }
+      }
+    },
+    "diagnostics": {
+      "type": "array",
+      "items": {"$ref": "#/$defs/diagnostic"}
+    }
+  },
+  "$defs": {
+    "block": {
+      "type": "object",
+      "required": ["name", "domain", "type", "status"],
+      "additionalProperties": true,
+      "properties": {
+        "name": {"type": "string"},
+        "domain": {"type": "string"},
+        "type": {"type": "string", "enum": ["custom", "semantic"]},
+        "status": {"type": "string", "enum": ["draft", "review", "certified"]},
+        "description": {"type": "string"},
+        "owner": {"type": "string"},
+        "tags": {"type": "array", "items": {"type": "string"}},
+        "datalex_contract": {
+          "type": "string",
+          "description": "Optional reference to a DataLex contract id. When set, the DQL compiler resolves this id against the DataLex manifest and fails compilation on contract drift. See docs/interop.md.",
+          "pattern": "^[a-zA-Z][a-zA-Z0-9_]*\\.[A-Z][A-Za-z0-9]*\\.[a-z][a-z0-9_]*(@[0-9]+)?$"
+        },
+        "metric": {
+          "type": "string",
+          "description": "For type=semantic: the dbt semantic-layer metric this block delegates to."
+        },
+        "query": {"type": "string"},
+        "params": {
+          "type": "array",
+          "items": {"$ref": "#/$defs/blockParam"}
+        },
+        "outputs": {
+          "type": "array",
+          "items": {"$ref": "#/$defs/blockColumn"}
+        },
+        "llmContext": {"type": "string"},
+        "invariants": {"type": "array", "items": {"type": "string"}},
+        "examples": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "question": {"type": "string"},
+              "sql": {"type": "string"}
+            }
+          }
+        }
+      }
+    },
+    "blockParam": {
+      "type": "object",
+      "required": ["name", "type"],
+      "properties": {
+        "name": {"type": "string"},
+        "type": {"type": "string"},
+        "default": {},
+        "description": {"type": "string"}
+      }
+    },
+    "blockColumn": {
+      "type": "object",
+      "required": ["name"],
+      "properties": {
+        "name": {"type": "string"},
+        "type": {"type": "string"},
+        "description": {"type": "string"},
+        "lineage": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["kind", "ref"],
+            "properties": {
+              "kind": {"type": "string", "enum": ["dbt_model_column", "dbt_source_column", "block_column", "literal"]},
+              "ref": {"type": "string"}
+            }
+          },
+          "description": "Column-level provenance of this output column. Required for certified blocks once column-level lineage ships in DQL."
+        }
+      }
+    },
+    "app": {
+      "type": "object",
+      "required": ["id", "title"],
+      "additionalProperties": true,
+      "properties": {
+        "id": {"type": "string"},
+        "title": {"type": "string"},
+        "description": {"type": "string"},
+        "owners": {"type": "array", "items": {"type": "string"}},
+        "dashboards": {"type": "array", "items": {"type": "string"}},
+        "notebooks": {"type": "array", "items": {"type": "string"}},
+        "blocks": {"type": "array", "items": {"type": "string"}}
+      }
+    },
+    "dashboard": {
+      "type": "object",
+      "required": ["id"],
+      "additionalProperties": true,
+      "properties": {
+        "id": {"type": "string"},
+        "title": {"type": "string"},
+        "tiles": {"type": "array"}
+      }
+    },
+    "notebook": {
+      "type": "object",
+      "required": ["id"],
+      "properties": {
+        "id": {"type": "string"},
+        "title": {"type": "string"},
+        "cells": {"type": "array"}
+      }
+    },
+    "lineageEdge": {
+      "type": "object",
+      "required": ["from", "to"],
+      "properties": {
+        "from": {
+          "type": "object",
+          "required": ["kind", "ref"],
+          "properties": {
+            "kind": {"type": "string", "enum": ["dbt_source", "dbt_model", "datalex_contract", "dql_block", "dql_app"]},
+            "ref": {"type": "string"}
+          }
+        },
+        "to": {
+          "type": "object",
+          "required": ["kind", "ref"],
+          "properties": {
+            "kind": {"type": "string", "enum": ["dbt_source", "dbt_model", "datalex_contract", "dql_block", "dql_app"]},
+            "ref": {"type": "string"}
+          }
+        },
+        "relationship": {"type": "string", "enum": ["uses", "implements", "renders", "derives_from"]}
+      }
+    },
+    "diagnostic": {
+      "type": "object",
+      "required": ["severity", "message"],
+      "properties": {
+        "severity": {"type": "string", "enum": ["info", "warning", "error"]},
+        "message": {"type": "string"},
+        "path": {"type": "string"},
+        "code": {"type": "string"}
+      }
+    }
+  }
+}

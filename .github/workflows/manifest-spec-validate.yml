@@ -1,0 +1,46 @@
+name: Validate manifest-spec examples
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "docs/manifest-spec/**"
+      - ".github/workflows/manifest-spec-validate.yml"
+  pull_request:
+    paths:
+      - "docs/manifest-spec/**"
+      - ".github/workflows/manifest-spec-validate.yml"
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install jsonschema
+      - run: |
+          python <<'PY'
+          import json
+          import sys
+          from pathlib import Path
+
+          import jsonschema
+
+          pairs = [
+              ("docs/manifest-spec/v1/datalex-manifest.schema.json", "docs/manifest-spec/examples/datalex/minimal.manifest.json"),
+              ("docs/manifest-spec/v1/dql-manifest.schema.json", "docs/manifest-spec/examples/dql/minimal.manifest.json"),
+          ]
+          ok = True
+          for schema_path, example_path in pairs:
+              schema = json.loads(Path(schema_path).read_text())
+              example = json.loads(Path(example_path).read_text())
+              try:
+                  jsonschema.Draft202012Validator(schema).validate(example)
+                  print(f"OK   {example_path}")
+              except jsonschema.ValidationError as exc:
+                  ok = False
+                  print(f"FAIL {example_path}: {exc.message}")
+          sys.exit(0 if ok else 1)
+          PY
