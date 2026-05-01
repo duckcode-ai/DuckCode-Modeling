@@ -38,6 +38,20 @@ import {
 } from "../../lib/api";
 import EditableDescription from "./EditableDescription";
 import MermaidERD from "./MermaidERD";
+import { buildEventStormingFlow } from "../../design/views/eventStormingFlow";
+
+/* EventStorming sticky-note palette for the docs narrative. The canvas
+ * (EntityNode.jsx, Phase 4a) renders the same five types in the same
+ * five colors as Tailwind utility classes; here we use plain inline
+ * styles, so the hex values are copied verbatim from the Tailwind
+ * palette to keep the reading experience consistent across surfaces. */
+const ES_TYPE_STYLES = {
+  event:     { bg: "#FED7AA", border: "#FB923C", text: "#9A3412", label: "event" },
+  command:   { bg: "#BFDBFE", border: "#60A5FA", text: "#1E40AF", label: "command" },
+  actor:     { bg: "#FEF08A", border: "#FACC15", text: "#854D0E", label: "actor" },
+  policy:    { bg: "#FBCFE8", border: "#F472B6", text: "#9D174D", label: "policy" },
+  aggregate: { bg: "#FEF3C7", border: "#FCD34D", text: "#92400E", label: "aggregate" },
+};
 
 /* AI provider gating.
  *
@@ -644,6 +658,98 @@ function DbtShapeSections({
       {exposures.map((e, i) => <ExposureCard key={(e?.name || i) + ""} e={e} />)}
       {snapshots.map((s, i) => <SnapshotCard key={(s?.name || i) + ""} s={s} />)}
     </>
+  );
+}
+
+/* EventStormingFlowSection — Phase 4b. Renders any EventStorming-typed
+ * entities (event/command/actor/policy/aggregate) in the active model
+ * as a numbered narrative grouped by Brandolini's canonical order
+ * (actors → commands → aggregates → events → policies). Pure read view:
+ * the entities are still authored in YAML and shown in the per-entity
+ * tables below, this just gives PMs and architects the workshop-style
+ * "story" of the model.
+ *
+ * Renders nothing if the model has zero EventStorming entities, so the
+ * section stays out of the way for plain ER models.
+ */
+function EventStormingFlowSection({ entities }) {
+  const groups = buildEventStormingFlow(entities);
+  if (groups.length === 0) return null;
+
+  return (
+    <section
+      className="dlx-docs-card"
+      style={{
+        marginBottom: 24,
+        borderColor: "color-mix(in srgb, #FB923C 40%, var(--border-default))",
+      }}
+    >
+      <p className="dlx-docs-eyebrow">EventStorming flow</p>
+      <p style={{ margin: "0 0 14px", fontSize: 12.5, color: "var(--text-tertiary)", lineHeight: 1.5 }}>
+        The pieces of this domain laid out in workshop order — actors trigger commands,
+        aggregates handle them, events record what happened, policies react.
+      </p>
+      <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+        {groups.map((g) => {
+          const palette = ES_TYPE_STYLES[g.type];
+          return (
+            <div key={g.type} id={`eventstorming-${g.type}`}>
+              <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
+                <span
+                  style={{
+                    display: "inline-block",
+                    width: 12,
+                    height: 12,
+                    borderRadius: 3,
+                    background: palette.bg,
+                    border: `1px solid ${palette.border}`,
+                  }}
+                />
+                <h3 style={{ margin: 0, fontSize: 13, fontWeight: 700, color: "var(--text-primary)" }}>
+                  {g.label}
+                </h3>
+                <span style={{ fontSize: 11.5, color: "var(--text-tertiary)" }}>
+                  ({g.items.length})
+                </span>
+              </div>
+              <ol style={{ margin: 0, paddingLeft: 22, fontSize: 13.5, lineHeight: 1.7 }}>
+                {g.items.map((e, idx) => {
+                  const name = String(e?.name || `${g.label.slice(0, -1)} ${idx + 1}`);
+                  const desc = String(e?.description || "").trim();
+                  return (
+                    <li key={name + idx} style={{ marginBottom: 6, color: "var(--text-primary)" }}>
+                      <span
+                        style={{
+                          display: "inline-block",
+                          padding: "1px 7px",
+                          marginRight: 8,
+                          borderRadius: 4,
+                          fontSize: 10.5,
+                          fontWeight: 700,
+                          letterSpacing: "0.04em",
+                          textTransform: "uppercase",
+                          background: palette.bg,
+                          border: `1px solid ${palette.border}`,
+                          color: palette.text,
+                        }}
+                      >
+                        {palette.label}
+                      </span>
+                      <strong>{name}</strong>
+                      {desc && (
+                        <span style={{ color: "var(--text-secondary)", fontWeight: 400 }}>
+                          {" — "}{desc}
+                        </span>
+                      )}
+                    </li>
+                  );
+                })}
+              </ol>
+            </div>
+          );
+        })}
+      </div>
+    </section>
   );
 }
 
@@ -1293,6 +1399,11 @@ export default function DocsView() {
             <MermaidERD entities={entities} />
           </section>
         )}
+
+        {/* Phase 4b — EventStorming narrative. Self-hides when no
+            EventStorming entities are present, so plain data models
+            don't grow an empty section. */}
+        <EventStormingFlowSection entities={entities} />
 
         {/* Phase 2b — narrative renderer for conceptual files. The
             existing field-table layout below renders only when the file
