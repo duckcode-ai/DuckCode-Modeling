@@ -7,6 +7,58 @@ from `v0.1.0` onward.
 
 ## [Unreleased]
 
+## [1.10.0] - 2026-05-01
+
+Minor release — multi-provider support for `datalex draft`. The CLI is no
+longer locked to Anthropic; users with OpenAI, Google Gemini, or local
+Ollama keys can run the AI-assisted starter against their preferred
+provider. Auto-detection from `*_API_KEY` env vars at runtime.
+
+### Added
+
+- **Multi-provider drafting**. `packages/core_engine/src/datalex_core/draft/providers/`
+  is a new module with one file per provider plus a factory:
+  - `anthropic_provider.py` — uses Anthropic's `cache_control: ephemeral`
+    on the system + last few-shot block (existing behavior preserved).
+  - `openai_provider.py` — `chat.completions.create`; relies on OpenAI's
+    automatic prompt caching for prefixes >1024 tokens (no explicit
+    `cache_control` needed).
+  - `gemini_provider.py` — `google-generativeai` with system_instruction +
+    chat history. Default model `gemini-2.5-pro`.
+  - `ollama_provider.py` — speaks Ollama's HTTP API via stdlib `urllib`
+    (no extra dependency). Reads `OLLAMA_HOST` (defaults to
+    `http://127.0.0.1:11434`).
+  Each provider returns a uniform `CompletionResult` with input / output /
+  cache token counts.
+
+- **`--provider {anthropic,openai,gemini,ollama}` flag** on `datalex draft`.
+  When omitted, the CLI auto-detects from env: `ANTHROPIC_API_KEY` >
+  `OPENAI_API_KEY` > `GOOGLE_API_KEY` (or `GEMINI_API_KEY`) > Ollama
+  fallback. Explicit flag always wins.
+
+- **New optional install extras** in `pyproject.toml`:
+  - `pip install datalex-cli[draft]` — Anthropic (default).
+  - `pip install datalex-cli[draft-openai]` — OpenAI.
+  - `pip install datalex-cli[draft-gemini]` — Gemini.
+  - `pip install datalex-cli[draft-ollama]` — Ollama (no SDK needed; the
+    extra is a placeholder for symmetry).
+  - `pip install datalex-cli[draft-all]` — all of the above.
+
+- **18 new pytest cases** in `tests/test_draft_providers.py` covering
+  factory + detection priority + per-provider message-shape transforms
+  (each SDK is mocked at the import boundary, so CI doesn't need real
+  packages installed).
+
+### Changed
+
+- `runner.py` is now provider-agnostic — calls `get_provider(name)` from
+  the new factory. Existing Anthropic-only callers behave identically.
+- `prompt.py` gains a neutral `build_neutral_messages()` returning
+  `(system, few_shot_pairs, user_message)`. The original
+  `build_messages()` (Anthropic-shape) is kept for backwards compat.
+- The CLI's stderr summary now prints `provider=<name> model=<id>` so
+  users can see which provider answered their request.
+
 ## [1.9.0] - 2026-05-01
 
 Minor release — bundles the OSS roadmap milestones that landed in #106

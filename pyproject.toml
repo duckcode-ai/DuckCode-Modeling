@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "datalex-cli"
-version = "1.9.0"
+version = "1.10.0"
 description = "Git-native data modeling for dbt users"
 readme = "README.md"
 requires-python = ">=3.9"
@@ -32,9 +32,19 @@ dependencies = [
 # Bundled Node runtime — `pip install datalex-cli[serve]` gives the user
 # a working `datalex serve` even on hosts without Node on PATH.
 serve = ["nodejs-wheel>=20,<23"]
-# AI-assisted drafting — `pip install datalex-cli[draft]` enables
-# `datalex draft` (calls Anthropic; needs ANTHROPIC_API_KEY at runtime).
+# AI-assisted drafting. Multi-provider since v1.10.0; pick one (or
+# install `[draft-all]` to keep them all available). Auto-detection
+# at runtime picks Anthropic > OpenAI > Gemini > Ollama based on which
+# API keys are set.
 draft = ["anthropic>=0.40.0"]
+draft-openai = ["openai>=1.30.0"]
+draft-gemini = ["google-generativeai>=0.8.0"]
+draft-ollama = []   # Ollama uses urllib (stdlib); no extra dep
+draft-all = [
+  "anthropic>=0.40.0",
+  "openai>=1.30.0",
+  "google-generativeai>=0.8.0",
+]
 duckdb = ["duckdb>=0.9"]
 postgres = ["psycopg2-binary"]
 mysql = ["mysql-connector-python"]
@@ -46,6 +56,8 @@ redshift = ["redshift-connector"]
 all = [
   "nodejs-wheel>=20,<23",
   "anthropic>=0.40.0",
+  "openai>=1.30.0",
+  "google-generativeai>=0.8.0",
   "duckdb>=0.9",
   "psycopg2-binary",
   "mysql-connector-python",

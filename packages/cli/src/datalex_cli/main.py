@@ -1554,7 +1554,8 @@ def cmd_draft(args: argparse.Namespace) -> int:
             condensed=condensed,
             domain=args.domain,
             owner=owner,
-            model=args.model,
+            provider=args.provider,
+            model=args.model or None,
             max_tokens=args.max_tokens,
             schema_path=schema_path,
         )
@@ -1562,6 +1563,9 @@ def cmd_draft(args: argparse.Namespace) -> int:
         sys.stderr.write(f"[draft] {exc}\n")
         return 3
 
+    sys.stderr.write(
+        f"[draft] provider={summary.get('provider', '?')} model={summary.get('model', '?')}\n"
+    )
     sys.stderr.write(
         f"[draft] tokens: input={summary.get('input_tokens', '?')} "
         f"output={summary.get('output_tokens', '?')} "
@@ -3633,9 +3637,22 @@ def build_parser() -> argparse.ArgumentParser:
         help="Allow --out to overwrite an existing file",
     )
     draft_parser.add_argument(
+        "--provider",
+        choices=["anthropic", "openai", "gemini", "ollama"],
+        default=None,
+        help=(
+            "LLM provider. Auto-detects from env when omitted: "
+            "ANTHROPIC_API_KEY > OPENAI_API_KEY > GOOGLE_API_KEY > Ollama fallback."
+        ),
+    )
+    draft_parser.add_argument(
         "--model",
-        default="claude-opus-4-7",
-        help="Anthropic model id (default: claude-opus-4-7)",
+        default="",
+        help=(
+            "Model id. Defaults are per-provider: "
+            "claude-opus-4-7 (anthropic), gpt-4.1 (openai), "
+            "gemini-2.5-pro (gemini), llama3.1:8b (ollama)."
+        ),
     )
     draft_parser.add_argument("--max-tokens", type=int, default=8000)
     draft_parser.add_argument(
