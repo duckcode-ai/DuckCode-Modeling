@@ -7,6 +7,51 @@ from `v0.1.0` onward.
 
 ## [Unreleased]
 
+## [1.8.2] - 2026-04-30
+
+Patch release — Roadmap **Phase 4b** (EventStorming narrative in DocsView)
+and **Phase 5a** (Markdown export from DocsView). Closes the originally
+planned roadmap; Phase 4c (canvas swim-lanes) and Phase 5b/c (Confluence
+push, collaboration) remain deferred for future passes.
+
+### Added
+
+- **EventStorming flow** card in DocsView (Phase 4b). Renders any
+  `event`/`command`/`actor`/`policy`/`aggregate` entities as a
+  numbered narrative grouped in canonical Brandolini order:
+  Actors → Commands → Aggregates → Events → Policies. Each group
+  carries the same sticky-note swatch hex values as the canvas
+  (`EntityNode.jsx`, Phase 4a) so the docs read like the diagram.
+  Self-hides for plain ER models.
+- **`buildEventStormingFlow`** pure helper in
+  `design/views/eventStormingFlow.js` — testable without React,
+  mirroring the `buildCapabilityHierarchy` pattern from Phase 3.
+  Preserves YAML order within each group (the modeler's chosen
+  narrative order, not alphabetical).
+- **Export Markdown** button in DocsView (Phase 5a). Downloads the
+  active docs page as a portable `.md` containing the model header,
+  overview, mermaid `erDiagram` (renders inline on GitHub / GitLab /
+  Confluence-with-mermaid / Notion / LLM context windows),
+  EventStorming flow, and per-entity field tables. Works for both
+  conceptual diagrams and physical/logical models.
+- **`buildDocsMarkdown`** pure helper in
+  `design/views/docsToMarkdown.js`, plus shared mermaid source
+  builder extracted from `MermaidERD.jsx` to
+  `lib/mermaidErdSource.js` so the rendered diagram and the
+  exported diagram come from a single source of truth.
+- **22 new tests** (9 for `eventStormingFlow`, 13 for
+  `docsToMarkdown`); web-app suite now 147/147.
+
+### Out of scope (deferred)
+
+- Phase 4c — canvas swim-lane layout. The narrative version above
+  covers the workshop-readout value; the canvas is a v2 feature.
+- Phase 5b/c — Confluence direct push and collaboration features.
+  Each warrants its own design pass and auth integration.
+
+PRs: [#101](https://github.com/duckcode-ai/DataLex/pull/101),
+[#102](https://github.com/duckcode-ai/DataLex/pull/102).
+
 ## [1.8.1] - 2026-04-30
 
 Patch release — Roadmap Phase 4a: EventStorming sticky-note shapes.
