@@ -97,6 +97,11 @@ nav:
   - Reference:
       - CLI: cli.md
       - API contracts: api-contracts.md
+  - Manifest spec:
+      - Overview: manifest-spec/index.md
+      - Interop (datalex_contract resolution rules): manifest-spec/interop.md
+      - Versioning policy: manifest-spec/versioning.md
+      - Changelog: manifest-spec/CHANGELOG.md
   - Operations:
       - Observability SLOs: observability-slos.md
       - Backup & restore runbook: backup-restore-runbook.md
