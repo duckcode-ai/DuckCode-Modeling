@@ -87,6 +87,7 @@ nav:
       - Data mesh interfaces: mesh-interfaces.md
       - AI-agentic modeling: ai-agentic-modeling.md
   - Tutorials:
+      - 5-minute DataLex + DQL tutorial: tutorials/datalex-plus-dql-end-to-end.md
       - Jaffle Shop walkthrough: tutorials/jaffle-shop-walkthrough.md
       - Import an existing dbt project: tutorials/import-existing-dbt.md
       - dbt round-trip: tutorial-dbt-sync.md

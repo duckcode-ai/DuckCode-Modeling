@@ -50,10 +50,11 @@ DataLex is the layer that turns that "no" into "yes" — by giving your dbt proj
 
 ## Five-minute path
 
-1. **[Get started](getting-started.md)** — install, scaffold a project, compile your first model.
-2. **[Walk through Jaffle Shop](tutorials/jaffle-shop-walkthrough.md)** — full dbt + DuckDB + DataLex example.
-3. **[Layered modeling](datalex-layout.md)** — when to use conceptual vs. logical vs. physical.
-4. **[The DataLex + DQL stack](datalex-and-dql.md)** — how the two languages combine for certified AI analytics.
+1. **[End-to-end DataLex + DQL tutorial](tutorials/datalex-plus-dql-end-to-end.md)** — feel the wedge in 5 minutes using both example repos. The fastest way to understand the product.
+2. **[Get started](getting-started.md)** — install, scaffold a project, compile your first model.
+3. **[Walk through Jaffle Shop](tutorials/jaffle-shop-walkthrough.md)** — full dbt + DuckDB + DataLex example.
+4. **[Layered modeling](datalex-layout.md)** — when to use conceptual vs. logical vs. physical.
+5. **[The DataLex + DQL stack](datalex-and-dql.md)** — how the two languages combine for certified AI analytics.
 
 ---
 
