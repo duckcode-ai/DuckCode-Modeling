@@ -1,0 +1,107 @@
+site_name: DataLex
+site_description: YAML-first data modeling that makes contracts machine-checkable for the AI era.
+site_url: https://datalex.duckcode.ai
+repo_url: https://github.com/duckcode-ai/DataLex
+repo_name: duckcode-ai/DataLex
+edit_uri: edit/main/docs/
+
+theme:
+  name: material
+  language: en
+  features:
+    - navigation.tabs
+    - navigation.tabs.sticky
+    - navigation.sections
+    - navigation.indexes
+    - navigation.top
+    - navigation.footer
+    - search.suggest
+    - search.highlight
+    - search.share
+    - content.code.copy
+    - content.code.annotate
+    - content.action.edit
+    - content.tabs.link
+    - toc.follow
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+
+markdown_extensions:
+  - admonition
+  - attr_list
+  - def_list
+  - footnotes
+  - md_in_html
+  - tables
+  - toc:
+      permalink: true
+  - pymdownx.details
+  - pymdownx.superfences
+  - pymdownx.tabbed:
+      alternate_style: true
+  - pymdownx.tasklist:
+      custom_checkbox: true
+  - pymdownx.snippets
+
+plugins:
+  - search
+  - awesome-pages
+
+extra:
+  social:
+    - icon: fontawesome/brands/github
+      link: https://github.com/duckcode-ai/DataLex
+    - icon: fontawesome/brands/discord
+      link: https://discord.gg/Dnm6bUvk
+  version:
+    provider: mike
+    default: stable
+
+# Ignore archive + working artifacts in the published site.
+exclude_docs: |
+  archive/
+  launch/
+  rfcs/0000-template.md
+
+nav:
+  - Home: index.md
+  - Getting started:
+      - Quickstart: getting-started.md
+      - The DataLex + DQL stack: datalex-and-dql.md
+  - Concepts:
+      - Architecture: architecture.md
+      - Layered model (conceptual / logical / physical): datalex-layout.md
+      - Data mesh interfaces: mesh-interfaces.md
+      - AI-agentic modeling: ai-agentic-modeling.md
+  - Tutorials:
+      - 5-minute DataLex + DQL tutorial: tutorials/datalex-plus-dql-end-to-end.md
+      - Jaffle Shop walkthrough: tutorials/jaffle-shop-walkthrough.md
+      - Import an existing dbt project: tutorials/import-existing-dbt.md
+      - dbt round-trip: tutorial-dbt-sync.md
+      - Pull from your warehouse: tutorials/warehouse-pull.md
+      - Author a policy pack: tutorials/policy-packs.md
+      - CI readiness gate: tutorials/ci-readiness-gate.md
+  - Reference:
+      - CLI: cli.md
+      - API contracts: api-contracts.md
+  - Operations:
+      - Observability SLOs: observability-slos.md
+      - Backup & restore runbook: backup-restore-runbook.md
+  - Community:
+      - Contributing: https://github.com/duckcode-ai/DataLex/blob/main/CONTRIBUTING.md
+      - Roadmap: https://github.com/duckcode-ai/DataLex/blob/main/ROADMAP.md
+      - Support & triage: https://github.com/duckcode-ai/DataLex/blob/main/SUPPORT.md
+      - Manifest spec: https://github.com/duckcode-ai/manifest-spec
